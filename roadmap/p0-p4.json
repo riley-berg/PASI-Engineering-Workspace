@@ -1,0 +1,10 @@
+{
+  "name": "PASI Engineering Workspace roadmap",
+  "phases": [
+    {"id": "P0", "title": "Runtime proof and delivery infrastructure", "depends_on": [], "status": "in_progress"},
+    {"id": "P1", "title": "Control-plane consolidation", "depends_on": ["P0"], "status": "planned"},
+    {"id": "P2", "title": "Planner, scheduler, and engineering memory", "depends_on": ["P1"], "status": "planned"},
+    {"id": "P3", "title": "Provider-neutral model infrastructure", "depends_on": ["P2"], "status": "planned"},
+    {"id": "P4", "title": "Typed computer integration", "depends_on": ["P1", "P3"], "status": "planned"}
+  ]
+}

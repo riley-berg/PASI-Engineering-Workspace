@@ -66,7 +66,7 @@ importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscri
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (String(message?.type || "").startsWith("pasi.userscript.") && message?.type !== "pasi.userscript.rpc") {
-      globalThis.PASIUserScriptManager.handle(message)
+      globalThis.PASIUserScriptManager.handle(message, sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
       return true;

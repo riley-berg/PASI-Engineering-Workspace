@@ -23,6 +23,14 @@
   }
 
   const userScripts = Object.freeze({
+    install(url, options = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_INSTALL, {
+        url: String(url),
+        enabled: options.enabled !== false,
+        typeScript: options.typeScript === true,
+        replace: options.replace === true,
+      }).then((result) => result.script);
+    },
     register(source, options = {}) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_REGISTER, {
         source: String(source || ""),

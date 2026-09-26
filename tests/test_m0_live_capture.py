@@ -157,15 +157,15 @@ def test_capture_bridge_main_declares_and_returns_an_int() -> None:
     assert main.body[-1].value.value == 0
 
 
-def test_current_prompt_payload_is_canonical_and_durable() -> None:
-    from scripts.run_m0_live_capture import current_prompt_payload
+def test_current_prompt_payload_is_canonical_and_durable(tmp_path, monkeypatch) -> None:
+    import scripts.run_m0_live_capture as capture
 
-    payload = current_prompt_payload()
+    monkeypatch.setattr(capture, "PROGRESSION", tmp_path / "progression.json")
 
-    assert payload["task_id"] in {"P0.1", "P0.2"}
-    assert isinstance(payload["prompt"], str)
-    assert payload["prompt"].strip()
+    payload = capture.current_prompt_payload()
+
+    assert payload["task_id"] == "P0.1"
+    assert "PASI_RESULT_STATUS: complete" in payload["prompt"]
     assert isinstance(payload["prompt_generation"], int)
-    assert payload["prompt_generation"] >= 1
-    assert isinstance(payload["advance_count"], int)
-    assert payload["advance_count"] >= 0
+    assert payload["prompt_generation"] == 1
+    assert payload["advance_count"] == 0

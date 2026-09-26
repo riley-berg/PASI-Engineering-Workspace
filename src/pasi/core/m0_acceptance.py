@@ -62,10 +62,14 @@ class M0Response:
 
         next_task_id = payload.get("next_task_id")
         next_prompt = payload.get("next_prompt")
-        if next_task_id is not None and (not isinstance(next_task_id, str) or not next_task_id.strip()):
-            raise M0AcceptanceError("next_task_id must be a non-empty string when supplied")
-        if next_prompt is not None and (not isinstance(next_prompt, str) or not next_prompt.strip()):
-            raise M0AcceptanceError("next_prompt must be a non-empty string when supplied")
+        if not isinstance(next_task_id, str) or not next_task_id.strip():
+            raise M0AcceptanceError("next_task_id is required after verified completion")
+        if not isinstance(next_prompt, str) or not next_prompt.strip():
+            raise M0AcceptanceError("next_prompt is required after verified completion")
+        if next_task_id.strip() == task_id.strip():
+            raise M0AcceptanceError("next_task_id must change after completion")
+        if next_prompt.strip() == task_id.strip():
+            raise M0AcceptanceError("next_prompt must advance to a new task")
 
         return cls(
             provider=provider,
@@ -221,11 +225,9 @@ def apply_validate_commit(
                 "proof_file": "acceptance/M0-LIVE-PROOF.txt",
                 "prompt_advance_rule": "advance only after verified completion",
                 "next_task_id": response.next_task_id,
-                "next_prompt_digest": (
-                    hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest()
-                    if response.next_prompt
-                    else None
-                ),
+                "next_prompt": response.next_prompt,
+                "next_prompt_digest": hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest(),
+                "prompt_advanced_after_verified_completion": True,
             },
             indent=2,
         )

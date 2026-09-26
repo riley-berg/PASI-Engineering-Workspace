@@ -54,15 +54,17 @@ The extension is deliberately conservative about ChatGPT UI details. It uses sta
 
 ## Automatic prompt progression
 
-After prior chat usage, a fresh ChatGPT conversation is detected by the extension. The bridge then provides the current durable roadmap prompt and the extension injects it exactly once for that prompt generation.
+The current task prompt is immutable while that task is incomplete. The bridge derives the next task prompt exactly once, only after the current task passes the authoritative acceptance harness. The derived prompt carries a bounded handoff from the verified prior task so prompts evolve with the actual repository state instead of repeating a static template.
 
-When an accepted task response completes, the bridge runs the authoritative acceptance harness. Only a successful harness result advances the durable progression state. The extension then creates a fresh chat and injects the newly derived prompt.
+The extension reuses the durable automation conversation after task completion. It switches back to that stored automation chat when the browser is elsewhere. It does not create a fresh chat merely because a task completed, a chat has prior messages, or Thinking is currently off.
 
 A connection loss does not advance progression. The current operation keeps its operation ID and checkpoint and may resume once after reconnect.
 
 ## Automatic run loop
 
-After the extension loads on an authenticated ChatGPT page, it verifies Thinking. If the current chat has already been used, it creates a fresh task conversation; if the current chat is blank, it uses that chat. It then injects the current task prompt from the GitHub issue plan.
+After the extension loads on an authenticated ChatGPT page, it verifies Thinking and locates the durable automation chat. If the browser is on another chat, it switches back to the stored automation chat. It then injects the current task prompt from the GitHub issue plan.
+
+A fresh chat is created only when the current automation chat explicitly reports a ChatGPT usage/context limit. Before that recovery chat is created, PASI verifies the desired Thinking state. The fresh-chat event records fresh_chat_creation_reason=usage_limit; no other fresh-chat reason is accepted by the M0 runtime contract.
 
 Task order is deterministic: backend phase P0 through P22, with the matching FE-P0 through FE-P22 issue tasks immediately after each backend phase. The order is derived from the issue plan at runtime; issue number order is not used as the execution order.
 

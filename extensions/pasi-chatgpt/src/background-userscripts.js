@@ -86,6 +86,7 @@
       source_chars: String(author_source || source || "").length,
       hosts: hostPatterns(script),
       hosts_granted: await hostsGranted(script),
+      requires_unsafe_confirmation: requiresUnsafeConfirmation(script),
     };
   }
 

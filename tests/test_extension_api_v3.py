@@ -21,6 +21,7 @@ def test_api_v3_exposes_requested_improvements():
         "include_headers",
         "clipboard write was rejected",
         "menu_controls",
+        "channel(tabId)",
         "element_present_run_at",
         "structuredTypes",
         "register(name, definition)",

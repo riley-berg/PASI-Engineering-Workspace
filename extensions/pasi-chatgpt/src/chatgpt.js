@@ -36,18 +36,79 @@
 
   function isAuthenticatedPage() {
     const urlOk = /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+$/.test(currentChatUrl());
-    const composer = document.querySelector(
-      "textarea, [contenteditable=\"true\"], [data-testid*=\"composer\"]"
-    );
+    const composer = findComposer();
     return urlOk && Boolean(composer);
   }
 
+  function thinkingControl() {
+    const candidates = visibleElements(
+      "button, [role=\"button\"], [role=\"menuitemradio\"], [role=\"option\"], [aria-pressed], [aria-checked]"
+    );
+    for (const element of candidates) {
+      const label = elementLabel(element);
+      if (!/\bthinking\b/i.test(label)) {
+        continue;
+      }
+      const pressed = element.getAttribute("aria-pressed");
+      const checked = element.getAttribute("aria-checked");
+      const state = element.getAttribute("data-state");
+      if (pressed === "true" || checked === "true" || state === "on") {
+        return { element, enabled: true };
+      }
+      if (pressed === "false" || checked === "false" || state === "off") {
+        return { element, enabled: false };
+      }
+    }
+    return null;
+  }
+
   function thinkingEnabled() {
-    const labels = visibleElements("button, [role=\"button\"], [aria-label]")
-      .map(elementLabel)
-      .filter(Boolean)
-      .join(" ");
-    return /thinking/i.test(labels);
+    const direct = thinkingControl();
+    if (direct) {
+      return direct.enabled;
+    }
+    return /\bthinking\b/i.test(
+      visibleElements("button, [role=\"button\"], [aria-label], [title]")
+        .map(elementLabel)
+        .filter(Boolean)
+        .join(" ")
+    );
+  }
+
+  function ensureThinkingEnabled() {
+    const direct = thinkingControl();
+    if (direct?.enabled) {
+      return true;
+    }
+    if (direct?.element && !direct.element.disabled) {
+      direct.element.click();
+      return thinkingEnabled();
+    }
+
+    const picker = findAction([
+      /thinking/i,
+      /model/i,
+      /instant/i,
+    ]);
+    if (picker && !picker.disabled) {
+      picker.click();
+      const option = visibleElements(
+        "[role=\"menuitemradio\"], [role=\"option\"], button, [role=\"menuitem\"]"
+      ).find((element) => {
+        const label = elementLabel(element);
+        return /^thinking(?:\s+mode)?$/i.test(label) || /\bthinking\b/i.test(label);
+      });
+      if (option && !option.disabled) {
+        const pressed = option.getAttribute("aria-pressed");
+        const checked = option.getAttribute("aria-checked");
+        const state = option.getAttribute("data-state");
+        if (pressed !== "true" && checked !== "true" && state !== "on") {
+          option.click();
+        }
+      }
+    }
+
+    return thinkingEnabled();
   }
 
   function isGenerating() {
@@ -55,6 +116,7 @@
       /stop generating/i,
       /^stop$/i,
       /stop response/i,
+      /cancel response/i,
     ]));
   }
 
@@ -63,18 +125,7 @@
       /stop generating/i,
       /^stop$/i,
       /stop response/i,
-    ]);
-    if (!button) {
-      return false;
-    }
-    button.click();
-    return true;
-  }
-
-  function resumeGeneration() {
-    const button = findAction([
-      /continue generating/i,
-      /resume generating/i,
+      /cancel response/i,
     ]);
     if (!button) {
       return false;
@@ -101,6 +152,10 @@
       "textarea, [contenteditable=\"true\"], [data-testid*=\"composer\"]"
     );
     return candidates.length ? candidates[candidates.length - 1] : null;
+  }
+
+  function hasUserMessage() {
+    return visibleElements('[data-message-author-role="user"]').length > 0;
   }
 
   function setComposerValue(composer, value) {
@@ -158,7 +213,7 @@
     if (!prompt || isGenerating() || !isAuthenticatedPage()) {
       return false;
     }
-    if (!thinkingEnabled()) {
+    if (!ensureThinkingEnabled()) {
       return false;
     }
     const composer = findComposer();
@@ -176,6 +231,27 @@
     return cleanText(messages[messages.length - 1].innerText);
   }
 
+  function visibleAlertText() {
+    return visibleElements(
+      '[role="alert"], [data-testid*="error"], [data-testid*="toast"], [data-testid*="notification"]'
+    )
+      .map((element) => cleanText(element.innerText || element.textContent))
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function connectionErrorMessage() {
+    const text = visibleAlertText();
+    return /connection\s+(?:lost|error)|network\s+error|disconnected|reconnect|error\s+generating|failed\s+to\s+generate|something\s+went\s+wrong/i.test(text)
+      ? text
+      : "";
+  }
+
+  function chatLimitReached() {
+    const text = visibleAlertText();
+    return /you(?:'|’)ve\s+reached.*(?:limit|max|maximum)|maximum.*(?:reached|length)|conversation.*(?:too\s+long|limit)|start\s+a\s+new\s+chat|new\s+chat\s+to\s+continue/i.test(text);
+  }
+
   function hasCompletePasiResponse(text) {
     return /PASI_RESULT_STATUS:\s*complete/i.test(text);
   }
@@ -184,12 +260,16 @@
     currentChatUrl,
     isAuthenticatedPage,
     thinkingEnabled,
+    ensureThinkingEnabled,
     isGenerating,
     stopGeneration,
-    resumeGeneration,
     createFreshChat,
+    findComposer,
+    hasUserMessage,
     injectPrompt,
     latestAssistantMessage,
+    connectionErrorMessage,
+    chatLimitReached,
     hasCompletePasiResponse,
   });
 })();

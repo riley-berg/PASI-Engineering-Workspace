@@ -6,16 +6,18 @@
   let operationId = null;
   let priorChatUrl = null;
   let active = false;
+  let awaitingAcceptance = false;
   let lastAssistantText = "";
   let checkpoint = null;
   let recoveryCount = 0;
+  let lastFreshChatUrl = null;
 
   async function emit(type, payload = {}) {
     const message = protocol.envelope(type, payload);
     try {
-      await chrome.runtime.sendMessage(message);
+      return await chrome.runtime.sendMessage(message);
     } catch (_error) {
-      // The page remains usable if the local capture bridge is unavailable.
+      return null;
     }
   }
 
@@ -31,7 +33,7 @@
   }
 
   async function startOperation() {
-    if (active) {
+    if (active || awaitingAcceptance) {
       return;
     }
     operationId = protocol.makeId();
@@ -42,6 +44,53 @@
       chat_url: chatgpt.currentChatUrl(),
       thinking_enabled: chatgpt.thinkingEnabled(),
       prior_chat_url: priorChatUrl,
+    });
+  }
+
+  async function injectCurrentPrompt(prompt, taskId, promptGeneration) {
+    if (!prompt || !taskId || !Number.isInteger(promptGeneration)) {
+      return;
+    }
+
+    const stored = await chrome.storage.local.get(["pasi_injected_prompt_generation"]);
+    if (stored.pasi_injected_prompt_generation === promptGeneration) {
+      return;
+    }
+
+    if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
+      return;
+    }
+
+    if (!chatgpt.thinkingEnabled()) {
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "Thinking is not enabled; refusing automatic prompt injection.",
+        task_id: taskId,
+        prompt_generation: promptGeneration,
+      });
+      return;
+    }
+
+    const sent = chatgpt.injectPrompt(prompt);
+    if (!sent) {
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "PASI could not inject the current task prompt into the ChatGPT composer.",
+        task_id: taskId,
+        prompt_generation: promptGeneration,
+      });
+      return;
+    }
+
+    await chrome.storage.local.set({
+      pasi_injected_prompt_generation: promptGeneration,
+      pasi_injected_task_id: taskId,
+      pasi_injected_chat_url: chatgpt.currentChatUrl(),
+    });
+
+    await emit(protocol.TYPES.CHAT_USAGE, {
+      task_id: taskId,
+      prompt_generation: promptGeneration,
+      chat_url: chatgpt.currentChatUrl(),
+      prompt_injected: true,
     });
   }
 
@@ -56,7 +105,8 @@
       chat_url: url,
     });
 
-    if (url && url !== priorChatUrl && priorChatUrl) {
+    if (url && url !== priorChatUrl && priorChatUrl && url !== lastFreshChatUrl) {
+      lastFreshChatUrl = url;
       await emit(protocol.TYPES.FRESH_CHAT, {
         fresh_chat_created_after_usage: true,
         prior_chat_url: priorChatUrl,
@@ -64,7 +114,7 @@
       });
     }
 
-    if (!active && generating) {
+    if (!active && !awaitingAcceptance && generating) {
       await startOperation();
     }
 
@@ -78,7 +128,13 @@
       });
     }
 
-    if (active && !generating && chatgpt.hasCompletePasiResponse(response)) {
+    if (
+      active &&
+      !awaitingAcceptance &&
+      !generating &&
+      chatgpt.hasCompletePasiResponse(response)
+    ) {
+      awaitingAcceptance = true;
       await emit(protocol.TYPES.RESPONSE_COMPLETE, {
         operation_id: operationId,
         chat_url: url,
@@ -87,8 +143,9 @@
         recovery_count: recoveryCount,
         fresh_chat_created_after_usage: Boolean(priorChatUrl && priorChatUrl !== url),
       });
-      active = false;
     }
+
+    priorChatUrl = priorChatUrl || url;
 
     await chrome.storage.local.set({
       last_chat_url: url,
@@ -96,8 +153,33 @@
     });
   }
 
+  async function handleBridgeMessage(message) {
+    if (message.type === "pasi.inject_prompt") {
+      await injectCurrentPrompt(
+        message.prompt,
+        message.task_id,
+        message.prompt_generation
+      );
+      return;
+    }
+
+    if (message.type === "pasi.acceptance_passed") {
+      active = false;
+      awaitingAcceptance = false;
+      operationId = null;
+      checkpoint = null;
+      recoveryCount = 0;
+      lastAssistantText = "";
+      priorChatUrl = chatgpt.currentChatUrl();
+      await chrome.storage.local.set({
+        last_chat_url: chatgpt.currentChatUrl(),
+      });
+      chatgpt.createFreshChat();
+    }
+  }
+
   async function handleOffline() {
-    if (!active || !chatgpt.isGenerating()) {
+    if (!active || awaitingAcceptance || !chatgpt.isGenerating()) {
       return;
     }
 
@@ -135,7 +217,9 @@
   }
 
   async function initialize() {
-    priorChatUrl = await chrome.storage.local.get("last_chat_url").then((value) => value.last_chat_url || null);
+    const stored = await chrome.storage.local.get(["last_chat_url"]);
+    priorChatUrl = stored.last_chat_url || null;
+
     await emit(protocol.TYPES.PAGE_READY, {
       chat_url: chatgpt.currentChatUrl(),
       authenticated_page: chatgpt.isAuthenticatedPage(),
@@ -145,6 +229,10 @@
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+
+    chrome.runtime.onMessage.addListener((message) => {
+      void handleBridgeMessage(message);
+    });
 
     const observer = new MutationObserver(() => {
       void observe();

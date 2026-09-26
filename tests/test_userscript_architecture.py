@@ -37,11 +37,11 @@ def test_userscript_architecture_files_exist_and_are_self_contained():
 def test_userscript_contract_declares_architecture_boundaries():
     source = (EXT / "src/userscript_contract.js").read_text(encoding="utf-8")
     for token in [
-        "@match",
-        "case \"grant\"",
-        "case \"run-at\"",
-        "case \"noframes\"",
-        "case \"connect\"",
+        '"@match"',
+        'case "grant"',
+        'case "run-at"',
+        'case "noframes"',
+        'case "connect"',
         "unsafeWindow",
         "mainWorld",
         "PASIUserScriptContract",

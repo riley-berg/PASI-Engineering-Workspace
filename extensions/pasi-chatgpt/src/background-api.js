@@ -491,24 +491,6 @@
     return {ok: true, notification_id: id};
   }
 
-  async function ensureOffscreen() {
-    if (!chrome.offscreen) throw new Error("Chrome offscreen API is unavailable");
-    if (await chrome.offscreen.hasDocument()) return;
-    await chrome.offscreen.createDocument({
-      url: "src/offscreen.html",
-      reasons: ["CLIPBOARD"],
-      justification: "Provide PASI clipboard APIs without exposing page clipboard privileges to the ChatGPT DOM controller.",
-    });
-  }
-
-  async function offscreenMessage(message) {
-    await ensureOffscreen();
-    return chrome.runtime.sendMessage(message);
-  }
-
-  async function handleClipboard(message) {
-    return offscreenMessage(message);
-  }
 
   async function handleDownload(message) {
     const url = String(message.url || "");
@@ -741,9 +723,6 @@
       case contract.MESSAGE_TYPES.TAB_BROADCAST: return handleTabBroadcast(message, sender);
       case contract.MESSAGE_TYPES.TAB_LIST: return handleTabList();
       case contract.MESSAGE_TYPES.NOTIFICATION_SHOW: return handleNotification(message);
-      case contract.MESSAGE_TYPES.CLIPBOARD_WRITE:
-      case contract.MESSAGE_TYPES.CLIPBOARD_READ:
-        return handleClipboard(message);
       case contract.MESSAGE_TYPES.DOWNLOAD: return handleDownload(message);
       case contract.MESSAGE_TYPES.PERMISSION_CONTAINS:
       case contract.MESSAGE_TYPES.PERMISSION_REQUEST:

@@ -138,7 +138,7 @@
     priorChatUrl = await chrome.storage.local.get("last_chat_url").then((value) => value.last_chat_url || null);
     await emit(protocol.TYPES.PAGE_READY, {
       chat_url: chatgpt.currentChatUrl(),
-      authenticated_page: /^https:\/\/chatgpt\.com\/c\//.test(chatgpt.currentChatUrl()),
+      authenticated_page: chatgpt.isAuthenticatedPage(),
       thinking_enabled: chatgpt.thinkingEnabled(),
       prior_chat_url: priorChatUrl,
     });

@@ -64,6 +64,7 @@
     USERSCRIPT_SOURCE_GET: "pasi.userscript.source.get",
     USERSCRIPT_SOURCE_SAVE: "pasi.userscript.source.save",
     USERSCRIPT_VCS_CONFIG: "pasi.userscript.vcs.config",
+    USERSCRIPT_VCS_FETCH: "pasi.userscript.vcs.fetch",
     USERSCRIPT_VCS_PULL: "pasi.userscript.vcs.pull",
     USERSCRIPT_VCS_PUSH: "pasi.userscript.vcs.push",
     USERSCRIPT_SYNC_STATUS: "pasi.userscript.sync.status",

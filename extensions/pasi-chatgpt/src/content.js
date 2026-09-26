@@ -169,90 +169,33 @@
     return true;
   }
 
-  async function submitRecoveryPrompt(reason) {
-    if (
-      !operationId ||
-      awaitingAcceptance ||
-      !recoveryPending ||
-      recoveryCompleted
-    ) {
-      return false;
-    }
-    if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
-      return false;
-    }
-    if (!await chatgpt.ensureThinkingEnabled()) {
-      return false;
-    }
-
-    const stored = await storageGet(["pasi_injected_task_id"]);
-    const taskId = stored.pasi_injected_task_id || "unknown";
-    const recentChanges = (
-      lastAssistantText ||
-      checkpoint?.checkpoint ||
-      "No prior assistant output captured."
-    ).slice(-2500);
-    const prompt = [
-      "PASI CONNECTION RECOVERY",
-      "Current task: " + taskId,
-      "Reason: " + reason,
-      "The active response was interrupted. Do not advance to another task.",
-      "Resume the same task from the preserved operation/checkpoint.",
-      "Most recent assistant output / changes before interruption:",
-      recentChanges,
-      "Re-check your latest changes, continue from that exact state, and preserve the task identity.",
-      "When the task is actually complete, return the required PASI completion markers and unified patch.",
-    ].join("\n");
-
-    const sent = await chatgpt.injectPrompt(prompt);
-    if (!sent) {
-      return false;
-    }
-
-    await emit(protocol.TYPES.CONNECTION_RESTORED, {
-      operation_id: operationId,
-      resumed_after_reconnect: true,
-      same_operation_resumed: true,
-      resume_phase: checkpoint?.resume_phase || "connection_loss",
-      recovery_via_new_prompt: true,
-      recovery_reason: reason,
-    });
-    await emit(protocol.TYPES.RESUME_REQUEST, {
-      operation_id: operationId,
-      resume_phase: checkpoint?.resume_phase || "connection_loss",
-      resumed: true,
-      recovery_via_new_prompt: true,
-    });
-    recoveryPending = false;
-    recoveryCompleted = true;
-    return true;
-  }
-
-  async function beginRecovery(reason) {
-    if (isExtensionContextInvalidated(reason) || reason === "extension context invalidated") {
-      // Extension context invalidation is handled by page reload + state restore.
-      // It must never generate a new ChatGPT prompt.
-      return;
-    }
+  async function markRecoveryPending(reason) {
     if (!active || awaitingAcceptance || recoveryCompleted) {
       return;
     }
     recoveryPending = true;
-    if (!lossRecorded) {
-      const response = chatgpt.latestAssistantMessage();
-      const stopped = chatgpt.stopGeneration();
-      await checkpointProgress("connection_loss", response);
-      await emit(protocol.TYPES.CONNECTION_LOST, {
-        operation_id: operationId,
-        response_stopped_on_loss: stopped || Boolean(chatgpt.connectionErrorMessage()),
-        checkpoint_preserved: Boolean(checkpoint),
-        resume_phase: checkpoint?.resume_phase || "connection_loss",
-        recovery_reason: reason,
-      });
-      lossRecorded = true;
+    if (lossRecorded) {
+      return;
     }
-    await sleep(250);
-    await submitRecoveryPrompt(reason);
+    const response = chatgpt.latestAssistantMessage();
+    const stopped = chatgpt.stopGeneration();
+    await checkpointProgress("connection_loss", response);
+    await emit(protocol.TYPES.CONNECTION_LOST, {
+      operation_id: operationId,
+      response_stopped_on_loss: stopped || Boolean(chatgpt.connectionErrorMessage()),
+      checkpoint_preserved: Boolean(checkpoint),
+      resume_phase: checkpoint?.resume_phase || "connection_loss",
+      recovery_reason: reason,
+      automatic_recovery_prompt_submitted: false,
+    });
+    lossRecorded = true;
+  }
+
+  async function beginRecovery(reason) {
+    if (isExtensionContextInvalidated(reason) || reason === "extension context invalidated") {
+      return;
+    }
+    await markRecoveryPending(reason);
   }
 
   async function handleChatLimit() {
@@ -459,7 +402,21 @@
     if (!active || awaitingAcceptance || !recoveryPending) {
       return;
     }
-    await submitRecoveryPrompt("browser online event");
+    await emit(protocol.TYPES.CONNECTION_RESTORED, {
+      operation_id: operationId,
+      resumed_after_reconnect: false,
+      same_operation_resumed: true,
+      resume_phase: checkpoint?.resume_phase || "connection_loss",
+      recovery_via_new_prompt: false,
+      recovery_reason: "browser online event",
+    });
+    await emit(protocol.TYPES.RESUME_REQUEST, {
+      operation_id: operationId,
+      resume_phase: checkpoint?.resume_phase || "connection_loss",
+      resumed: false,
+      recovery_via_new_prompt: false,
+      awaiting_same_task_continuation: true,
+    });
   }
 
   function restoreContextRecoveryState() {
@@ -535,8 +492,7 @@
     if (recoveringFromContextInvalidation) {
       // The operation/checkpoint has already been restored into this fresh
       // extension context. Continue observing the existing ChatGPT response;
-      // never inject a synthetic "PASI CONNECTION RECOVERY" prompt merely
-      // because the browser extension was reloaded.
+      // do not inject any synthetic recovery message after an extension reset.
       recoveringFromContextInvalidation = false;
       await emit(protocol.TYPES.CHECKPOINT, {
         operation_id: operationId,

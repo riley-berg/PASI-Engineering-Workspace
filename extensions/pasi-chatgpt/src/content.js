@@ -16,8 +16,12 @@
   let awaitingFreshChat = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
-  let contextRecoveryScheduled = false;
+  let extensionContextDead = false;
   let recoveringFromContextInvalidation = false;
+  let mutationObserver = null;
+  let observeTimer = null;
+  let heartbeatTimer = null;
+  let observationRunning = false;
 
   function isExtensionContextInvalidated(error) {
     return /extension context invalidated/i.test(String(error?.message || error || ""));
@@ -44,43 +48,68 @@
     }
   }
 
-  function scheduleContextRecovery(error) {
-    if (!isExtensionContextInvalidated(error) || contextRecoveryScheduled) {
+  function markExtensionContextDead(error) {
+    if (!isExtensionContextInvalidated(error) || extensionContextDead) {
       return false;
     }
-    contextRecoveryScheduled = true;
+    extensionContextDead = true;
     persistContextRecoveryState();
-    window.setTimeout(() => {
-      window.location.reload();
-    }, 0);
+
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+      mutationObserver = null;
+    }
+    if (observeTimer !== null) {
+      window.clearTimeout(observeTimer);
+      observeTimer = null;
+    }
+    if (heartbeatTimer !== null) {
+      window.clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
     return true;
   }
 
   async function storageGet(keys) {
+    if (extensionContextDead) {
+      return {};
+    }
     try {
       return await chrome.storage.local.get(keys);
     } catch (error) {
-      scheduleContextRecovery(error);
-      return {};
+      if (markExtensionContextDead(error)) {
+        return {};
+      }
+      throw error;
     }
   }
 
   async function storageSet(values) {
+    if (extensionContextDead) {
+      return false;
+    }
     try {
       await chrome.storage.local.set(values);
       return true;
     } catch (error) {
-      scheduleContextRecovery(error);
-      return false;
+      if (markExtensionContextDead(error)) {
+        return false;
+      }
+      throw error;
     }
   }
 
   async function emit(type, payload = {}) {
+    if (extensionContextDead) {
+      return null;
+    }
     const message = protocol.envelope(type, payload);
     try {
       return await chrome.runtime.sendMessage(message);
     } catch (error) {
-      scheduleContextRecovery(error);
+      if (markExtensionContextDead(error)) {
+        return null;
+      }
       return null;
     }
   }
@@ -101,7 +130,7 @@
   }
 
   async function startOperation() {
-    if (active || awaitingAcceptance) {
+    if (extensionContextDead || active || awaitingAcceptance) {
       return;
     }
     operationId = protocol.makeId();
@@ -116,7 +145,7 @@
   }
 
   async function injectCurrentPrompt(prompt, taskId, promptGeneration) {
-    if (!prompt || !taskId || !Number.isInteger(promptGeneration)) {
+    if (extensionContextDead || !prompt || !taskId || !Number.isInteger(promptGeneration)) {
       return false;
     }
 
@@ -170,7 +199,7 @@
   }
 
   async function markRecoveryPending(reason) {
-    if (!active || awaitingAcceptance || recoveryCompleted) {
+    if (extensionContextDead || !active || awaitingAcceptance || recoveryCompleted) {
       return;
     }
     recoveryPending = true;
@@ -199,6 +228,9 @@
   }
 
   async function handleChatLimit() {
+    if (extensionContextDead) {
+      return;
+    }
     const url = chatgpt.currentChatUrl();
     const stored = await storageGet(["pasi_automation_chat_url"]);
     if (
@@ -246,7 +278,7 @@
   }
 
   async function ensureTaskChat() {
-    if (active || awaitingAcceptance || awaitingFreshChat) {
+    if (extensionContextDead || active || awaitingAcceptance || awaitingFreshChat) {
       return;
     }
     if (!chatgpt.isAuthenticatedPage()) {
@@ -289,7 +321,7 @@
     }
   }
 
-  async function observe() {
+  async function performObserve() {
     const url = chatgpt.currentChatUrl();
     const thinking = chatgpt.thinkingEnabled();
     const generating = chatgpt.isGenerating();
@@ -359,7 +391,38 @@
     });
   }
 
+  async function observe() {
+    if (extensionContextDead || observationRunning) {
+      return;
+    }
+    observationRunning = true;
+    try {
+      await performObserve();
+    } catch (error) {
+      if (!markExtensionContextDead(error)) {
+        // Keep unrelated UI/runtime errors visible without destroying the
+        // automation lifecycle.
+        console.warn("[PASI] observe failed:", error);
+      }
+    } finally {
+      observationRunning = false;
+    }
+  }
+
+  function scheduleObserve(delay = 100) {
+    if (extensionContextDead || observeTimer !== null) {
+      return;
+    }
+    observeTimer = window.setTimeout(() => {
+      observeTimer = null;
+      void observe();
+    }, delay);
+  }
+
   async function handleBridgeMessage(message) {
+    if (extensionContextDead) {
+      return;
+    }
     if (message.type === "pasi.inject_prompt") {
       await injectCurrentPrompt(
         message.prompt,
@@ -470,21 +533,35 @@
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
 
-    chrome.runtime.onMessage.addListener((message) => {
-      void handleBridgeMessage(message);
-    });
+    try {
+      chrome.runtime.onMessage.addListener((message) => {
+        if (extensionContextDead) {
+          return;
+        }
+        void handleBridgeMessage(message).catch((error) => {
+          if (!markExtensionContextDead(error)) {
+            console.warn("[PASI] bridge message failed:", error);
+          }
+        });
+      });
+    } catch (error) {
+      if (!markExtensionContextDead(error)) {
+        throw error;
+      }
+      return;
+    }
 
-    const observer = new MutationObserver(() => {
-      void observe();
+    mutationObserver = new MutationObserver(() => {
+      scheduleObserve(150);
     });
-    observer.observe(document.documentElement, {
+    mutationObserver.observe(document.documentElement, {
       subtree: true,
       childList: true,
       characterData: true,
     });
 
-    window.setInterval(() => {
-      void observe();
+    heartbeatTimer = window.setInterval(() => {
+      scheduleObserve(0);
     }, 1000);
 
     await observe();
@@ -492,7 +569,7 @@
     if (recoveringFromContextInvalidation) {
       // The operation/checkpoint has already been restored into this fresh
       // extension context. Continue observing the existing ChatGPT response;
-      // do not inject any synthetic recovery message after an extension reset.
+      // do not inject or manufacture a recovery message.
       recoveringFromContextInvalidation = false;
       await emit(protocol.TYPES.CHECKPOINT, {
         operation_id: operationId,

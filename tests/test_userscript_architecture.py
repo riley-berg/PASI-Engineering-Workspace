@@ -97,7 +97,7 @@ def test_all_userscript_javascript_parses():
         "userscript_dnr.js",
         "userscript_install_queue.js",
     ]:
-        target = EXT / name if name == "options.js" else EXT / "src" / name
+        target = EXT / name if name in {"options.js", "popup.js", "editor.js"} else EXT / "src" / name
         result = subprocess.run(
             ["node", "--check", str(target)],
             capture_output=True,
@@ -196,9 +196,9 @@ def test_userscript_main_world_wrapper_keeps_broker_private():
 const fs = require("fs");
 const vm = require("vm");
 const source = fs.readFileSync(process.argv[1], "utf8");
-const sandbox = {};
+const sandbox = {globalThis: {}};
 vm.runInNewContext(source, sandbox);
-const runtime = sandbox.globalThis.PASIUserScriptRuntime;
+const runtime = sandbox.globalThis.PASIUserScriptRuntime || sandbox.PASIUserScriptRuntime;
 const generated = runtime.buildMainWorld({
   id: "probe",
   name: "Probe",

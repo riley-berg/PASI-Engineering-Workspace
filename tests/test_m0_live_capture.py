@@ -153,7 +153,7 @@ def test_capture_bridge_does_not_fill_missing_response_markers() -> None:
     state = CaptureState()
     for event in complete_events():
         state.apply(event)
-    state.response_text = state.response_text.replace("PASI_M0_NEXT_TASK_ID: P0.2\n", "")
+    state.response_text = state.response_text.replace("PASI_EVIDENCE: Live evidence captured.\n", "")
 
     assert state.ready() is False
 

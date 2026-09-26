@@ -77,7 +77,7 @@
       return false;
     }
 
-    if (!chatgpt.ensureThinkingEnabled()) {
+    if (!await chatgpt.ensureThinkingEnabled()) {
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "Thinking could not be enabled; refusing automatic task prompt injection.",
         task_id: taskId,

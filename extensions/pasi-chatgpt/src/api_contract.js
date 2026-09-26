@@ -56,6 +56,11 @@
     USERSCRIPT_BACKUP: "pasi.userscript.backup",
     USERSCRIPT_RESTORE: "pasi.userscript.restore",
     USERSCRIPT_SYNC: "pasi.userscript.sync",
+    USERSCRIPT_NETWORK_ADD: "pasi.userscript.network.add",
+    USERSCRIPT_NETWORK_REMOVE: "pasi.userscript.network.remove",
+    USERSCRIPT_NETWORK_LIST: "pasi.userscript.network.list",
+    USERSCRIPT_HOSTS: "pasi.userscript.hosts",
+    USERSCRIPT_ACTIVE_TAB: "pasi.userscript.active_tab",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 
@@ -89,6 +94,7 @@
     userScriptIdChars: 100,
     userScriptNameChars: 160,
     userScriptConnectChars: 120,
+    userScriptRuleIdChars: 80,
   });
 
   const SAFE_HTTP_HEADERS = Object.freeze([

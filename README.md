@@ -22,7 +22,7 @@ ModelProvider
 Computer capabilities stay separate:
 Planner -> typed ComputerCapability -> host application
 
-This repository intentionally contains no ChatGPT DOM controller, browser-response extraction, Tampermonkey controller, frontend shell, Chromium extension, or DOM-based model transport.
+The repository contains a deliberately bounded Chromium ChatGPT handoff extension under `extensions/pasi-chatgpt/`. The extension is a typed browser boundary for authenticated task handoff, chat reuse/switching, usage-limit recovery, Thinking-state enforcement, checkpoints, and completion evidence. It does not use the DOM as a model transport or fabricate completion evidence.
 
 ## Local model API
 

@@ -69,7 +69,7 @@
   }
 
   function sanitizeScriptForClient(script) {
-    const {source, ...safe} = script;
+    const {source, auth, ...safe} = script;
     return {...safe};
   }
 

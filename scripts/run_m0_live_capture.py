@@ -245,6 +245,7 @@ def main() -> int:
         return 0
     finally:
         server.server_close()
+    return 0
 
 
 if __name__ == "__main__":

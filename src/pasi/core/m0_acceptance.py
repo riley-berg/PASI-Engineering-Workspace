@@ -251,7 +251,7 @@ def apply_validate_commit(
                 "next_task_id": "",
                 "next_prompt": "",
                 "next_prompt_digest": "",
-                "prompt_advanced_after_verified_completion": True,
+                "prompt_advanced_after_verified_completion": False,
             },
             indent=2,
         )

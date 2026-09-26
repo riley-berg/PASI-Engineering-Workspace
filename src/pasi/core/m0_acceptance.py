@@ -132,6 +132,25 @@ def parse_response_file(path: Path) -> M0Response:
     return M0Response.from_mapping(payload)
 
 
+def _canonical_m0_proof_patch(patch: str) -> str:
+    """Normalize transport-only diff formatting for the single M0 proof artifact."""
+    normalized = patch.replace("\r\n", "\n").replace("\r", "\n").lstrip("\ufeff")
+    lines = [line for line in normalized.split("\n") if line.strip()]
+    canonical = [
+        "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/acceptance/M0-LIVE-PROOF.txt",
+        "@@ -0,0 +1 @@",
+        "+PASI M0 LIVE PROOF",
+    ]
+    if len(lines) == 7 and lines[2].startswith("index "):
+        lines.pop(2)
+    if lines != canonical:
+        raise M0AcceptanceError("M0 patch must contain only the canonical proof-file addition")
+    return "\n".join(canonical) + "\n"
+
+
 def _run(command: list[str], cwd: Path, *, timeout: float) -> str:
     result = subprocess.run(
         command,
@@ -164,7 +183,7 @@ def apply_validate_commit(
 
     patch_file = repo / ".runtime" / "m0-response.patch"
     patch_file.parent.mkdir(parents=True, exist_ok=True)
-    patch_file.write_text(response.patch, encoding="utf-8")
+    patch_file.write_text(_canonical_m0_proof_patch(response.patch), encoding="utf-8")
 
     _run(["git", "apply", "--check", str(patch_file)], repo, timeout=10)
     _run(["git", "apply", "--index", str(patch_file)], repo, timeout=10)

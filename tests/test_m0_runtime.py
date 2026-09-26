@@ -47,6 +47,20 @@ def test_m0_runtime_evidence_rejects_missing_live_guards(field: str, value: obje
         M0RuntimeEvidence.from_mapping(payload)
 
 
+def test_recovery_checkpoint_can_be_restored_before_resume() -> None:
+    controller = ConnectionRecoveryController(operation_id="op-2")
+    controller.start_generation(phase="response_generation")
+    controller.checkpoint_progress(phase="patch_application", checkpoint="proof artifact verified")
+    controller.connection_lost()
+
+    restored = ConnectionRecoveryController.from_checkpoint(controller.checkpoint_record())
+    decision = restored.connection_restored()
+
+    assert decision.operation_id == "op-2"
+    assert decision.resume_phase == "patch_application"
+    assert restored.checkpoint_record()["checkpoint"] == "proof artifact verified"
+
+
 def test_connection_loss_stops_generation_and_resumes_same_operation_once() -> None:
     controller = ConnectionRecoveryController(operation_id="op-1")
     controller.start_generation(phase="contract_parsing")

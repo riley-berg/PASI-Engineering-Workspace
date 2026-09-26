@@ -29,6 +29,12 @@
         message.remote === true,
       ));
     }
+    if (message?.type === "menu-command") {
+      const callback = menuCallbacks.get(message.command_id);
+      if (callback) Promise.resolve(callback(message.info)).catch((error) => {
+        void call("script.error", {message: String(error?.message || error), stack: String(error?.stack || "")});
+      });
+    }
   });
 
   const listeners = new Map();

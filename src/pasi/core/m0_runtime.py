@@ -168,6 +168,37 @@ class ConnectionRecoveryController:
             limit=MAX_CHECKPOINT_CHARS,
         )
 
+    def checkpoint_record(self) -> dict[str, Any]:
+        if not self.checkpoint:
+            raise M0RuntimeError("cannot persist an empty checkpoint")
+        return {
+            "operation_id": self.operation_id,
+            "resume_phase": self.resume_phase,
+            "checkpoint": self.checkpoint,
+            "connected": self.connected,
+            "generating": self.generating,
+            "interrupted": self.interrupted,
+            "resumed": self.resumed,
+            "recovery_count": self.recovery_count,
+        }
+
+    @classmethod
+    def from_checkpoint(cls, value: Mapping[str, Any]) -> "ConnectionRecoveryController":
+        if not isinstance(value, Mapping):
+            raise M0RuntimeError("recovery checkpoint must be an object")
+        controller = cls(operation_id=value.get("operation_id", ""))
+        controller.resume_phase = _text(value.get("resume_phase", ""), name="resume_phase", limit=MAX_PHASE_CHARS)
+        controller.checkpoint = _text(value.get("checkpoint", ""), name="checkpoint", limit=MAX_CHECKPOINT_CHARS)
+        controller.connected = value.get("connected") is True
+        controller.generating = value.get("generating") is True
+        controller.interrupted = value.get("interrupted") is True
+        controller.resumed = value.get("resumed") is True
+        recovery_count = value.get("recovery_count", 0)
+        if not isinstance(recovery_count, int) or recovery_count < 0:
+            raise M0RuntimeError("recovery_count must be a non-negative integer")
+        controller.recovery_count = recovery_count
+        return controller
+
     def connection_lost(self) -> RecoveryDecision:
         if not self.generating:
             raise M0RuntimeError("connection loss requires an active generation")

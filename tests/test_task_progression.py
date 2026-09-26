@@ -25,7 +25,7 @@ def test_start_derives_prompt_from_current_roadmap_task() -> None:
     progression = TaskPromptProgression.start(catalog=catalog(), task_id="P0.1")
     assert progression.state.current_task_id == "P0.1"
     assert "[PASI TASK P0.1]" in progression.current_prompt()
-    assert "Create a fresh chat after prior chat usage." in progression.current_prompt()
+    assert "Reuse the durable automation chat; create a fresh chat only when ChatGPT explicitly reports a usage or context limit." in progression.current_prompt()
     assert progression.state.prompt_generation == 1
 
 

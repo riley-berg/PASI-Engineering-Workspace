@@ -69,6 +69,7 @@
     USERSCRIPT_VCS_PULL: "pasi.userscript.vcs.pull",
     USERSCRIPT_VCS_PUSH: "pasi.userscript.vcs.push",
     USERSCRIPT_SYNC_STATUS: "pasi.userscript.sync.status",
+    USERSCRIPT_SYNC_RESOLVE: "pasi.userscript.sync.resolve",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 

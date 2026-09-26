@@ -32,7 +32,7 @@ Shadow DOM roots can be requested when UI isolation is needed.
 
 PASI.tabs supports open, close, focus, send, broadcast, list, and subscriptions.
 
-PASI.notifications provides native notifications. PASI.downloads supports relative download paths, including subdirectories below Downloads.
+PASI.notifications provides native notifications. PASI.downloads supports relative download paths, including subdirectories below Downloads. PASI.copyText provides a user-gesture-friendly text copy primitive; ambient reads are intentionally not exposed.
 
 Dynamic context menus are exposed by PASI.menu.
 

@@ -19,7 +19,7 @@ Use the resulting Windows path in the browser's **Load unpacked** control.
 
 The extension observes the authenticated `chatgpt.com` page, tracks the active operation, records a bounded checkpoint, reacts to browser online/offline transitions, and sends structured events to the local PASI capture bridge at:
 
-```
+```text
 http://127.0.0.1:8765
 ```
 
@@ -35,7 +35,7 @@ python scripts/run_m0_live_capture.py
 
 The bridge writes:
 
-```
+```text
 .runtime/acceptance/m0-authenticated-response.json
 ```
 

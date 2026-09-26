@@ -76,6 +76,11 @@ class TestM0Acceptance(unittest.TestCase):
                 next_prompt="Complete P0.3.",
             )
 
+    def test_roadmap_records_completion_gated_prompt_progression(self) -> None:
+        roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
+        self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
+        self.assertIn("generated exactly once after verified completion", roadmap)
+
     def test_response_file_round_trip(self) -> None:
         value = {
             "provider": "chatgpt_browser",
@@ -96,3 +101,4 @@ class TestM0Acceptance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -117,4 +117,6 @@ def test_userscript_productization_contracts():
     ]:
         assert token in backup + manager + runtime + api + options
     assert "menu-command" in runtime
+    assert "wrapSource" in runtime
+    assert "runtime.wrapSource(script.source)" in manager
     assert "chrome.permissions.request" in options

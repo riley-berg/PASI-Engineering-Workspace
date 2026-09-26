@@ -53,6 +53,7 @@ class CaptureState:
         self.authenticated = False
         self.thinking_enabled = False
         self.fresh_chat_created_after_usage = False
+        self.fresh_chat_creation_reason = ""
         self.operation_id = ""
         self.resume_phase = ""
         self.connection_loss_detected = False
@@ -83,6 +84,9 @@ class CaptureState:
                 self.fresh_chat_created_after_usage = (
                     event.get("fresh_chat_created_after_usage") is True
                 )
+                self.fresh_chat_creation_reason = str(
+                    event.get("fresh_chat_creation_reason") or ""
+                ).strip()
                 self.chat_url = str(event.get("fresh_chat_url") or self.chat_url)
 
             if event_type == "operation_started":
@@ -185,9 +189,12 @@ class CaptureState:
                         "PASI_M0_NEXT_PROMPT_END",
                     ),
                 )
+                valid_chat_creation_policy = (
+                    not self.fresh_chat_created_after_usage
+                    or self.fresh_chat_creation_reason == "usage_limit"
+                )
                 return (
-                    self.fresh_chat_created_after_usage
-                    and all(m0_markers)
+                    valid_chat_creation_policy
                     and self.connection_loss_detected
                     and self.response_stopped_on_loss
                     and self.checkpoint_preserved
@@ -212,6 +219,7 @@ class CaptureState:
                 "patch": extract_patch(text),
                 "runtime_evidence": {
                     "fresh_chat_created_after_usage": self.fresh_chat_created_after_usage,
+                    "fresh_chat_creation_reason": self.fresh_chat_creation_reason,
                     "thinking_enabled": self.thinking_enabled,
                     "connection_recovery": {
                         "connection_loss_detected": self.connection_loss_detected,
@@ -239,6 +247,7 @@ class CaptureState:
             self.authenticated = False
             self.thinking_enabled = False
             self.fresh_chat_created_after_usage = False
+            self.fresh_chat_creation_reason = ""
             self.operation_id = ""
             self.resume_phase = ""
             self.connection_loss_detected = False

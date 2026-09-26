@@ -496,12 +496,13 @@
       await beginRecovery(connectionError);
     }
 
+    const resumedGenerating = chatgpt.isGenerating();
     if (
       active &&
       !awaitingAcceptance &&
       recoveryPending &&
       !connectionError &&
-      generating &&
+      resumedGenerating &&
       !recoveryCompleted
     ) {
       await emit(protocol.TYPES.CONNECTION_RESTORED, {

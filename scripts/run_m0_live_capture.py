@@ -49,8 +49,9 @@ def current_prompt_payload() -> dict[str, Any]:
 
 
 class CaptureState:
-    def __init__(self) -> None:
+    def __init__(self, expected_task_id: str = "P0.1") -> None:
         self.lock = threading.Lock()
+        self.expected_task_id = expected_task_id
         self.chat_url = ""
         self.authenticated = False
         self.thinking_enabled = False
@@ -175,12 +176,7 @@ class CaptureState:
             ):
                 return False
 
-            try:
-                expected_task = current_prompt_payload()["task_id"]
-            except TaskProgressionError:
-                return False
-
-            if task_id != expected_task:
+            if task_id != self.expected_task_id:
                 return False
 
             if task_id == "P0.1":
@@ -238,8 +234,10 @@ class CaptureState:
                 ),
             }
 
-    def reset_after_success(self) -> None:
+    def reset_after_success(self, next_task_id: str | None = None) -> None:
         with self.lock:
+            if next_task_id:
+                self.expected_task_id = next_task_id
             self.chat_url = ""
             self.authenticated = False
             self.thinking_enabled = False
@@ -377,6 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                     acceptance = run_acceptance()
                     if acceptance["status"] == "passed":
                         task = current_prompt_payload()
+                        STATE.reset_after_success(task["task_id"])
                         response = {
                             "ok": True,
                             "ready": True,
@@ -385,7 +384,6 @@ class Handler(BaseHTTPRequestHandler):
                             "next_prompt": task["prompt"],
                             "prompt_generation": task["prompt_generation"],
                         }
-                        STATE.reset_after_success()
                         json_response(self, 200, response)
                         return
 
@@ -411,6 +409,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    STATE.expected_task_id = current_prompt_payload()["task_id"]
     OUTPUT.unlink(missing_ok=True)
     server = ThreadingHTTPServer(("127.0.0.1", 8765), Handler)
     print("PASI M0 live capture bridge: http://127.0.0.1:8765")

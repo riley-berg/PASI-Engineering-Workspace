@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -13,6 +14,13 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pasi.core.m0_acceptance import apply_validate_commit, parse_response_file
+
+
+def persist_evidence(source: Path, destination: Path) -> Path:
+    """Copy acceptance evidence out of the temporary worktree before cleanup."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, destination)
+    return destination
 
 
 
@@ -52,7 +60,11 @@ def main() -> int:
         )
         print(f"task_id={response.task_id}")
         print(f"commit={commit}")
-        print(f"evidence={evidence}")
+        persistent_evidence = persist_evidence(
+            evidence,
+            REPO_ROOT / ".runtime" / "acceptance" / "m0-live.json",
+        )
+        print(f"evidence={persistent_evidence}")
         if response.next_task_id and response.next_prompt:
             print(f"next_task={response.next_task_id}")
             print("next_prompt=advanced only after verified completion")

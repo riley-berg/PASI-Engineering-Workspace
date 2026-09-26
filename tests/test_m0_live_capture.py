@@ -75,6 +75,8 @@ def test_independent_extension_manifest() -> None:
     assert manifest["background"]["service_worker"] == "src/background.js"
     assert manifest["content_scripts"][0]["js"] == [
         "src/protocol.js",
+        "src/api_contract.js",
+        "src/api_v2.js",
         "src/chatgpt.js",
         "src/content.js",
     ]

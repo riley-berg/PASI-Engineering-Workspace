@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PASI Userscript Editor</title><link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<header>
+  <div><p class="eyebrow">PASI</p><h1 id="title">Userscript editor</h1><div id="meta" class="muted"></div></div>
+  <div class="top-actions"><label><input id="typescript" type="checkbox"> TypeScript</label><button id="save">Save</button><button id="pull">Preview remote</button><button id="apply" disabled>Apply remote</button><button id="push">Push</button></div>
+</header>
+<section class="grid">
+  <div class="pane"><h2>Source</h2><textarea id="source" spellcheck="false"></textarea></div>
+  <div class="pane"><h2>Diff</h2><pre id="diff"></pre></div>
+</section>
+<section class="vcs">
+  <h2>Repository</h2>
+  <div class="fields">
+    <select id="provider"><option value="github">GitHub</option><option value="gitlab">GitLab</option></select>
+    <input id="owner" placeholder="owner / group">
+    <input id="repo" placeholder="repository">
+    <input id="path" placeholder="userscripts/foo.js">
+    <input id="branch" placeholder="main">
+    <input id="token" type="password" placeholder="session token (not backed up)">
+    <input id="baseUrl" placeholder="https://gitlab.com">
+  </div>
+  <button id="save-vcs">Save repository settings</button><span id="vcs-status" class="muted"></span>
+</section>
+<section id="status" class="status"></section>
+<script src="src/userscript_diff.js"></script><script src="editor.js"></script>
+</body>
+</html>

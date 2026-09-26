@@ -68,6 +68,24 @@
     sync(mode = "preview") {
       return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC, {mode}).then((result) => result);
     },
+    networkAdd(id, rule) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_ADD, {id: String(id), rule}).then((result) => result.rules);
+    },
+    networkRemove(id, ruleId) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_REMOVE, {id: String(id), rule_id: String(ruleId)}).then((result) => result.rules);
+    },
+    networkList(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_LIST, {id: String(id)}).then((result) => result.rules);
+    },
+    setHostAllowlist(id, hostAllowlist) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_HOSTS, {
+        id: String(id),
+        host_allowlist: Array.isArray(hostAllowlist) ? hostAllowlist.map(String) : [],
+      }).then((result) => result.script);
+    },
+    activeTab() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB).then((result) => result);
+    },
   });
 
   globalThis.PASI = Object.freeze({
@@ -84,6 +102,9 @@
       userscript_backup_restore: true,
       userscript_sync: true,
       userscript_tags_groups: true,
+      userscript_network_rules: true,
+      userscript_context_recovery: true,
+      userscript_host_scoping: true,
     }),
   });
 })();

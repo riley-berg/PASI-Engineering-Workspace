@@ -5,7 +5,9 @@
   const sc = globalThis.PASIUserScriptContract;
   const runtime = globalThis.PASIUserScriptRuntime;
   const backup = globalThis.PASIUserScriptBackup;
-  if (!c || !sc || !runtime || !backup) throw new Error("PASI userscript manager dependencies are missing");
+  const dnr = globalThis.PASIUserScriptDNR;
+  const installQueue = globalThis.PASIUserScriptInstallQueue;
+  if (!c || !sc || !runtime || !backup || !dnr || !installQueue) throw new Error("PASI userscript manager dependencies are missing");
 
   const STORE_KEY = "pasi:userscripts:registry";
   const USER_SCRIPT_PREFIX = "pasi:userscript:";
@@ -127,11 +129,17 @@
     };
   }
 
+  function effectiveMatches(script) {
+    const allowed = Array.isArray(script.host_allowlist) ? new Set(script.host_allowlist.map(String)) : null;
+    const matches = allowed ? script.matches.filter((pattern) => allowed.has(pattern)) : script.matches;
+    return matches.length ? matches : script.matches;
+  }
+
   function userScriptDefinition(script) {
     const source = runtime.build(script);
     return {
       id: script.id,
-      matches: script.matches,
+      matches: effectiveMatches(script),
       excludeMatches: script.excludes.length ? script.excludes : undefined,
       js: [{code: source}, {code: runtime.wrapSource(script.source)}],
       runAt: script.runAt,
@@ -141,6 +149,26 @@
     };
   }
 
+  function networkInputs(script) {
+    return Array.isArray(script.network_rules) ? script.network_rules : [];
+  }
+
+  async function removeNetworkRulesForScript(script) {
+    if (!chrome.declarativeNetRequest?.updateDynamicRules || !dnr) return;
+    const ids = networkInputs(script).map((rule) => dnr.normalizeRule(script.id, rule).id);
+    if (!ids.length) return;
+    await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds: ids, addRules: []});
+  }
+
+  async function applyNetworkRulesForScript(script) {
+    if (!chrome.declarativeNetRequest?.updateDynamicRules || !dnr) return;
+    await removeNetworkRulesForScript(script);
+    if (!script.enabled || !script.grants.includes("webRequest")) return;
+    const rules = dnr.normalizeRules(script.id, networkInputs(script));
+    if (!rules.length) return;
+    await chrome.declarativeNetRequest.updateDynamicRules({removeRuleIds: [], addRules: rules});
+  }
+
   async function unregisterNative(id) {
     if (!chrome.userScripts?.unregister) return;
     await chrome.userScripts.unregister({ids: [id]}).catch(() => undefined);
@@ -148,12 +176,11 @@
 
   async function registerNative(script) {
     ensureAvailable();
-    if (!script.enabled) {
-      await unregisterNative(script.id);
-      return;
-    }
     await unregisterNative(script.id);
+    await removeNetworkRulesForScript(script);
+    if (!script.enabled) return;
     await chrome.userScripts.register([userScriptDefinition(script)]);
+    await applyNetworkRulesForScript(script);
   }
 
   async function registerNativeBatch(scripts) {
@@ -161,6 +188,7 @@
     const enabled = scripts.filter((script) => script.enabled);
     if (!enabled.length) return;
     await chrome.userScripts.register(enabled.map(userScriptDefinition));
+    for (const script of enabled) await applyNetworkRulesForScript(script);
   }
 
   async function configureWorld() {
@@ -182,7 +210,7 @@
     if (all[parsed.id] && message.replace !== true) {
       throw new Error("PASI userscript already exists: " + parsed.id);
     }
-    const script = stamp({...parsed, tags: message.tags, group: message.group}, all[parsed.id]);
+    const script = stamp({...parsed, tags: message.tags, group: message.group, host_allowlist: message.host_allowlist, network_rules: Array.isArray(message.network_rules) ? message.network_rules : []}, all[parsed.id]);
     await configureWorld();
     await saveRegistry({...all, [script.id]: script});
     try {
@@ -273,6 +301,8 @@
       ...parsed,
       tags: message.tags === undefined ? current.tags : message.tags,
       group: message.group === undefined ? current.group : message.group,
+      host_allowlist: message.host_allowlist === undefined ? current.host_allowlist : message.host_allowlist,
+      network_rules: message.network_rules === undefined ? current.network_rules : message.network_rules,
     }, current);
     all[current.id] = next;
     await configureWorld();
@@ -318,6 +348,8 @@
         ...script,
         tags: item.tags,
         group: item.group,
+        host_allowlist: item.host_allowlist,
+        network_rules: Array.isArray(item.network_rules) ? item.network_rules : [],
         created_at: item.created_at,
         updated_at: item.updated_at,
         revision: item.revision,

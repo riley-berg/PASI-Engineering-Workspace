@@ -126,6 +126,18 @@
     syncResolve(decisions) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_RESOLVE, {decisions}).then((result) => result);
     },
+    cloudConfig(config = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_CONFIG, {config}).then((result) => result);
+    },
+    cloudStatus() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_STATUS).then((result) => result.status);
+    },
+    cloudPush() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PUSH).then((result) => result);
+    },
+    cloudPull() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PULL).then((result) => result);
+    },
   });
 
   globalThis.PASI = Object.freeze({
@@ -148,6 +160,7 @@
       userscript_editor: true,
       userscript_vcs: true,
       userscript_sync_status: true,
+      userscript_remote_backup: true,
     }),
   });
 })();

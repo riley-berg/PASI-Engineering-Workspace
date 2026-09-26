@@ -11,6 +11,8 @@ def test_userscript_manifest_and_load_order():
     assert manifest["minimum_chrome_version"] == "120"
     assert "userScripts" in manifest["permissions"]
     assert manifest["options_ui"]["page"] == "options.html"
+    assert manifest["action"]["default_popup"] == "popup.html"
+    assert "alarms" in manifest["permissions"]
     scripts = manifest["content_scripts"][0]["js"]
     assert scripts.index("src/api_v3.js") < scripts.index("src/api_v4.js")
 
@@ -87,6 +89,13 @@ def test_all_userscript_javascript_parses():
         "api_v4.js",
         "background.js",
         "options.js",
+        "popup.js",
+        "editor.js",
+        "userscript_vcs.js",
+        "userscript_diff.js",
+        "userscript_compiler.js",
+        "userscript_dnr.js",
+        "userscript_install_queue.js",
     ]:
         target = EXT / name if name == "options.js" else EXT / "src" / name
         result = subprocess.run(
@@ -115,9 +124,37 @@ def test_userscript_productization_contracts():
         "hosts_granted",
         "tags",
         "group",
+        "GM_fetch",
+        "GM_webRequest",
+        "chrome.userScripts.execute",
+        "installQueue.run",
+        "VCS",
     ]:
         assert token in backup + manager + runtime + api + options
     assert "menu-command" in runtime
     assert "wrapSource" in runtime
     assert "runtime.wrapSource(script.source)" in manager
     assert "chrome.permissions.request" in options
+
+
+def test_userscript_runtime_contracts():
+    manager = (EXT / "src" / "background-userscripts.js").read_text(encoding="utf-8")
+    runtime = (EXT / "src" / "userscript_runtime.js").read_text(encoding="utf-8")
+    dnr = (EXT / "src" / "userscript_dnr.js").read_text(encoding="utf-8")
+    compiler = (EXT / "src" / "userscript_compiler.js").read_text(encoding="utf-8")
+    vcs = (EXT / "src" / "userscript_vcs.js").read_text(encoding="utf-8")
+    for token in [
+        "PASIExtensionContextError",
+        "safeSendMessage",
+        "pagehide",
+        "lifecycle.cleanup",
+        "http.fetch",
+        "network.add",
+        "declarativeNetRequest",
+        "chrome.userScripts.execute",
+    ]:
+        assert token in manager + runtime
+    assert "normalizeRule" in dnr
+    assert "pasi-typescript-lite" in compiler
+    assert "github.com" in vcs
+    assert "gitlab" in vcs

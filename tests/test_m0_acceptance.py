@@ -124,7 +124,7 @@ class TestM0Acceptance(unittest.TestCase):
     def test_roadmap_records_completion_gated_prompt_progression(self) -> None:
         roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
         self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
-        self.assertIn("generated exactly once after verified completion", roadmap)
+        self.assertIn("exactly one new prompt is generated after verified completion", roadmap)
         self.assertIn("create a fresh chat only after an explicit ChatGPT usage/context limit", roadmap)
         self.assertIn("Thinking enabled", roadmap)
         self.assertIn("connection-loss stop/resume", roadmap)

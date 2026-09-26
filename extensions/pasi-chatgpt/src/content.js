@@ -16,7 +16,6 @@
   let awaitingFreshChat = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
-  let lastFreshChatUrl = null;
 
   async function emit(type, payload = {}) {
     const message = protocol.envelope(type, payload);
@@ -194,7 +193,12 @@
 
   async function handleChatLimit() {
     const url = chatgpt.currentChatUrl();
-    if (!chatgpt.chatLimitReached() || url === lastObservedLimitUrl) {
+    const stored = await chrome.storage.local.get(["pasi_automation_chat_url"]);
+    if (
+      !chatgpt.chatLimitReached() ||
+      url === lastObservedLimitUrl ||
+      (stored.pasi_automation_chat_url && stored.pasi_automation_chat_url !== url)
+    ) {
       return;
     }
     if (awaitingAcceptance) {
@@ -230,15 +234,16 @@
     }
 
     const url = chatgpt.currentChatUrl();
-    if (chatgpt.hasUserMessage()) {
-      priorChatUrl = url;
-      awaitingFreshChat = true;
-      if (!chatgpt.createFreshChat()) {
-        awaitingFreshChat = false;
-        await emit(protocol.TYPES.RUNTIME_ERROR, {
-          error: "PASI found an already-used chat but could not create the required fresh task chat.",
-        });
-      }
+    const stored = await chrome.storage.local.get(["pasi_automation_chat_url"]);
+    const automationChatUrl = stored.pasi_automation_chat_url || url;
+
+    if (!stored.pasi_automation_chat_url) {
+      await chrome.storage.local.set({
+        pasi_automation_chat_url: url,
+      });
+    }
+
+    if (automationChatUrl !== url) {
       return;
     }
 
@@ -265,7 +270,9 @@
 
     if (awaitingFreshChat && url !== priorChatUrl) {
       awaitingFreshChat = false;
-      lastFreshChatUrl = url;
+      await chrome.storage.local.set({
+        pasi_automation_chat_url: url,
+      });
       await emit(protocol.TYPES.FRESH_CHAT, {
         fresh_chat_created_after_usage: true,
         prior_chat_url: priorChatUrl,
@@ -339,13 +346,15 @@
       recoveryCompleted = false;
       lastAssistantText = "";
       priorChatUrl = chatgpt.currentChatUrl();
-      awaitingFreshChat = true;
-      if (!chatgpt.createFreshChat()) {
-        awaitingFreshChat = false;
-        await emit(protocol.TYPES.RUNTIME_ERROR, {
-          error: "Task completed, but PASI could not create the next fresh task chat.",
-        });
-      }
+      awaitingFreshChat = false;
+      lastReadyUrl = null;
+      lastObservedLimitUrl = null;
+      await emit(protocol.TYPES.CHAT_READY, {
+        chat_url: priorChatUrl,
+        authenticated_page: true,
+        thinking_enabled: chatgpt.thinkingEnabled(),
+        same_chat_continuation: true,
+      });
     }
   }
 

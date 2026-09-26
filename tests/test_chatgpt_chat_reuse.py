@@ -50,7 +50,7 @@ class TestChatGPTChatReuse(unittest.TestCase):
         self.assertIn("protocol.TYPES.CHAT_READY", completion_handler)
 
     def test_fresh_chat_event_records_usage_limit_reason(self) -> None:
-        observe = self.source[self.source.index("async function observe()"):]
+        observe = self.source[self.source.index("async function performObserve()"):]
         self.assertIn('fresh_chat_creation_reason: "usage_limit"', observe)
 
     def test_fresh_chat_updates_automation_chat_identity(self) -> None:

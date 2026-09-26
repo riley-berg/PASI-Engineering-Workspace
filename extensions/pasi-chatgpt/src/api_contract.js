@@ -46,6 +46,13 @@
     SCRIPT_UNREGISTER: "pasi.api.script.unregister",
     SCRIPT_EXECUTE: "pasi.api.script.execute",
     SCRIPT_LIST: "pasi.api.script.list",
+    USERSCRIPT_REGISTER: "pasi.userscript.register",
+    USERSCRIPT_UNREGISTER: "pasi.userscript.unregister",
+    USERSCRIPT_LIST: "pasi.userscript.list",
+    USERSCRIPT_ENABLE: "pasi.userscript.enable",
+    USERSCRIPT_DISABLE: "pasi.userscript.disable",
+    USERSCRIPT_INFO: "pasi.userscript.info",
+    USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 
   const HTTP_METHODS = Object.freeze([
@@ -74,6 +81,10 @@
     downloadFilenameChars: 240,
     notificationTitleChars: 120,
     notificationMessageChars: 1000,
+    userScriptSourceChars: 500000,
+    userScriptIdChars: 100,
+    userScriptNameChars: 160,
+    userScriptConnectChars: 120,
   });
 
   const SAFE_HTTP_HEADERS = Object.freeze([

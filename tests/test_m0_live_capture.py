@@ -78,6 +78,7 @@ def test_independent_extension_manifest() -> None:
         "src/api_contract.js",
         "src/api_v2.js",
         "src/api_v3.js",
+        "src/api_v4.js",
         "src/copy-api.js",
         "src/chatgpt.js",
         "src/content.js",

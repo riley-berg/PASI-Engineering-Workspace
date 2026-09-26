@@ -16,12 +16,71 @@
   let awaitingFreshChat = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
+  let contextRecoveryScheduled = false;
+  let recoveringFromContextInvalidation = false;
+
+  function isExtensionContextInvalidated(error) {
+    return /extension context invalidated/i.test(String(error?.message || error || ""));
+  }
+
+  function persistContextRecoveryState() {
+    try {
+      sessionStorage.setItem(
+        "pasi_extension_context_recovery",
+        JSON.stringify({
+          operation_id: operationId,
+          active,
+          checkpoint,
+          last_assistant_text: lastAssistantText,
+          prior_chat_url: priorChatUrl,
+          recovery_pending: recoveryPending,
+          awaiting_fresh_chat: awaitingFreshChat,
+          at: new Date().toISOString(),
+        })
+      );
+    } catch (_error) {
+      // Page session storage may be unavailable; the reload still restores the
+      // extension context and the bridge retains the authoritative task state.
+    }
+  }
+
+  function scheduleContextRecovery(error) {
+    if (!isExtensionContextInvalidated(error) || contextRecoveryScheduled) {
+      return false;
+    }
+    contextRecoveryScheduled = true;
+    persistContextRecoveryState();
+    window.setTimeout(() => {
+      window.location.reload();
+    }, 0);
+    return true;
+  }
+
+  async function storageGet(keys) {
+    try {
+      return await storageGet(keys);
+    } catch (error) {
+      scheduleContextRecovery(error);
+      return {};
+    }
+  }
+
+  async function storageSet(values) {
+    try {
+      await storageSet(values);
+      return true;
+    } catch (error) {
+      scheduleContextRecovery(error);
+      return false;
+    }
+  }
 
   async function emit(type, payload = {}) {
     const message = protocol.envelope(type, payload);
     try {
       return await chrome.runtime.sendMessage(message);
-    } catch (_error) {
+    } catch (error) {
+      scheduleContextRecovery(error);
       return null;
     }
   }
@@ -61,7 +120,7 @@
       return false;
     }
 
-    const stored = await chrome.storage.local.get([
+    const stored = await storageGet([
       "pasi_injected_prompt_generation",
       "pasi_injected_chat_url",
     ]);
@@ -95,7 +154,7 @@
       return false;
     }
 
-    await chrome.storage.local.set({
+    await storageSet({
       pasi_injected_prompt_generation: promptGeneration,
       pasi_injected_task_id: taskId,
       pasi_injected_chat_url: chatgpt.currentChatUrl(),
@@ -126,7 +185,7 @@
       return false;
     }
 
-    const stored = await chrome.storage.local.get(["pasi_injected_task_id"]);
+    const stored = await storageGet(["pasi_injected_task_id"]);
     const taskId = stored.pasi_injected_task_id || "unknown";
     const recentChanges = (
       lastAssistantText ||
@@ -193,7 +252,7 @@
 
   async function handleChatLimit() {
     const url = chatgpt.currentChatUrl();
-    const stored = await chrome.storage.local.get(["pasi_automation_chat_url"]);
+    const stored = await storageGet(["pasi_automation_chat_url"]);
     if (
       !chatgpt.chatLimitReached() ||
       url === lastObservedLimitUrl ||
@@ -247,11 +306,11 @@
     }
 
     const url = chatgpt.currentChatUrl();
-    const stored = await chrome.storage.local.get(["pasi_automation_chat_url"]);
+    const stored = await storageGet(["pasi_automation_chat_url"]);
     const automationChatUrl = stored.pasi_automation_chat_url || url;
 
     if (!stored.pasi_automation_chat_url) {
-      await chrome.storage.local.set({
+      await storageSet({
         pasi_automation_chat_url: url,
       });
     }
@@ -295,7 +354,7 @@
 
     if (awaitingFreshChat && url !== priorChatUrl) {
       awaitingFreshChat = false;
-      await chrome.storage.local.set({
+      await storageSet({
         pasi_automation_chat_url: url,
       });
       await emit(protocol.TYPES.FRESH_CHAT, {
@@ -346,7 +405,7 @@
       });
     }
 
-    await chrome.storage.local.set({
+    await storageSet({
       last_chat_url: url,
       last_chat_used: Boolean(response),
     });
@@ -398,9 +457,40 @@
     await submitRecoveryPrompt("browser online event");
   }
 
+  function restoreContextRecoveryState() {
+    try {
+      const raw = sessionStorage.getItem("pasi_extension_context_recovery");
+      if (!raw) {
+        return false;
+      }
+      sessionStorage.removeItem("pasi_extension_context_recovery");
+      const state = JSON.parse(raw);
+      if (!state || !state.active || !state.operation_id) {
+        return false;
+      }
+
+      operationId = state.operation_id;
+      active = true;
+      awaitingAcceptance = false;
+      checkpoint = state.checkpoint || null;
+      lastAssistantText = state.last_assistant_text || "";
+      priorChatUrl = state.prior_chat_url || null;
+      recoveryPending = Boolean(state.recovery_pending);
+      awaitingFreshChat = Boolean(state.awaiting_fresh_chat);
+      recoveringFromContextInvalidation = true;
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   async function initialize() {
-    const stored = await chrome.storage.local.get(["last_chat_url"]);
-    priorChatUrl = stored.last_chat_url || null;
+    restoreContextRecoveryState();
+
+    const stored = await storageGet(["last_chat_url"]);
+    if (!priorChatUrl) {
+      priorChatUrl = stored.last_chat_url || null;
+    }
 
     await emit(protocol.TYPES.PAGE_READY, {
       chat_url: chatgpt.currentChatUrl(),
@@ -430,6 +520,11 @@
     }, 1000);
 
     await observe();
+
+    if (recoveringFromContextInvalidation) {
+      recoveringFromContextInvalidation = false;
+      await beginRecovery("extension context invalidated");
+    }
   }
 
   void initialize();

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -46,7 +47,6 @@ def main() -> int:
         progression = TaskPromptProgression.start(catalog=catalog, task_id=response.task_id)
     if progression.state.current_task_id != response.task_id:
         raise TaskProgressionError("live response task does not match durable current task")
-    expected_next_task_id, expected_next_prompt = progression.expected_next()
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     worktree = (
         args.worktree.expanduser().resolve()
@@ -66,14 +66,24 @@ def main() -> int:
             repo=worktree,
             response=response,
             branch_name=branch,
-            next_task_id=expected_next_task_id,
-            next_prompt=expected_next_prompt,
         )
         progression, receipt = progression.complete(
             verified_task_id=response.task_id,
             evidence=f"{response.evidence}\ncommit={commit}\nclean_worktree=true",
         )
         progression.save(progression_path)
+        if receipt.next_task_id and receipt.next_prompt:
+            evidence_payload = json.loads(evidence.read_text(encoding="utf-8"))
+            evidence_payload["next_task_id"] = receipt.next_task_id
+            evidence_payload["next_prompt"] = receipt.next_prompt
+            evidence_payload["next_prompt_digest"] = __import__("hashlib").sha256(
+                receipt.next_prompt.encode("utf-8")
+            ).hexdigest()
+            evidence_payload["prompt_advanced_after_verified_completion"] = True
+            evidence.write_text(
+                json.dumps(evidence_payload, indent=2) + "\n",
+                encoding="utf-8",
+            )
         print(
             "M0 PASS: authenticated response -> contract parsing -> patch application -> "
             "canonical validation -> commit -> clean worktree"

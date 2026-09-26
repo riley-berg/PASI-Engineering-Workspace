@@ -40,6 +40,11 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertLess(block.index("await startOperation()"), block.index("await chatgpt.injectPrompt(prompt)"))
         self.assertIn("pasi_prompt_injection_state", block)
 
+    def test_context_recovery_preserves_automation_chat_identity(self) -> None:
+        self.assertIn("sessionAutomationChatUrl", self.content)
+        self.assertIn("setSessionAutomationChatUrl", self.content)
+        self.assertIn("automation_chat_url: sessionAutomationChatUrl()", self.content)
+
     def test_prompt_delivery_is_verified_against_user_message(self) -> None:
         self.assertIn("hasUserMessageText(prompt)", self.content)
         self.assertIn('sessionInjection.status === "sending"', self.content)

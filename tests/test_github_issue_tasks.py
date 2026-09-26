@@ -69,3 +69,27 @@ def test_checked_tasks_are_skipped_when_progression_finds_the_next_task() -> Non
     next_task = catalog.next_task("P0.1")
     assert next_task is not None
     assert next_task.task_id == "P0.2"
+
+
+def test_closed_duplicate_issue_is_not_in_live_catalog() -> None:
+    catalog = GitHubIssueTaskCatalog.from_issues(
+        [
+            {
+                "number": 25,
+                "title": "FE-P4 — Computer integration, capability control & host telemetry UI",
+                "state": "closed",
+                "html_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/25",
+                "body": "- [ ] P4.1 — Duplicate closed task",
+            },
+            {
+                "number": 26,
+                "title": "FE-P4 — Computer integration, capability control & host telemetry UI",
+                "state": "open",
+                "html_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/26",
+                "body": "- [ ] P4.1 — Active task",
+            },
+        ]
+    )
+
+    assert [task.task_id for task in catalog.ordered_tasks()] == ["FE-P4.1"]
+    assert catalog.source("FE-P4.1").issue_number == 26

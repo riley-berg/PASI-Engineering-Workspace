@@ -172,7 +172,7 @@ def apply_validate_commit(
     repo: Path,
     response: M0Response,
     branch_name: str,
-    expected_proof: str = "PASI M0 LIVE PROOF\\n",
+    expected_proof: str = "PASI M0 LIVE PROOF\n",
 ) -> tuple[str, Path]:
     if not (repo / ".git").exists():
         raise M0AcceptanceError(f"not a git worktree: {repo}")

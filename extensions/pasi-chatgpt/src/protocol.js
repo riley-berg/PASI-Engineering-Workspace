@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "m0-v1";
+  const VERSION = "m0-v2";
 
   function makeId() {
     if (globalThis.crypto?.randomUUID) {
@@ -26,6 +26,7 @@
     TYPES: Object.freeze({
       PAGE_READY: "page_ready",
       CHAT_USAGE: "chat_usage",
+      CHAT_READY: "chat_ready",
       FRESH_CHAT: "fresh_chat",
       THINKING_STATE: "thinking_state",
       OPERATION_STARTED: "operation_started",

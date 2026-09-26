@@ -127,6 +127,28 @@ def test_capture_bridge_materializes_real_runtime_evidence() -> None:
     assert payload["runtime_evidence"]["connection_recovery"]["operation_id"] == "op-1"
 
 
+def test_capture_bridge_accepts_same_chat_when_no_usage_limit_requires_fresh_chat() -> None:
+    events = [event for event in complete_events() if event["type"] != "fresh_chat"]
+    state = CaptureState()
+    for event in events:
+        state.apply(event)
+
+    assert state.ready() is True
+    payload = state.materialize()
+    assert payload["runtime_evidence"]["fresh_chat_created_after_usage"] is False
+    assert payload["runtime_evidence"]["fresh_chat_creation_reason"] == ""
+
+
+def test_capture_bridge_rejects_non_usage_fresh_chat_reason() -> None:
+    events = complete_events()
+    events[1]["fresh_chat_creation_reason"] = "task_completed"
+    state = CaptureState()
+    for event in events:
+        state.apply(event)
+
+    assert state.ready() is False
+
+
 def test_capture_bridge_does_not_fill_missing_response_markers() -> None:
     state = CaptureState()
     for event in complete_events():

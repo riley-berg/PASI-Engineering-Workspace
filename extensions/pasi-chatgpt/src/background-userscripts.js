@@ -124,6 +124,17 @@
     return String(group || "").trim().slice(0, 80);
   }
 
+  function requiresUnsafeConfirmation(script) {
+    return script.grants.includes("mainWorld") || script.grants.includes("unsafeWindow");
+  }
+
+  function enforceUnsafeConfirmation(next, previous, confirmed) {
+    const addingUnsafe = requiresUnsafeConfirmation(next) && !requiresUnsafeConfirmation(previous || {grants: []});
+    if (addingUnsafe && confirmed !== true) {
+      throw new Error("This userscript requests MAIN/unsafeWindow access; explicit unsafe-mode confirmation is required");
+    }
+  }
+
   function stamp(script, previous) {
     const now = new Date().toISOString();
     return {
@@ -243,7 +254,7 @@
     if (all[parsed.id] && message.replace !== true) {
       throw new Error("PASI userscript already exists: " + parsed.id);
     }
-    const script = stamp({
+    const candidate = {
       ...parsed,
       tags: message.tags,
       group: message.group,
@@ -251,7 +262,9 @@
       network_rules: Array.isArray(message.network_rules) ? message.network_rules : [],
       author_source: authored,
       source_language: message.typeScript === true ? "typescript" : "javascript",
-    }, all[parsed.id]);
+    };
+    enforceUnsafeConfirmation(candidate, all[parsed.id], message.confirmUnsafeMainWorld === true);
+    const script = stamp(candidate, all[parsed.id]);
     if (script.enabled && !(await hostsGranted(script))) {
       script.enabled = false;
       script.pending_host_access = true;
@@ -351,7 +364,7 @@
       metadata,
       enabled: message.enabled === undefined ? current.enabled : Boolean(message.enabled),
     });
-    const next = stamp({
+    const candidate = {
       ...parsed,
       tags: message.tags === undefined ? current.tags : message.tags,
       group: message.group === undefined ? current.group : message.group,
@@ -359,7 +372,9 @@
       network_rules: message.network_rules === undefined ? current.network_rules : message.network_rules,
       author_source: authored,
       source_language: typeScript ? "typescript" : "javascript",
-    }, current);
+    };
+    enforceUnsafeConfirmation(candidate, current, message.confirmUnsafeMainWorld === true);
+    const next = stamp(candidate, current);
     all[current.id] = next;
     await configureWorld();
     await registerNative(next);
@@ -661,6 +676,7 @@
         metadata: item,
         enabled: item.enabled !== false,
       });
+      if (requiresUnsafeConfirmation(script)) script.enabled = false;
       return stamp({
         ...script,
         tags: item.tags,

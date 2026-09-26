@@ -19,8 +19,8 @@
 
   async function sendTabMessage(tabId, message) {
     try {
-      await chrome.tabs.sendMessage(tabId, message);
-      return true;
+      const response = await chrome.tabs.sendMessage(tabId, message);
+      return response?.ok === true;
     } catch (error) {
       // A stale content script can disappear while the service worker is
       // delivering a prompt. Treat that as a delivery failure, not as a new

@@ -21,7 +21,7 @@
   }
 
   function findAction(patterns) {
-    for (const element of visibleElements("button, a, [role="button"]")) {
+    for (const element of visibleElements("button, a, [role=\"button\"]")) {
       const label = elementLabel(element);
       if (patterns.some((pattern) => pattern.test(label))) {
         return element;
@@ -34,8 +34,16 @@
     return location.href;
   }
 
+  function isAuthenticatedPage() {
+    const urlOk = /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+$/.test(currentChatUrl());
+    const composer = document.querySelector(
+      "textarea, [contenteditable=\"true\"], [data-testid*=\"composer\"]"
+    );
+    return urlOk && Boolean(composer);
+  }
+
   function thinkingEnabled() {
-    const labels = visibleElements("button, [role="button"], [aria-label]")
+    const labels = visibleElements("button, [role=\"button\"], [aria-label]")
       .map(elementLabel)
       .filter(Boolean)
       .join(" ");
@@ -101,6 +109,7 @@
 
   globalThis.PASIChatGPT = Object.freeze({
     currentChatUrl,
+    isAuthenticatedPage,
     thinkingEnabled,
     isGenerating,
     stopGeneration,

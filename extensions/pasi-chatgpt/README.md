@@ -1,40 +1,49 @@
-# PASI ChatGPT Extension
+# PASI browser API
 
-This extension is self-contained. It does not depend on Tampermonkey, Greasemonkey, or another userscript manager.
+The PASI extension is self-contained. It does not depend on Tampermonkey or Greasemonkey.
 
-## Native PASI API
+The API borrows the useful shape of userscript managers but uses native Chromium extension primitives and a narrower security model.
 
-The extension now provides an internal API layer over native Chromium extension primitives.
+## Data
 
-The content-controller surface is:
+Use PASI.storage for namespaced persistent state. It supports get, set, remove, list, quota profiling, and cross-tab change notifications.
 
-- `PASI.storage`: namespaced persistent key/value state.
-- `PASI.http`: Promise-based HTTP requests through the background service worker.
-- `PASI.retry`: bounded exponential-backoff retries.
-- `PASI.sleep`: async timing primitive.
-- `PASI.runtime.info()`: extension/runtime metadata.
-- `PASI.events`: local event subscription and emission.
+For large datasets, PASI.db wraps extension IndexedDB using structured-clone storage.
 
-Example:
+PASI.codec.register provides opt-in application type serialization for classes that need reconstruction after storage.
 
-```javascript
-await PASI.storage.set("operation", state, {namespace: "controller"});
+## Network
 
-const response = await PASI.http.request({
-  method: "POST",
-  url: "http://127.0.0.1:8765/event",
-  headers: {"content-type": "application/json"},
-  body: JSON.stringify(event),
-});
+PASI.http.request provides Promise-based fetch-style requests through the service worker. Origins are granted at runtime using the browser permission system.
 
-await PASI.retry(() => doWork(), {
-  attempts: 4,
-  base_delay_ms: 250,
-});
-```
+PASI.http.stream exposes response-body streaming through a ReadableStream.
 
-The HTTP broker is deliberately narrower than a generic `GM_xmlhttpRequest` implementation. It currently allows only the PASI local bridge origin, bounds timeouts and bodies, restricts headers, rejects redirects, and omits ambient credentials.
+PASI.web.observe provides request/complete/error metadata. PASI.web.rules uses declarative network rules for supported request/response header modifications. Arbitrary response-body interception is intentionally not exposed.
 
-This layer is the foundation for migrating the strongest DOM-controller ideas from the abandoned `personal-ai-system` repository without bringing Tampermonkey or the abandoned extension architecture into the authoritative workspace.
+## DOM
 
-The next controller work can build against the PASI API rather than calling raw `chrome.*` primitives throughout the DOM automation code.
+PASI.dom.addElement and PASI.dom.addStyle provide controlled DOM helpers.
+
+PASI.dom.waitFor and PASI.dom.onPresent implement an element-present style lifecycle without forcing every controller to maintain interval loops.
+
+Shadow DOM roots can be requested when UI isolation is needed.
+
+## Browser/system
+
+PASI.tabs supports open, close, focus, send, broadcast, list, and subscriptions.
+
+PASI.notifications provides native notifications. PASI.downloads supports relative download paths, including subdirectories below Downloads.
+
+Dynamic context menus are exposed by PASI.menu.
+
+## Permissions and scripts
+
+PASI.permissions wraps Chrome runtime permission checks, requests, and removals.
+
+PASI.scripts wraps dynamic content-script registration. Scripts must remain extension-local, and host access remains permission-gated.
+
+## Reliability
+
+All APIs are Promise-first. Network operations have bounded timeouts and size limits. Storage is namespaced. Cross-tab messaging is explicit.
+
+The next controller work can migrate the strongest old PASI DOM-controller primitives against this API without bringing back the abandoned controller or adding a userscript-manager dependency.

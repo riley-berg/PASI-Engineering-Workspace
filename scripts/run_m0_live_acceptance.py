@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import shutil
 import subprocess
@@ -76,7 +77,7 @@ def main() -> int:
             evidence_payload = json.loads(evidence.read_text(encoding="utf-8"))
             evidence_payload["next_task_id"] = receipt.next_task_id
             evidence_payload["next_prompt"] = receipt.next_prompt
-            evidence_payload["next_prompt_digest"] = __import__("hashlib").sha256(
+            evidence_payload["next_prompt_digest"] = hashlib.sha256(
                 receipt.next_prompt.encode("utf-8")
             ).hexdigest()
             evidence_payload["prompt_advanced_after_verified_completion"] = True

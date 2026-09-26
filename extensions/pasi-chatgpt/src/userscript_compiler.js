@@ -55,6 +55,24 @@
 
   function compile(source, options = {}) {
     if (options.typeScript !== true) return {code: String(source || ""), diagnostics: [], compiler: "javascript"};
+    const fullCompiler = globalThis.ts || globalThis.TypeScript;
+    if (fullCompiler?.transpileModule) {
+      const result = fullCompiler.transpileModule(String(source || ""), {
+        reportDiagnostics: true,
+        compilerOptions: {
+          target: fullCompiler.ScriptTarget?.ES2022 ?? 7,
+          module: fullCompiler.ModuleKind?.None ?? 0,
+          jsx: fullCompiler.JsxEmit?.Preserve ?? 1,
+        },
+      });
+      return {
+        code: result.outputText,
+        diagnostics: (result.diagnostics || []).map((diagnostic) => fullCompiler.flattenDiagnosticMessageText?.(
+          diagnostic.messageText, "\\n"
+        ) || String(diagnostic.messageText)),
+        compiler: "typescript",
+      };
+    }
     const code = transpile(source);
     return {
       code,

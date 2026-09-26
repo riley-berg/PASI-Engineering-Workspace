@@ -26,6 +26,7 @@ PYTHON_FILES=()
 MARKDOWN_FILES=()
 SHELL_FILES=()
 JSON_FILES=()
+JS_FILES=()
 
 for file in "${TRACKED_FILES[@]}"; do
     case "$file" in
@@ -33,6 +34,7 @@ for file in "${TRACKED_FILES[@]}"; do
         *.md) MARKDOWN_FILES+=("./$file") ;;
         *.sh) SHELL_FILES+=("./$file") ;;
         *.json) JSON_FILES+=("./$file") ;;
+        *.js) JS_FILES+=("./$file") ;;
     esac
 done
 

@@ -3,13 +3,20 @@
 
   const protocol = globalThis.PASIProtocol;
   const chatgpt = globalThis.PASIChatGPT;
+  const BOOTSTRAP_PROMPT =
+    "PASI runtime initialization. Reply exactly PASI_BOOTSTRAP_OK. Do not modify files, create patches, advance tasks, or claim completion.";
+
   let operationId = null;
   let priorChatUrl = null;
   let active = false;
   let awaitingAcceptance = false;
   let lastAssistantText = "";
   let checkpoint = null;
-  let recoveryCount = 0;
+  let recoveryPending = false;
+  let lossRecorded = false;
+  let bootstrapInProgress = false;
+  let lastReadyUrl = null;
+  let lastObservedLimitUrl = null;
   let lastFreshChatUrl = null;
 
   async function emit(type, payload = {}) {
@@ -19,6 +26,10 @@
     } catch (_error) {
       return null;
     }
+  }
+
+  async function sleep(milliseconds) {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
 
   async function checkpointProgress(phase, value) {
@@ -38,7 +49,6 @@
     }
     operationId = protocol.makeId();
     active = true;
-    recoveryCount = 0;
     await emit(protocol.TYPES.OPERATION_STARTED, {
       operation_id: operationId,
       chat_url: chatgpt.currentChatUrl(),
@@ -49,25 +59,31 @@
 
   async function injectCurrentPrompt(prompt, taskId, promptGeneration) {
     if (!prompt || !taskId || !Number.isInteger(promptGeneration)) {
-      return;
+      return false;
     }
 
-    const stored = await chrome.storage.local.get(["pasi_injected_prompt_generation"]);
-    if (stored.pasi_injected_prompt_generation === promptGeneration) {
-      return;
+    const stored = await chrome.storage.local.get([
+      "pasi_injected_prompt_generation",
+      "pasi_injected_chat_url",
+    ]);
+    if (
+      stored.pasi_injected_prompt_generation === promptGeneration &&
+      stored.pasi_injected_chat_url === chatgpt.currentChatUrl()
+    ) {
+      return true;
     }
 
     if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
-      return;
+      return false;
     }
 
-    if (!chatgpt.thinkingEnabled()) {
+    if (!chatgpt.ensureThinkingEnabled()) {
       await emit(protocol.TYPES.RUNTIME_ERROR, {
-        error: "Thinking is not enabled; refusing automatic prompt injection.",
+        error: "Thinking could not be enabled; refusing automatic task prompt injection.",
         task_id: taskId,
         prompt_generation: promptGeneration,
       });
-      return;
+      return false;
     }
 
     const sent = chatgpt.injectPrompt(prompt);
@@ -77,7 +93,7 @@
         task_id: taskId,
         prompt_generation: promptGeneration,
       });
-      return;
+      return false;
     }
 
     await chrome.storage.local.set({
@@ -92,6 +108,138 @@
       chat_url: chatgpt.currentChatUrl(),
       prompt_injected: true,
     });
+    return true;
+  }
+
+  async function submitRecoveryPrompt(reason) {
+    if (!operationId || awaitingAcceptance || !recoveryPending) {
+      return false;
+    }
+    if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
+      return false;
+    }
+    if (!chatgpt.ensureThinkingEnabled()) {
+      return false;
+    }
+
+    const stored = await chrome.storage.local.get(["pasi_injected_task_id"]);
+    const taskId = stored.pasi_injected_task_id || "unknown";
+    const recentChanges = (
+      lastAssistantText ||
+      checkpoint?.checkpoint ||
+      "No prior assistant output captured."
+    ).slice(-2500);
+    const prompt = [
+      "PASI CONNECTION RECOVERY",
+      "Current task: " + taskId,
+      "Reason: " + reason,
+      "The active response was interrupted. Do not advance to another task.",
+      "Resume the same task from the preserved operation/checkpoint.",
+      "Most recent assistant output / changes before interruption:",
+      recentChanges,
+      "Re-check your latest changes, continue from that exact state, and preserve the task identity.",
+      "When the task is actually complete, return the required PASI completion markers and unified patch.",
+    ].join("\n");
+
+    const sent = chatgpt.injectPrompt(prompt);
+    if (!sent) {
+      return false;
+    }
+
+    await emit(protocol.TYPES.CONNECTION_RESTORED, {
+      operation_id: operationId,
+      resumed_after_reconnect: true,
+      same_operation_resumed: true,
+      resume_phase: checkpoint?.resume_phase || "connection_loss",
+      recovery_via_new_prompt: true,
+      recovery_reason: reason,
+    });
+    await emit(protocol.TYPES.RESUME_REQUEST, {
+      operation_id: operationId,
+      resume_phase: checkpoint?.resume_phase || "connection_loss",
+      resumed: true,
+      recovery_via_new_prompt: true,
+    });
+    recoveryPending = false;
+    lossRecorded = false;
+    return true;
+  }
+
+  async function beginRecovery(reason) {
+    if (!active || awaitingAcceptance) {
+      return;
+    }
+    recoveryPending = true;
+    if (!lossRecorded) {
+      const response = chatgpt.latestAssistantMessage();
+      const stopped = chatgpt.stopGeneration();
+      await checkpointProgress("connection_loss", response);
+      await emit(protocol.TYPES.CONNECTION_LOST, {
+        operation_id: operationId,
+        response_stopped_on_loss: stopped || Boolean(chatgpt.connectionErrorMessage()),
+        checkpoint_preserved: Boolean(checkpoint),
+        resume_phase: checkpoint?.resume_phase || "connection_loss",
+        recovery_reason: reason,
+      });
+      lossRecorded = true;
+    }
+    await sleep(250);
+    await submitRecoveryPrompt(reason);
+  }
+
+  async function handleChatLimit() {
+    const url = chatgpt.currentChatUrl();
+    if (!chatgpt.chatLimitReached() || url === lastObservedLimitUrl) {
+      return;
+    }
+    if (awaitingAcceptance) {
+      return;
+    }
+    lastObservedLimitUrl = url;
+    if (active) {
+      const response = chatgpt.latestAssistantMessage();
+      const stopped = chatgpt.stopGeneration();
+      await checkpointProgress("chat_limit", response);
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "Chat usage limit detected; creating a fresh conversation without advancing the current task.",
+        operation_id: operationId,
+        response_stopped: stopped,
+      });
+    }
+    if (!chatgpt.createFreshChat()) {
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "Chat usage limit detected, but PASI could not create a fresh chat.",
+      });
+    }
+  }
+
+  async function startBootstrapIfNeeded() {
+    if (bootstrapInProgress || active || awaitingAcceptance) {
+      return;
+    }
+    const stored = await chrome.storage.local.get(["pasi_bootstrap_completed"]);
+    if (stored.pasi_bootstrap_completed) {
+      return;
+    }
+    if (!chatgpt.isAuthenticatedPage() || chatgpt.hasUserMessage()) {
+      return;
+    }
+    if (!chatgpt.ensureThinkingEnabled()) {
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "PASI bootstrap requires Thinking to be enabled.",
+      });
+      return;
+    }
+    bootstrapInProgress = true;
+    const sent = chatgpt.injectPrompt(BOOTSTRAP_PROMPT);
+    if (!sent) {
+      bootstrapInProgress = false;
+      return;
+    }
+    await emit(protocol.TYPES.CHAT_USAGE, {
+      bootstrap: true,
+      chat_url: chatgpt.currentChatUrl(),
+    });
   }
 
   async function observe() {
@@ -105,7 +253,19 @@
       chat_url: url,
     });
 
-    if (url && url !== priorChatUrl && priorChatUrl && url !== lastFreshChatUrl) {
+    await handleChatLimit();
+
+    const connectionError = chatgpt.connectionErrorMessage();
+    if (active && !awaitingAcceptance && connectionError) {
+      await beginRecovery(connectionError);
+    }
+
+    if (
+      url &&
+      url !== priorChatUrl &&
+      priorChatUrl &&
+      url !== lastFreshChatUrl
+    ) {
       lastFreshChatUrl = url;
       await emit(protocol.TYPES.FRESH_CHAT, {
         fresh_chat_created_after_usage: true,
@@ -114,7 +274,25 @@
       });
     }
 
-    if (!active && !awaitingAcceptance && generating) {
+    if (
+      !active &&
+      !awaitingAcceptance &&
+      !bootstrapInProgress &&
+      chatgpt.isAuthenticatedPage() &&
+      !chatgpt.hasUserMessage() &&
+      url !== lastReadyUrl
+    ) {
+      lastReadyUrl = url;
+      await emit(protocol.TYPES.CHAT_READY, {
+        chat_url: url,
+        authenticated_page: true,
+        thinking_enabled: thinking,
+      });
+    }
+
+    await startBootstrapIfNeeded();
+
+    if (!active && !awaitingAcceptance && !bootstrapInProgress && generating) {
       await startOperation();
     }
 
@@ -129,8 +307,24 @@
     }
 
     if (
+      bootstrapInProgress &&
+      /PASI_BOOTSTRAP_OK/i.test(response) &&
+      !generating
+    ) {
+      bootstrapInProgress = false;
+      await chrome.storage.local.set({ pasi_bootstrap_completed: true });
+      priorChatUrl = url;
+      if (!chatgpt.createFreshChat()) {
+        await emit(protocol.TYPES.RUNTIME_ERROR, {
+          error: "PASI bootstrap completed, but the fresh task chat could not be created.",
+        });
+      }
+    }
+
+    if (
       active &&
       !awaitingAcceptance &&
+      !bootstrapInProgress &&
       !generating &&
       chatgpt.hasCompletePasiResponse(response)
     ) {
@@ -140,8 +334,8 @@
         chat_url: url,
         thinking_enabled: thinking,
         response_text: response,
-        recovery_count: recoveryCount,
         fresh_chat_created_after_usage: Boolean(priorChatUrl && priorChatUrl !== url),
+        recovery_count: lossRecorded ? 1 : 0,
       });
     }
 
@@ -168,7 +362,8 @@
       awaitingAcceptance = false;
       operationId = null;
       checkpoint = null;
-      recoveryCount = 0;
+      recoveryPending = false;
+      lossRecorded = false;
       lastAssistantText = "";
       priorChatUrl = chatgpt.currentChatUrl();
       await chrome.storage.local.set({
@@ -179,41 +374,17 @@
   }
 
   async function handleOffline() {
-    if (!active || awaitingAcceptance || !chatgpt.isGenerating()) {
+    if (!active || awaitingAcceptance) {
       return;
     }
-
-    const response = chatgpt.latestAssistantMessage();
-    const stopped = chatgpt.stopGeneration();
-    await checkpointProgress("connection_loss", response);
-    await emit(protocol.TYPES.CONNECTION_LOST, {
-      operation_id: operationId,
-      response_stopped_on_loss: stopped,
-      checkpoint_preserved: Boolean(checkpoint),
-      resume_phase: checkpoint?.resume_phase || "connection_loss",
-    });
+    await beginRecovery("browser offline event");
   }
 
   async function handleOnline() {
-    if (!operationId || !checkpoint || recoveryCount >= 1) {
+    if (!active || awaitingAcceptance || !recoveryPending) {
       return;
     }
-
-    recoveryCount += 1;
-    const resumed = chatgpt.resumeGeneration();
-    await emit(protocol.TYPES.CONNECTION_RESTORED, {
-      operation_id: operationId,
-      resumed_after_reconnect: resumed,
-      same_operation_resumed: Boolean(resumed && operationId),
-      resume_phase: checkpoint.resume_phase,
-      recovery_count: recoveryCount,
-    });
-
-    await emit(protocol.TYPES.RESUME_REQUEST, {
-      operation_id: operationId,
-      resume_phase: checkpoint.resume_phase,
-      resumed,
-    });
+    await submitRecoveryPrompt("browser online event");
   }
 
   async function initialize() {

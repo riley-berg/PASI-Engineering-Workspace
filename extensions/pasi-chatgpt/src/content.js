@@ -300,6 +300,7 @@
       });
       await emit(protocol.TYPES.FRESH_CHAT, {
         fresh_chat_created_after_usage: true,
+        fresh_chat_creation_reason: "usage_limit",
         prior_chat_url: priorChatUrl,
         fresh_chat_url: url,
       });

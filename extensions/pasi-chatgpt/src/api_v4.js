@@ -123,6 +123,9 @@
     syncStatus() {
       return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS).then((result) => result.status);
     },
+    syncResolve(decisions) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_RESOLVE, {decisions}).then((result) => result);
+    },
   });
 
   globalThis.PASI = Object.freeze({

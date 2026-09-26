@@ -3,8 +3,6 @@
 
   const protocol = globalThis.PASIProtocol;
   const chatgpt = globalThis.PASIChatGPT;
-  const BOOTSTRAP_PROMPT =
-    "PASI runtime initialization. Reply exactly PASI_BOOTSTRAP_OK. Do not modify files, create patches, advance tasks, or claim completion.";
 
   let operationId = null;
   let priorChatUrl = null;
@@ -14,7 +12,7 @@
   let checkpoint = null;
   let recoveryPending = false;
   let lossRecorded = false;
-  let bootstrapInProgress = false;
+  let awaitingFreshChat = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
   let lastFreshChatUrl = null;
@@ -86,7 +84,7 @@
       return false;
     }
 
-    const sent = chatgpt.injectPrompt(prompt);
+    const sent = await chatgpt.injectPrompt(prompt);
     if (!sent) {
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "PASI could not inject the current task prompt into the ChatGPT composer.",
@@ -118,7 +116,7 @@
     if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
       return false;
     }
-    if (!chatgpt.ensureThinkingEnabled()) {
+    if (!await chatgpt.ensureThinkingEnabled()) {
       return false;
     }
 
@@ -141,7 +139,7 @@
       "When the task is actually complete, return the required PASI completion markers and unified patch.",
     ].join("\n");
 
-    const sent = chatgpt.injectPrompt(prompt);
+    const sent = await chatgpt.injectPrompt(prompt);
     if (!sent) {
       return false;
     }
@@ -206,40 +204,45 @@
         response_stopped: stopped,
       });
     }
+    priorChatUrl = url;
+    awaitingFreshChat = true;
     if (!chatgpt.createFreshChat()) {
+      awaitingFreshChat = false;
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "Chat usage limit detected, but PASI could not create a fresh chat.",
       });
     }
   }
 
-  async function startBootstrapIfNeeded() {
-    if (bootstrapInProgress || active || awaitingAcceptance) {
+  async function ensureTaskChat() {
+    if (active || awaitingAcceptance || awaitingFreshChat) {
       return;
     }
-    const stored = await chrome.storage.local.get(["pasi_bootstrap_completed"]);
-    if (stored.pasi_bootstrap_completed) {
+    if (!chatgpt.isAuthenticatedPage()) {
       return;
     }
-    if (!chatgpt.isAuthenticatedPage() || chatgpt.hasUserMessage()) {
+
+    const url = chatgpt.currentChatUrl();
+    if (chatgpt.hasUserMessage()) {
+      priorChatUrl = url;
+      awaitingFreshChat = true;
+      if (!chatgpt.createFreshChat()) {
+        awaitingFreshChat = false;
+        await emit(protocol.TYPES.RUNTIME_ERROR, {
+          error: "PASI found an already-used chat but could not create the required fresh task chat.",
+        });
+      }
       return;
     }
-    if (!chatgpt.ensureThinkingEnabled()) {
-      await emit(protocol.TYPES.RUNTIME_ERROR, {
-        error: "PASI bootstrap requires Thinking to be enabled.",
+
+    if (url !== lastReadyUrl) {
+      lastReadyUrl = url;
+      await emit(protocol.TYPES.CHAT_READY, {
+        chat_url: url,
+        authenticated_page: true,
+        thinking_enabled: chatgpt.thinkingEnabled(),
       });
-      return;
     }
-    bootstrapInProgress = true;
-    const sent = chatgpt.injectPrompt(BOOTSTRAP_PROMPT);
-    if (!sent) {
-      bootstrapInProgress = false;
-      return;
-    }
-    await emit(protocol.TYPES.CHAT_USAGE, {
-      bootstrap: true,
-      chat_url: chatgpt.currentChatUrl(),
-    });
   }
 
   async function observe() {
@@ -253,19 +256,8 @@
       chat_url: url,
     });
 
-    await handleChatLimit();
-
-    const connectionError = chatgpt.connectionErrorMessage();
-    if (active && !awaitingAcceptance && connectionError) {
-      await beginRecovery(connectionError);
-    }
-
-    if (
-      url &&
-      url !== priorChatUrl &&
-      priorChatUrl &&
-      url !== lastFreshChatUrl
-    ) {
+    if (awaitingFreshChat && url !== priorChatUrl) {
+      awaitingFreshChat = false;
       lastFreshChatUrl = url;
       await emit(protocol.TYPES.FRESH_CHAT, {
         fresh_chat_created_after_usage: true,
@@ -274,25 +266,16 @@
       });
     }
 
-    if (
-      !active &&
-      !awaitingAcceptance &&
-      !bootstrapInProgress &&
-      chatgpt.isAuthenticatedPage() &&
-      !chatgpt.hasUserMessage() &&
-      url !== lastReadyUrl
-    ) {
-      lastReadyUrl = url;
-      await emit(protocol.TYPES.CHAT_READY, {
-        chat_url: url,
-        authenticated_page: true,
-        thinking_enabled: thinking,
-      });
+    await handleChatLimit();
+
+    const connectionError = chatgpt.connectionErrorMessage();
+    if (active && !awaitingAcceptance && connectionError) {
+      await beginRecovery(connectionError);
     }
 
-    await startBootstrapIfNeeded();
+    await ensureTaskChat();
 
-    if (!active && !awaitingAcceptance && !bootstrapInProgress && generating) {
+    if (!active && !awaitingAcceptance && generating) {
       await startOperation();
     }
 
@@ -307,24 +290,8 @@
     }
 
     if (
-      bootstrapInProgress &&
-      /PASI_BOOTSTRAP_OK/i.test(response) &&
-      !generating
-    ) {
-      bootstrapInProgress = false;
-      await chrome.storage.local.set({ pasi_bootstrap_completed: true });
-      priorChatUrl = url;
-      if (!chatgpt.createFreshChat()) {
-        await emit(protocol.TYPES.RUNTIME_ERROR, {
-          error: "PASI bootstrap completed, but the fresh task chat could not be created.",
-        });
-      }
-    }
-
-    if (
       active &&
       !awaitingAcceptance &&
-      !bootstrapInProgress &&
       !generating &&
       chatgpt.hasCompletePasiResponse(response)
     ) {
@@ -338,8 +305,6 @@
         recovery_count: lossRecorded ? 1 : 0,
       });
     }
-
-    priorChatUrl = priorChatUrl || url;
 
     await chrome.storage.local.set({
       last_chat_url: url,
@@ -366,10 +331,13 @@
       lossRecorded = false;
       lastAssistantText = "";
       priorChatUrl = chatgpt.currentChatUrl();
-      await chrome.storage.local.set({
-        last_chat_url: chatgpt.currentChatUrl(),
-      });
-      chatgpt.createFreshChat();
+      awaitingFreshChat = true;
+      if (!chatgpt.createFreshChat()) {
+        awaitingFreshChat = false;
+        await emit(protocol.TYPES.RUNTIME_ERROR, {
+          error: "Task completed, but PASI could not create the next fresh task chat.",
+        });
+      }
     }
   }
 

@@ -177,3 +177,51 @@ def test_userscript_toolchain_contracts():
         "USERSCRIPT_SYNC_RESOLVE",
     ]:
         assert token in manager or token in (ROOT / "extensions/pasi-chatgpt/src/api_contract.js").read_text(encoding="utf-8")
+
+def test_userscript_threat_boundaries():
+    manager = (EXT / "src" / "background-userscripts.js").read_text(encoding="utf-8")
+    runtime = (EXT / "src" / "userscript_runtime.js").read_text(encoding="utf-8")
+    contract = (EXT / "src" / "userscript_contract.js").read_text(encoding="utf-8")
+    assert "Unauthorized PASI userscript manager message" in manager
+    assert "PASI userscript IPC port is not authenticated" in manager
+    assert 'type: "handshake"' in runtime
+    assert 'message?.type !== "handshake"' in manager
+    assert '"webRequest"' in contract
+    assert '"unsafeWindow"' in contract
+
+
+def test_userscript_main_world_wrapper_keeps_broker_private():
+    probe = r"""
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync(process.argv[1], "utf8");
+const sandbox = {};
+vm.runInNewContext(source, sandbox);
+const runtime = sandbox.globalThis.PASIUserScriptRuntime;
+const generated = runtime.buildMainWorld({
+  id: "probe",
+  name: "Probe",
+  grants: ["http", "mainWorld"],
+  auth: "TOP-SECRET",
+  source: "window.__pasiProbe = GM_info.script.id;",
+});
+if (generated.includes("Object.defineProperties(globalThis")) process.exit(2);
+if (!generated.includes("const GM_getValue = getValue")) process.exit(3);
+if (!generated.includes("window.__pasiProbe = GM_info.script.id")) process.exit(4);
+if (!generated.includes("TOP-SECRET")) process.exit(5);
+"""
+    result = subprocess.run(
+        ["node", "-e", probe, str(EXT / "src" / "userscript_runtime.js")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_userscript_compiler_and_toolchain_versions():
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    workflow = (ROOT / ".github/workflows/test.yml").read_text(encoding="utf-8")
+    assert package["devDependencies"]["typescript"] == "7.0.2"
+    assert package["devDependencies"]["eslint"] == "10.11.0"
+    assert "typescript@7.0.2" in workflow

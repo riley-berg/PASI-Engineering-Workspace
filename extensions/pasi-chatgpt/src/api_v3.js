@@ -318,6 +318,34 @@
     });
   }
 
+  const clipboard = Object.freeze({
+    writeText(value) {
+      const text = String(value ?? "");
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.left = "-10000px";
+      area.style.top = "-10000px";
+      (document.body || document.documentElement).appendChild(area);
+      area.focus();
+      area.select();
+      let copied = false;
+      try {
+        copied = document.execCommand("copy");
+      } finally {
+        area.remove();
+      }
+      if (!copied) {
+        return Promise.reject(new Error("PASI clipboard write was rejected by the browser"));
+      }
+      return Promise.resolve({ok: true});
+    },
+    readText() {
+      return Promise.reject(new Error("PASI intentionally does not expose ambient clipboard reads"));
+    },
+  });
+
   const web = Object.freeze({
     ...base.web,
     async observe(options = {}, listener) {

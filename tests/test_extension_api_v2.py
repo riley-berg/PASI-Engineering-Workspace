@@ -13,6 +13,7 @@ class TestExtensionAPIV2(unittest.TestCase):
             "src/api_v2.js",
             "src/background-api.js",
             "src/background.js",
+            "src/copy-api.js",
         ]:
             self.assertTrue((EXT / name).is_file(), name)
 

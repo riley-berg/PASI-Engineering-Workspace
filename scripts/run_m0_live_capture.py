@@ -26,7 +26,7 @@ ACCEPTANCE_TIMEOUT = 900
 
 
 def load_progression() -> TaskPromptProgression:
-    catalog = load_task_catalog(ROADMAP)
+    catalog = load_task_catalog(ROADMAP, allow_fallback=False)
     if PROGRESSION.exists():
         return TaskPromptProgression.load(catalog=catalog, path=PROGRESSION)
     progression = TaskPromptProgression.start(catalog=catalog, task_id="P0.1")

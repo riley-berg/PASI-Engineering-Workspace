@@ -140,10 +140,13 @@ def _generic_completion_contract(task_id: str) -> str:
 
 def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
     return (
-        _generic_completion_contract("P0.1")
-        + "\n"
-        + "M0-specific completion requirements:\n"
-        + "PASI_PATCH_START\n"
+        "\n\nCompletion response contract:\n"
+        "Your final response must include these exact machine-readable markers:\n\n"
+        "PASI_TASK_ID: P0.1\n"
+        "PASI_RESULT_STATUS: complete\n"
+        "PASI_SUMMARY: <concise completion summary>\n"
+        "PASI_EVIDENCE: <direct evidence supporting completion>\n\n"
+        "PASI_PATCH_START\n"
         "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt\n"
         "new file mode 100644\n"
         "--- /dev/null\n"

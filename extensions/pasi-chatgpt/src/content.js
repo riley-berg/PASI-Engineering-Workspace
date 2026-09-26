@@ -229,6 +229,11 @@
   }
 
   async function beginRecovery(reason) {
+    if (isExtensionContextInvalidated(reason) || reason === "extension context invalidated") {
+      // Extension context invalidation is handled by page reload + state restore.
+      // It must never generate a new ChatGPT prompt.
+      return;
+    }
     if (!active || awaitingAcceptance || recoveryCompleted) {
       return;
     }
@@ -475,7 +480,13 @@
       checkpoint = state.checkpoint || null;
       lastAssistantText = state.last_assistant_text || "";
       priorChatUrl = state.prior_chat_url || null;
-      recoveryPending = Boolean(state.recovery_pending);
+
+      // Extension-context invalidation is a browser-extension lifecycle event,
+      // not a ChatGPT connection loss. Do not submit a recovery prompt here.
+      // If ChatGPT is actually still showing a connection error after reload,
+      // observe() will detect the real connection error and invoke normal
+      // connection recovery exactly once.
+      recoveryPending = false;
       awaitingFreshChat = Boolean(state.awaiting_fresh_chat);
       recoveringFromContextInvalidation = true;
       return true;
@@ -522,8 +533,18 @@
     await observe();
 
     if (recoveringFromContextInvalidation) {
+      // The operation/checkpoint has already been restored into this fresh
+      // extension context. Continue observing the existing ChatGPT response;
+      // never inject a synthetic "PASI CONNECTION RECOVERY" prompt merely
+      // because the browser extension was reloaded.
       recoveringFromContextInvalidation = false;
-      await beginRecovery("extension context invalidated");
+      await emit(protocol.TYPES.CHECKPOINT, {
+        operation_id: operationId,
+        resume_phase: checkpoint?.resume_phase || "extension_context_restored",
+        checkpoint: checkpoint?.checkpoint || "extension context restored",
+        context_restored: true,
+        synthetic_recovery_prompt: false,
+      });
     }
   }
 

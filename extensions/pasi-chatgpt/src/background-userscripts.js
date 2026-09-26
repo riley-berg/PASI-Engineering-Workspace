@@ -187,6 +187,9 @@
   async function rpc(message, sender) {
     const all = await registry();
     const script = scriptById(all, String(message.script_id));
+    if (String(message.auth || "") !== String(script.auth || "")) {
+      throw new Error("PASI userscript authorization failed");
+    }
     if (!script.enabled) throw new Error("PASI userscript is disabled: " + script.id);
     const method = String(message.method || "");
     const args = message.args || {};

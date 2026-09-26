@@ -38,10 +38,10 @@ def test_userscript_contract_declares_architecture_boundaries():
     source = (EXT / "src/userscript_contract.js").read_text(encoding="utf-8")
     for token in [
         "@match",
-        "@grant",
-        "@run-at",
-        "@noframes",
-        "@connect",
+        "case \"grant\"",
+        "case \"run-at\"",
+        "case \"noframes\"",
+        "case \"connect\"",
         "unsafeWindow",
         "mainWorld",
         "PASIUserScriptContract",

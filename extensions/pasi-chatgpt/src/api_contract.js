@@ -44,6 +44,7 @@
     PERMISSION_REMOVE: "pasi.api.permission.remove",
     SCRIPT_REGISTER: "pasi.api.script.register",
     SCRIPT_UNREGISTER: "pasi.api.script.unregister",
+    SCRIPT_EXECUTE: "pasi.api.script.execute",
     SCRIPT_LIST: "pasi.api.script.list",
   });
 

@@ -47,3 +47,22 @@ PASI.scripts wraps dynamic content-script registration. Scripts must remain exte
 All APIs are Promise-first. Network operations have bounded timeouts and size limits. Storage is namespaced. Cross-tab messaging is explicit.
 
 The next controller work can migrate the strongest old PASI DOM-controller primitives against this API without bringing back the abandoned controller or adding a userscript-manager dependency.
+
+## API v3 improvements
+
+The v3 layer adds the improvements that motivated the PASI-native API:
+
+- structured values for Date, RegExp, Map, Set, ArrayBuffer, typed arrays, BigInt, and registered application classes;
+- `PASI.http.fetch()` with a Fetch-style `Response`, plus streaming `Response.body`;
+- high-level `PASI.http.rules.modifyHeaders()` for declarative request/response header changes;
+- optional request/response header observation through `PASI.web.observe({include_headers: true}, listener)`;
+- menu controls for text, textarea, number, checkbox, and select inputs rendered in an isolated Shadow DOM panel;
+- automatic `element-present` script execution through `PASI.scripts.register({runAt: {type: "element-present", selector: "..."}, ...})`;
+- explicit runtime `PASI.scripts.execute()` for extension-local files;
+- a capability manifest exposed through `PASI.capabilities`.
+
+Chrome MV3 scripting itself provides document-start, document-end, and document-idle registration phases. PASI implements `element-present` as a bounded page-local lifecycle helper on top of the DOM observer rather than pretending Chrome provides a native fourth run phase.
+
+Network header modification uses Chrome declarative network rules, which support modifying request and response headers without exposing raw response bodies to the extension.
+
+Downloads accept relative paths beneath the browser Downloads directory, including subdirectories; parent traversal is rejected.

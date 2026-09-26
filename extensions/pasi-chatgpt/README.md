@@ -75,7 +75,6 @@ If ChatGPT reports a connection/network generation failure, PASI stops the activ
 
 The extension requires Thinking to be enabled before a task or recovery prompt is submitted. It attempts to enable the Thinking control automatically when the UI exposes it; otherwise it refuses to send the task and reports a runtime error instead of silently running with the wrong mode.
 
-
 ## Extension context lifecycle
 
 Chrome can invalidate an existing content-script context when the unpacked extension is reloaded, updated, or the page navigates. PASI treats that as an extension lifecycle event, not as a ChatGPT connection failure.

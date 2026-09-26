@@ -9,13 +9,15 @@
   const installQueue = globalThis.PASIUserScriptInstallQueue;
   const vcs = globalThis.PASIUserScriptVCS;
   const compiler = globalThis.PASIUserScriptCompiler;
-  if (!c || !sc || !runtime || !backup || !dnr || !installQueue || !vcs || !compiler) throw new Error("PASI userscript manager dependencies are missing");
+  const cloud = globalThis.PASIUserScriptCloud;
+  if (!c || !sc || !runtime || !backup || !dnr || !installQueue || !vcs || !compiler || !cloud) throw new Error("PASI userscript manager dependencies are missing");
 
   const STORE_KEY = "pasi:userscripts:registry";
   const USER_SCRIPT_PREFIX = "pasi:userscript:";
   const SYNC_PREFIX = "pasi:userscripts:sync:";
   const SYNC_STATUS_KEY = "pasi:userscripts:sync_status";
   const SYNC_ALARM = "pasi-userscripts-sync-retry";
+  const CLOUD_ALARM = "pasi-userscripts-cloud-retry";
   const ports = new Map();
   const valueWatchers = new Map();
   const menuCommands = new Map();
@@ -523,6 +525,35 @@
     return {ok: true, status: "resolved", decisions};
   }
 
+  async function cloudConfig(message) {
+    return {ok: true, ...(await cloud.saveConfig(message.config || {}))};
+  }
+
+  async function cloudStatus() {
+    return {ok: true, status: await cloud.readStatus()};
+  }
+
+  async function cloudPush() {
+    const snapshot = await backupNow();
+    const status = await cloud.push(snapshot);
+    if (status.state === "connection-error") {
+      await chrome.alarms.create(CLOUD_ALARM, {when: Date.now() + 60000});
+    }
+    return {ok: status.state === "ok", status};
+  }
+
+  async function cloudPull() {
+    const result = await cloud.pull();
+    if (!result.snapshot) {
+      if (result.status.state === "connection-error") {
+        await chrome.alarms.create(CLOUD_ALARM, {when: Date.now() + 60000});
+      }
+      return {ok: false, status: result.status};
+    }
+    await installQueue.run(() => restoreImpl({backup: result.snapshot, mode: "keep-local"}));
+    return {ok: true, status: result.status};
+  }
+
   async function syncStatus() {
     const value = await chrome.storage.local.get(SYNC_STATUS_KEY);
     return {ok: true, status: value[SYNC_STATUS_KEY] || {state: "idle"}};
@@ -1003,12 +1034,25 @@
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH: return installQueue.run(() => vcsPush(message));
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS: return syncStatus();
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC_RESOLVE: return syncResolve(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_CLOUD_CONFIG: return cloudConfig(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_CLOUD_STATUS: return cloudStatus();
+      case c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PUSH: return cloudPush();
+      case c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PULL: return cloudPull();
       default: throw new Error("Unknown PASI userscript manager method");
     }
   }
 
 
   chrome.alarms?.onAlarm.addListener((alarm) => {
+    if (alarm.name === CLOUD_ALARM) {
+      void cloudPush().catch(() => undefined);
+      return;
+    }
+    if (alarm.name !== SYNC_ALARM) return;
+    void sync({mode: "preview", automatic: true, backoff_ms: 120000});
+  });
+  /*
+  
     if (alarm.name !== SYNC_ALARM) return;
     void sync({mode: "preview", automatic: true, backoff_ms: 120000});
   });

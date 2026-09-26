@@ -176,6 +176,8 @@ def apply_validate_commit(
     repo: Path,
     response: M0Response,
     branch_name: str,
+    next_task_id: str | None = None,
+    next_prompt: str | None = None,
     expected_proof: str = "PASI M0 LIVE PROOF\n",
 ) -> tuple[str, Path]:
     if not (repo / ".git").exists():
@@ -248,9 +250,9 @@ def apply_validate_commit(
                 "proof_file": "acceptance/M0-LIVE-PROOF.txt",
                 "prompt_advance_rule": "advance only after verified completion",
                 "runtime_evidence": response.runtime_evidence.to_dict(),
-                "next_task_id": response.next_task_id,
-                "next_prompt": response.next_prompt,
-                "next_prompt_digest": hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest() if response.next_prompt else "",
+                "next_task_id": next_task_id or "",
+                "next_prompt": next_prompt or "",
+                "next_prompt_digest": hashlib.sha256(next_prompt.encode("utf-8")).hexdigest() if next_prompt else "",
                 "prompt_advanced_after_verified_completion": True,
             },
             indent=2,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import sys
@@ -12,6 +13,7 @@ from pasi.core.m0_acceptance import (
     M0Response,
     PromptProgression,
     _canonical_m0_proof_patch,
+    apply_validate_commit,
     parse_response_file,
 )
 
@@ -99,7 +101,8 @@ class TestM0Acceptance(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_proof_artifact_expectation_uses_a_real_trailing_newline(self) -> None:
-        self.assertEqual("PASI M0 LIVE PROOF\\n", "PASI M0 LIVE PROOF\n")
+        default = inspect.signature(apply_validate_commit).parameters["expected_proof"].default
+        self.assertEqual(default, "PASI M0 LIVE PROOF\n")
 
     def test_m0_proof_patch_is_canonicalized_and_other_changes_are_rejected(self) -> None:
         patch = (

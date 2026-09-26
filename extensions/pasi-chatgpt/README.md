@@ -62,7 +62,7 @@ A connection loss does not advance progression. The current operation keeps its 
 
 ## Automatic run loop
 
-After the extension loads on an authenticated empty ChatGPT conversation, it performs a one-time runtime bootstrap, verifies Thinking, creates a fresh task conversation, and injects the current task prompt from the GitHub issue plan.
+After the extension loads on an authenticated ChatGPT page, it verifies Thinking. If the current chat has already been used, it creates a fresh task conversation; if the current chat is blank, it uses that chat. It then injects the current task prompt from the GitHub issue plan.
 
 Task order is deterministic: backend phase P0 through P22, with the matching FE-P0 through FE-P22 issue tasks immediately after each backend phase. The order is derived from the issue plan at runtime; issue number order is not used as the execution order.
 

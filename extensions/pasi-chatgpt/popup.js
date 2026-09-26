@@ -2,6 +2,8 @@
   "use strict";
   const TYPES = {
     active: "pasi.userscript.active_tab",
+    menu: "pasi.userscript.menu.list",
+    menuInvoke: "pasi.userscript.menu.invoke",
     enable: "pasi.userscript.enable",
     disable: "pasi.userscript.disable",
     hosts: "pasi.userscript.hosts",
@@ -32,8 +34,29 @@
       $("site").textContent = result.url || "No inspectable page";
       const root = $("scripts");
       root.replaceChildren();
+      const menu = await send(TYPES.menu);
+      if (menu.commands?.length) {
+        const section = document.createElement("section");
+        section.className = "card";
+        const title = document.createElement("div");
+        title.className = "name";
+        title.textContent = "Userscript commands";
+        section.append(title);
+        for (const command of menu.commands) {
+          const button = document.createElement("button");
+          button.textContent = command.title;
+          button.onclick = async () => {
+            await send(TYPES.menuInvoke, {command_id: command.id});
+            window.close();
+          };
+          section.append(button);
+        }
+        root.append(section);
+      }
       if (!result.scripts?.length) {
-        root.textContent = "No PASI userscripts match this page.";
+        const empty = document.createElement("div");
+        empty.textContent = "No PASI userscripts match this page.";
+        root.append(empty);
         return;
       }
       for (const script of result.scripts) {

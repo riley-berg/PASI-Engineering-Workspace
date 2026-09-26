@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>PASI Userscripts</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">PASI</p>
+        <h1>Userscripts</h1>
+        <p class="subhead">Manage native MV3 userscripts, host access, tags, backups, and sync.</p>
+      </div>
+      <button id="reload" type="button">Refresh</button>
+    </header>
+
+    <section class="toolbar" aria-label="Userscript tools">
+      <input id="search" type="search" placeholder="Search scripts, tags, hosts">
+      <select id="group"><option value="">All groups</option></select>
+      <button id="backup" type="button">Export backup</button>
+      <label class="file-button">Import backup<input id="restore-file" type="file" accept="application/json"></label>
+      <button id="sync" type="button">Sync now</button>
+    </section>
+
+    <section id="status" class="status" role="status"></section>
+    <section id="scripts" class="scripts"></section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

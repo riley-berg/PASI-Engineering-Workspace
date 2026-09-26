@@ -30,6 +30,8 @@
         metadata: options.metadata,
         enabled: options.enabled !== false,
         replace: options.replace === true,
+        tags: options.tags,
+        group: options.group,
       }).then((result) => result.script);
     },
     unregister(id) {
@@ -47,6 +49,25 @@
     info(id) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_INFO, {id: String(id)}).then((result) => result.script);
     },
+    update(id, changes = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_UPDATE, {
+        id: String(id),
+        source: changes.source,
+        metadata: changes.metadata,
+        tags: changes.tags,
+        group: changes.group,
+        enabled: changes.enabled,
+      }).then((result) => result.script);
+    },
+    backup() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_BACKUP).then((result) => result.backup);
+    },
+    restore(backup, mode = "keep-local") {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_RESTORE, {backup, mode}).then((result) => result);
+    },
+    sync(mode = "preview") {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC, {mode}).then((result) => result);
+    },
   });
 
   globalThis.PASI = Object.freeze({
@@ -60,6 +81,9 @@
       userscript_grant_enforcement: true,
       userscript_ipc: true,
       userscript_metadata: true,
+      userscript_backup_restore: true,
+      userscript_sync: true,
+      userscript_tags_groups: true,
     }),
   });
 })();

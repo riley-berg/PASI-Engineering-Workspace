@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "PASI ChatGPT Handoff",
+  "version": "0.1.0",
+  "description": "Independent PASI ChatGPT live handoff and M0 evidence capture extension.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "http://127.0.0.1:8765/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "src/protocol.js",
+        "src/chatgpt.js",
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "PASI ChatGPT Handoff"
+  }
+}

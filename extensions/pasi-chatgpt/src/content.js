@@ -204,6 +204,19 @@
     if (awaitingAcceptance) {
       return;
     }
+
+    // A new chat is a recovery action for an exhausted conversation only.
+    // Before creating it, verify that the desired Thinking state is available;
+    // a normal usable chat must never trigger chat creation just because the
+    // Thinking selector is currently off.
+    if (!await chatgpt.ensureThinkingEnabled()) {
+      await emit(protocol.TYPES.RUNTIME_ERROR, {
+        error: "Chat usage limit detected, but the desired Thinking state could not be verified before fresh-chat recovery.",
+        operation_id: operationId,
+      });
+      return;
+    }
+
     lastObservedLimitUrl = url;
     if (active) {
       const response = chatgpt.latestAssistantMessage();
@@ -244,6 +257,17 @@
     }
 
     if (automationChatUrl !== url) {
+      // Chat switching is reuse, not chat creation. Return to the durable
+      // automation conversation whenever the browser is on another chat.
+      if (chatgpt.isGenerating()) {
+        return;
+      }
+      await emit(protocol.TYPES.CHAT_USAGE, {
+        chat_switch_requested: true,
+        from_chat_url: url,
+        to_chat_url: automationChatUrl,
+      });
+      location.assign(automationChatUrl);
       return;
     }
 
@@ -253,6 +277,7 @@
         chat_url: url,
         authenticated_page: true,
         thinking_enabled: chatgpt.thinkingEnabled(),
+        same_automation_chat: true,
       });
     }
   }

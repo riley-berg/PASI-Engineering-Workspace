@@ -806,6 +806,10 @@
     return {ok: true, status: message.mode === "replace" ? "pulled" : "merged", diff};
   }
 
+  async function managerMessageAllowed(sender) {
+    return sender?.id === chrome.runtime.id;
+  }
+
   async function rpc(message, sender) {
     const all = await registry();
     const script = scriptById(all, String(message.script_id));
@@ -813,6 +817,10 @@
       throw new Error("PASI userscript authorization failed");
     }
     if (!script.enabled) throw new Error("PASI userscript is disabled: " + script.id);
+    const tabId = sender?.tab?.id;
+    if (typeof tabId !== "number" || !ports.has(script.id + ":" + tabId)) {
+      throw new Error("PASI userscript IPC port is not authenticated");
+    }
     const method = String(message.method || "");
     const args = message.args || {};
 
@@ -1008,7 +1016,22 @@
     if (!name.startsWith("pasi.userscript:")) return;
     const scriptId = name.slice("pasi.userscript:".length);
     const tabId = port.sender?.tab?.id;
-    ports.set(scriptId + ":" + tabId, port);
+    let authenticated = false;
+
+    port.onMessage.addListener(async (message) => {
+      if (authenticated || message?.type !== "handshake") return;
+      if (String(message.script_id || "") !== scriptId) return;
+      const all = await registry();
+      const script = all[scriptId];
+      if (!script || !script.enabled || String(message.auth || "") !== String(script.auth || "")) {
+        try { port.disconnect(); } catch (_) {}
+        return;
+      }
+      authenticated = true;
+      ports.set(scriptId + ":" + tabId, port);
+      port.postMessage({type: "handshake-ok"});
+    });
+
     port.onDisconnect.addListener(() => {
       ports.delete(scriptId + ":" + tabId);
       for (const [listenerId, watcher] of valueWatchers.entries()) {
@@ -1058,7 +1081,8 @@
     }
   });
 
-  async function handle(message) {
+  async function handle(message, sender) {
+    if (!(await managerMessageAllowed(sender))) throw new Error("Unauthorized PASI userscript manager message");
     switch (message?.type) {
       case c.MESSAGE_TYPES.USERSCRIPT_INSTALL: return installQueue.run(() => installImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_REGISTER: return installQueue.run(() => registerImpl(message));

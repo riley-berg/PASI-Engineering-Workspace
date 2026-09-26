@@ -272,6 +272,7 @@ class TaskPromptProgression:
         return self, receipt
 
     def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
         return {"schema_version": PROGRESSION_SCHEMA_VERSION, **asdict(self.state)}
 
     @classmethod

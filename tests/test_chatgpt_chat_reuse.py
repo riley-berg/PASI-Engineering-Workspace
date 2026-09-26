@@ -49,6 +49,13 @@ class TestChatGPTChatReuse(unittest.TestCase):
         self.assertIn("same_chat_continuation: true", completion_handler)
         self.assertIn("protocol.TYPES.CHAT_READY", completion_handler)
 
+    def test_response_complete_does_not_infer_fresh_chat_from_url_change(self) -> None:
+        start = self.source.index("protocol.TYPES.RESPONSE_COMPLETE")
+        end = self.source.index("await storageSet(", start)
+        block = self.source[start:end]
+        self.assertIn("fresh_chat_created_after_usage: freshChatCreatedAfterUsage", block)
+        self.assertNotIn("priorChatUrl && priorChatUrl !== url", block)
+
     def test_fresh_chat_event_records_usage_limit_reason(self) -> None:
         observe = self.source[self.source.index("async function performObserve()"):]
         self.assertIn('fresh_chat_creation_reason: "usage_limit"', observe)

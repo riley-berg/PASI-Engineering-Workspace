@@ -13,7 +13,9 @@
   let recoveryPending = false;
   let lossRecorded = false;
   let recoveryCompleted = false;
+  let resumeRequestSent = false;
   let awaitingFreshChat = false;
+  let freshChatCreatedAfterUsage = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
   let extensionContextDead = false;
@@ -27,6 +29,38 @@
     return /extension context invalidated/i.test(String(error?.message || error || ""));
   }
 
+  function promptInjectionState() {
+    try {
+      const raw = sessionStorage.getItem("pasi_prompt_injection_state");
+      if (!raw) {
+        return null;
+      }
+      const state = JSON.parse(raw);
+      return state && typeof state === "object" ? state : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function setPromptInjectionState(state) {
+    try {
+      sessionStorage.setItem(
+        "pasi_prompt_injection_state",
+        JSON.stringify(state)
+      );
+    } catch (_error) {
+      // Page session storage is best-effort; the bridge remains authoritative.
+    }
+  }
+
+  function clearPromptInjectionState() {
+    try {
+      sessionStorage.removeItem("pasi_prompt_injection_state");
+    } catch (_error) {
+      // Ignore unavailable page session storage.
+    }
+  }
+
   function persistContextRecoveryState() {
     try {
       sessionStorage.setItem(
@@ -38,7 +72,12 @@
           last_assistant_text: lastAssistantText,
           prior_chat_url: priorChatUrl,
           recovery_pending: recoveryPending,
+          recovery_completed: recoveryCompleted,
+          loss_recorded: lossRecorded,
+          resume_request_sent: resumeRequestSent,
           awaiting_fresh_chat: awaitingFreshChat,
+          fresh_chat_created_after_usage: freshChatCreatedAfterUsage,
+          prompt_injection: promptInjectionState(),
           at: new Date().toISOString(),
         })
       );
@@ -131,10 +170,11 @@
 
   async function startOperation() {
     if (extensionContextDead || active || awaitingAcceptance) {
-      return;
+      return false;
     }
     operationId = protocol.makeId();
     recoveryCompleted = false;
+    resumeRequestSent = false;
     active = true;
     await emit(protocol.TYPES.OPERATION_STARTED, {
       operation_id: operationId,
@@ -142,6 +182,18 @@
       thinking_enabled: chatgpt.thinkingEnabled(),
       prior_chat_url: priorChatUrl,
     });
+    return !extensionContextDead;
+  }
+
+  function resetOperationState() {
+    active = false;
+    awaitingAcceptance = false;
+    operationId = null;
+    checkpoint = null;
+    recoveryPending = false;
+    lossRecorded = false;
+    recoveryCompleted = false;
+    resumeRequestSent = false;
   }
 
   async function injectCurrentPrompt(prompt, taskId, promptGeneration) {
@@ -149,13 +201,47 @@
       return false;
     }
 
+    const chatUrl = chatgpt.currentChatUrl();
     const stored = await storageGet([
       "pasi_injected_prompt_generation",
       "pasi_injected_chat_url",
     ]);
+    if (extensionContextDead) {
+      return false;
+    }
+
     if (
       stored.pasi_injected_prompt_generation === promptGeneration &&
-      stored.pasi_injected_chat_url === chatgpt.currentChatUrl()
+      stored.pasi_injected_chat_url === chatUrl &&
+      chatgpt.hasUserMessageText(prompt)
+    ) {
+      return true;
+    }
+
+    const sessionInjection = promptInjectionState();
+    const sameSessionInjection =
+      sessionInjection &&
+      sessionInjection.task_id === taskId &&
+      sessionInjection.prompt_generation === promptGeneration &&
+      sessionInjection.chat_url === chatUrl;
+
+    if (
+      sameSessionInjection &&
+      sessionInjection.status === "sending" &&
+      chatgpt.hasUserMessageText(prompt)
+    ) {
+      setPromptInjectionState({
+        ...sessionInjection,
+        status: "sent",
+        confirmed_at: new Date().toISOString(),
+      });
+      return true;
+    }
+
+    if (
+      sameSessionInjection &&
+      sessionInjection.status === "sent" &&
+      chatgpt.hasUserMessageText(prompt)
     ) {
       return true;
     }
@@ -164,7 +250,15 @@
       return false;
     }
 
+    if (!await startOperation()) {
+      return false;
+    }
+    if (extensionContextDead) {
+      return false;
+    }
+
     if (!await chatgpt.ensureThinkingEnabled()) {
+      resetOperationState();
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "Thinking could not be enabled; refusing automatic task prompt injection.",
         task_id: taskId,
@@ -172,9 +266,22 @@
       });
       return false;
     }
+    if (extensionContextDead) {
+      return false;
+    }
+
+    setPromptInjectionState({
+      task_id: taskId,
+      prompt_generation: promptGeneration,
+      chat_url: chatUrl,
+      status: "sending",
+      started_at: new Date().toISOString(),
+    });
 
     const sent = await chatgpt.injectPrompt(prompt);
     if (!sent) {
+      clearPromptInjectionState();
+      resetOperationState();
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "PASI could not inject the current task prompt into the ChatGPT composer.",
         task_id: taskId,
@@ -183,17 +290,28 @@
       return false;
     }
 
-    await storageSet({
-      pasi_injected_prompt_generation: promptGeneration,
-      pasi_injected_task_id: taskId,
-      pasi_injected_chat_url: chatgpt.currentChatUrl(),
+    setPromptInjectionState({
+      task_id: taskId,
+      prompt_generation: promptGeneration,
+      chat_url: chatUrl,
+      status: "sent",
+      confirmed_at: new Date().toISOString(),
     });
+
+    if (!extensionContextDead) {
+      await storageSet({
+        pasi_injected_prompt_generation: promptGeneration,
+        pasi_injected_task_id: taskId,
+        pasi_injected_chat_url: chatUrl,
+      });
+    }
 
     await emit(protocol.TYPES.CHAT_USAGE, {
       task_id: taskId,
       prompt_generation: promptGeneration,
-      chat_url: chatgpt.currentChatUrl(),
+      chat_url: chatUrl,
       prompt_injected: true,
+      operation_id: operationId,
     });
     return true;
   }
@@ -269,8 +387,10 @@
     }
     priorChatUrl = url;
     awaitingFreshChat = true;
+    freshChatCreatedAfterUsage = false;
     if (!chatgpt.createFreshChat()) {
       awaitingFreshChat = false;
+      freshChatCreatedAfterUsage = false;
       await emit(protocol.TYPES.RUNTIME_ERROR, {
         error: "Chat usage limit detected, but PASI could not create a fresh chat.",
       });
@@ -334,6 +454,7 @@
 
     if (awaitingFreshChat && url !== priorChatUrl) {
       awaitingFreshChat = false;
+      freshChatCreatedAfterUsage = true;
       await storageSet({
         pasi_automation_chat_url: url,
       });
@@ -350,6 +471,26 @@
     const connectionError = chatgpt.connectionErrorMessage();
     if (active && !awaitingAcceptance && connectionError) {
       await beginRecovery(connectionError);
+    }
+
+    if (
+      active &&
+      !awaitingAcceptance &&
+      recoveryPending &&
+      !connectionError &&
+      generating &&
+      !recoveryCompleted
+    ) {
+      await emit(protocol.TYPES.CONNECTION_RESTORED, {
+        operation_id: operationId,
+        resumed_after_reconnect: true,
+        same_operation_resumed: true,
+        resume_phase: checkpoint?.resume_phase || "connection_loss",
+        recovery_via_new_prompt: false,
+      });
+      recoveryPending = false;
+      recoveryCompleted = true;
+      resumeRequestSent = false;
     }
 
     await ensureTaskChat();
@@ -380,7 +521,7 @@
         chat_url: url,
         thinking_enabled: thinking,
         response_text: response,
-        fresh_chat_created_after_usage: Boolean(priorChatUrl && priorChatUrl !== url),
+        fresh_chat_created_after_usage: freshChatCreatedAfterUsage,
         recovery_count: lossRecorded ? 1 : 0,
       });
     }
@@ -424,12 +565,17 @@
       return;
     }
     if (message.type === "pasi.inject_prompt") {
-      await injectCurrentPrompt(
+      const ok = await injectCurrentPrompt(
         message.prompt,
         message.task_id,
         message.prompt_generation
       );
-      return;
+      return {
+        ok,
+        type: "prompt_injection",
+        task_id: message.task_id,
+        prompt_generation: message.prompt_generation,
+      };
     }
 
     if (message.type === "pasi.acceptance_passed") {
@@ -445,13 +591,21 @@
       awaitingFreshChat = false;
       lastReadyUrl = null;
       lastObservedLimitUrl = null;
+      freshChatCreatedAfterUsage = false;
+      clearPromptInjectionState();
       await emit(protocol.TYPES.CHAT_READY, {
         chat_url: priorChatUrl,
         authenticated_page: true,
         thinking_enabled: chatgpt.thinkingEnabled(),
         same_chat_continuation: true,
       });
+      return {
+        ok: !extensionContextDead,
+        type: "acceptance_passed",
+      };
     }
+
+    return { ok: false, error: "unsupported_bridge_message" };
   }
 
   async function handleOffline() {
@@ -462,17 +616,10 @@
   }
 
   async function handleOnline() {
-    if (!active || awaitingAcceptance || !recoveryPending) {
+    if (!active || awaitingAcceptance || !recoveryPending || resumeRequestSent) {
       return;
     }
-    await emit(protocol.TYPES.CONNECTION_RESTORED, {
-      operation_id: operationId,
-      resumed_after_reconnect: false,
-      same_operation_resumed: true,
-      resume_phase: checkpoint?.resume_phase || "connection_loss",
-      recovery_via_new_prompt: false,
-      recovery_reason: "browser online event",
-    });
+    resumeRequestSent = true;
     await emit(protocol.TYPES.RESUME_REQUEST, {
       operation_id: operationId,
       resume_phase: checkpoint?.resume_phase || "connection_loss",
@@ -506,8 +653,12 @@
       // If ChatGPT is actually still showing a connection error after reload,
       // observe() will detect the real connection error and invoke normal
       // connection recovery exactly once.
-      recoveryPending = false;
+      recoveryPending = Boolean(state.recovery_pending);
+      recoveryCompleted = Boolean(state.recovery_completed);
+      lossRecorded = Boolean(state.loss_recorded);
+      resumeRequestSent = Boolean(state.resume_request_sent);
       awaitingFreshChat = Boolean(state.awaiting_fresh_chat);
+      freshChatCreatedAfterUsage = Boolean(state.fresh_chat_created_after_usage);
       recoveringFromContextInvalidation = true;
       return true;
     } catch (_error) {
@@ -534,15 +685,22 @@
     window.addEventListener("online", handleOnline);
 
     try {
-      chrome.runtime.onMessage.addListener((message) => {
+      chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (extensionContextDead) {
-          return;
+          sendResponse({ ok: false, error: "extension_context_dead" });
+          return false;
         }
-        void handleBridgeMessage(message).catch((error) => {
-          if (!markExtensionContextDead(error)) {
+        void handleBridgeMessage(message)
+          .then((result) => sendResponse(result))
+          .catch((error) => {
+            if (markExtensionContextDead(error)) {
+              sendResponse({ ok: false, error: "extension_context_dead" });
+              return;
+            }
             console.warn("[PASI] bridge message failed:", error);
-          }
-        });
+            sendResponse({ ok: false, error: String(error) });
+          });
+        return true;
       });
     } catch (error) {
       if (!markExtensionContextDead(error)) {

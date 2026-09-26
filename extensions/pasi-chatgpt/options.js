@@ -180,6 +180,40 @@
     render();
   }
 
+
+  $("cloud-save").onclick = async () => {
+    try {
+      const result = await send("pasi.userscript.cloud.config", {config: {
+        provider: "webdav",
+        endpoint: $("cloud-endpoint").value,
+        filename: $("cloud-file").value,
+        username: $("cloud-user").value,
+        password: $("cloud-pass").value,
+      }});
+      $("cloud-state").textContent = result.credentials_set ? "credentials saved for this session" : "endpoint saved";
+      $("cloud-pass").value = "";
+    } catch (error) { setStatus(String(error.message || error), true); }
+  };
+  $("cloud-status").onclick = async () => {
+    try {
+      const result = await send("pasi.userscript.cloud.status");
+      $("cloud-state").textContent = result.status?.state || "idle";
+    } catch (error) { setStatus(String(error.message || error), true); }
+  };
+  $("cloud-push").onclick = async () => {
+    try {
+      const result = await send("pasi.userscript.cloud.push");
+      $("cloud-state").textContent = result.status?.state || "error";
+    } catch (error) { setStatus(String(error.message || error), true); }
+  };
+  $("cloud-pull").onclick = async () => {
+    try {
+      const result = await send("pasi.userscript.cloud.pull");
+      $("cloud-state").textContent = result.status?.state || "error";
+      if (result.ok) await refresh();
+    } catch (error) { setStatus(String(error.message || error), true); }
+  };
+
   $("search").oninput = (event) => { state.query = event.target.value; render(); };
   $("group").onchange = (event) => { state.group = event.target.value; render(); };
   $("reload").onclick = () => refresh().catch((e) => setStatus(String(e), true));
@@ -226,5 +260,9 @@
     await refresh();
   };
 
+
+  send("pasi.userscript.cloud.status").then((result) => {
+    if (result.status?.state) $("cloud-state").textContent = result.status.state;
+  }).catch(() => undefined);
   refresh().catch((error) => setStatus(String(error.message || error), true));
 })();

@@ -66,3 +66,41 @@ Chrome MV3 scripting itself provides document-start, document-end, and document-
 Network header modification uses Chrome declarative network rules, which support modifying request and response headers without exposing raw response bodies to the extension.
 
 Downloads accept relative paths beneath the browser Downloads directory, including subdirectories; parent traversal is rejected.
+
+
+## Native userscript architecture
+
+PASI now implements a three-tier userscript boundary using Chrome's native MV3 User Scripts API rather than a userscript-manager dependency.
+
+### 1. Privileged core
+
+`src/background-userscripts.js` owns the userscript registry, dynamic registration, grant checks, per-script storage, cross-context messaging, menus, downloads, notifications, clipboard mediation, and cross-origin HTTP.
+
+Each registered script receives a stable PASI script identity. Privileged RPCs are accepted only through the dedicated User Scripts messaging channel and are checked against the stored grants.
+
+### 2. Injection / wrapper layer
+
+`src/userscript_runtime.js` builds the code injected by `chrome.userScripts.register()`.
+
+The wrapper establishes a private IPC channel, exposes the declared PASI/GM-compatible APIs, forwards storage/network/system operations to the privileged core, and records script errors without giving the page direct access to extension APIs.
+
+PASI accepts the useful userscript metadata model:
+
+- `@match`, `@exclude`, `@run-at`, `@grant`, `@connect`, and `@noframes`;
+- `@include` is rejected in favor of explicit match patterns;
+- external `@require` and `@resource` loading is rejected; dependencies must be bundled;
+- supported grants are explicit and enforced by the service worker.
+
+### 3. Isolated userscript world
+
+By default, scripts run in Chrome's `USER_SCRIPT` execution world. This is isolated from the host page JavaScript while retaining DOM access.
+
+A script that requests `@grant unsafeWindow` must also opt into `@grant mainWorld`; PASI then registers the whole script in Chrome's `MAIN` world. That boundary is intentionally explicit because it removes the normal JavaScript isolation.
+
+The wrapper exposes compatible aliases including `GM_getValue`, `GM_setValue`, `GM_addValueChangeListener`, `GM_registerMenuCommand`, `GM_notification`, `GM_download`, `GM_setClipboard`, and `GM_xmlhttpRequest`. PASI still enforces the same native grant and network-origin rules behind those aliases.
+
+### Durable registration
+
+Chrome clears dynamically registered user scripts when an extension updates, so PASI persists its registry in `chrome.storage.local` and restores enabled scripts from the service worker's install/update lifecycle.
+
+This architecture gives PASI the useful Tampermonkey-style separation—privileged core, injection wrapper, isolated script runtime—without making Tampermonkey itself part of the system.

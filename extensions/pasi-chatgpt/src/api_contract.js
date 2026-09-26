@@ -61,6 +61,12 @@
     USERSCRIPT_NETWORK_LIST: "pasi.userscript.network.list",
     USERSCRIPT_HOSTS: "pasi.userscript.hosts",
     USERSCRIPT_ACTIVE_TAB: "pasi.userscript.active_tab",
+    USERSCRIPT_SOURCE_GET: "pasi.userscript.source.get",
+    USERSCRIPT_SOURCE_SAVE: "pasi.userscript.source.save",
+    USERSCRIPT_VCS_CONFIG: "pasi.userscript.vcs.config",
+    USERSCRIPT_VCS_PULL: "pasi.userscript.vcs.pull",
+    USERSCRIPT_VCS_PUSH: "pasi.userscript.vcs.push",
+    USERSCRIPT_SYNC_STATUS: "pasi.userscript.sync.status",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 

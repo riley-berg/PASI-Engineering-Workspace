@@ -87,12 +87,85 @@
     const button = findAction([
       /^new chat$/i,
       /new chat/i,
+      /new conversation/i,
     ]);
     if (!button) {
       return false;
     }
     button.click();
     return true;
+  }
+
+  function findComposer() {
+    const candidates = visibleElements(
+      "textarea, [contenteditable=\"true\"], [data-testid*=\"composer\"]"
+    );
+    return candidates.length ? candidates[candidates.length - 1] : null;
+  }
+
+  function setComposerValue(composer, value) {
+    composer.focus();
+
+    if (composer instanceof HTMLTextAreaElement) {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )?.set;
+      if (!setter) {
+        return false;
+      }
+      setter.call(composer, value);
+      composer.dispatchEvent(new Event("input", { bubbles: true }));
+      composer.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+
+    composer.textContent = value;
+    composer.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+      data: value,
+    }));
+    return true;
+  }
+
+  function sendPrompt() {
+    const button = findAction([
+      /send prompt/i,
+      /^send$/i,
+      /send message/i,
+    ]);
+    if (button && !button.disabled) {
+      button.click();
+      return true;
+    }
+
+    const composer = findComposer();
+    if (!composer) {
+      return false;
+    }
+
+    composer.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter",
+      code: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    return true;
+  }
+
+  function injectPrompt(prompt) {
+    if (!prompt || isGenerating() || !isAuthenticatedPage()) {
+      return false;
+    }
+    if (!thinkingEnabled()) {
+      return false;
+    }
+    const composer = findComposer();
+    if (!composer || !setComposerValue(composer, prompt)) {
+      return false;
+    }
+    return sendPrompt();
   }
 
   function latestAssistantMessage() {
@@ -115,6 +188,7 @@
     stopGeneration,
     resumeGeneration,
     createFreshChat,
+    injectPrompt,
     latestAssistantMessage,
     hasCompletePasiResponse,
   });

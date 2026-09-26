@@ -176,6 +176,16 @@
     return visibleElements('[data-message-author-role="user"]').length > 0;
   }
 
+  function hasUserMessageText(text) {
+    const expected = cleanText(text);
+    if (!expected) {
+      return false;
+    }
+    return visibleElements('[data-message-author-role="user"]').some((element) => {
+      return cleanText(element.innerText || element.textContent) === expected;
+    });
+  }
+
   function setComposerValue(composer, value) {
     composer.focus();
 
@@ -241,7 +251,17 @@
     if (!composer || !setComposerValue(composer, prompt)) {
       return false;
     }
-    return sendPrompt();
+    if (!await sendPrompt()) {
+      return false;
+    }
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      if (hasUserMessageText(prompt)) {
+        return true;
+      }
+      await sleep(100);
+    }
+    return hasUserMessageText(prompt);
   }
 
   function latestAssistantMessage() {
@@ -287,6 +307,7 @@
     createFreshChat,
     findComposer,
     hasUserMessage,
+    hasUserMessageText,
     injectPrompt,
     latestAssistantMessage,
     connectionErrorMessage,

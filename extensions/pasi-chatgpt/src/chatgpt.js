@@ -270,7 +270,7 @@
 
   function chatLimitReached() {
     const text = visibleAlertText();
-    return /you(?:'|’)\ve\s+reached.*(?:limit|max|maximum)|maximum.*(?:reached|length)|conversation.*(?:too\s+long|limit)|start\s+a\s+new\s+chat|new\s+chat\s+to\s+continue/i.test(text);
+    return /you(?:'|’)ve\s+reached.*(?:limit|max|maximum)|maximum.*(?:reached|length)|conversation.*(?:too\s+long|limit)|start\s+a\s+new\s+chat|new\s+chat\s+to\s+continue/i.test(text);
   }
 
   function hasCompletePasiResponse(text) {

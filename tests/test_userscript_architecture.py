@@ -163,6 +163,7 @@ def test_userscript_runtime_contracts():
 def test_userscript_toolchain_contracts():
     package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
     assert package["devDependencies"]["typescript"] == "7.0.2"
+    assert package["devDependencies"]["typescript-browser"] == "npm:typescript@6.0.3"
     assert package["devDependencies"]["eslint"] == "10.11.0"
     assert "build:userscript-compiler" in package["scripts"]
     assert "lint:userscripts" in package["scripts"]

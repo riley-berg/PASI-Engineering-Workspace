@@ -11,6 +11,7 @@ from pasi.core.m0_acceptance import (
     M0AcceptanceError,
     M0Response,
     PromptProgression,
+    _canonical_m0_proof_patch,
     parse_response_file,
 )
 
@@ -96,6 +97,22 @@ class TestM0Acceptance(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_m0_proof_patch_is_canonicalized_and_other_changes_are_rejected(self) -> None:
+        patch = (
+            "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt\\n"
+            "new file mode 100644\\n"
+            "index 0000000..4c6c0d6\\n"
+            "--- /dev/null\\n"
+            "+++ b/acceptance/M0-LIVE-PROOF.txt\\n"
+            "@@ -0,0 +1 @@\\n"
+            "+PASI M0 LIVE PROOF\\n"
+        )
+        canonical = _canonical_m0_proof_patch(patch)
+        self.assertEqual(canonical.splitlines()[0], "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt")
+        self.assertEqual(canonical.splitlines()[-1], "+PASI M0 LIVE PROOF")
+        with self.assertRaises(M0AcceptanceError):
+            _canonical_m0_proof_patch(patch + "+unexpected\\n")
 
     def test_response_file_round_trip(self) -> None:
         value = {

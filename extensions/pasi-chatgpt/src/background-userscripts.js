@@ -630,7 +630,7 @@
         requireGrant(script, "menu", method);
         const commandId = "pasi-userscript:" + script.id + ":" + crypto.randomUUID();
         await chrome.contextMenus.create({id: commandId, title: String(args.title || script.name), contexts: ["page"]});
-        menuCommands.set(commandId, {script_id: script.id});
+        menuCommands.set(commandId, {script_id: script.id, tab_id: sender?.tab?.id});
         return {ok: true, value: commandId};
       }
       case "http.request": {
@@ -663,6 +663,58 @@
           clearTimeout(timer);
         }
       }
+      case "http.fetch": {
+        requireGrant(script, "http", method);
+        const url = String(args.url || "");
+        if (!connectAllowed(script, url)) throw new Error("PASI userscript URL is not allowed by @connect: " + url);
+        const timeout = Math.min(Math.max(Number(args.timeout_ms) || 10000, 250), 30000);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeout);
+        try {
+          const response = await fetch(url, {
+            method: String(args.method || "GET").toUpperCase(),
+            headers: args.headers || {},
+            body: args.body == null ? undefined : String(args.body),
+            credentials: "omit",
+            redirect: "error",
+            cache: "no-store",
+            signal: controller.signal,
+          });
+          const body = await response.text();
+          return {ok: true, value: {
+            ok: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            url: response.url,
+            headers: Object.fromEntries(response.headers.entries()),
+            body,
+          }};
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      case "network.add":
+        requireGrant(script, "webRequest", method);
+        return networkAdd({id: script.id, rule: args.rule});
+      case "network.remove":
+        requireGrant(script, "webRequest", method);
+        return networkRemove({id: script.id, rule_id: args.rule_id});
+      case "network.list":
+        requireGrant(script, "webRequest", method);
+        return networkList({id: script.id});
+      case "lifecycle.cleanup": {
+        const tabId = sender?.tab?.id;
+        for (const [listenerId, watcher] of valueWatchers.entries()) {
+          if (watcher.script_id === script.id && watcher.tab_id === tabId) valueWatchers.delete(listenerId);
+        }
+        for (const [commandId, command] of menuCommands.entries()) {
+          if (command.script_id === script.id && command.tab_id === tabId) {
+            await chrome.contextMenus.remove(commandId).catch(() => undefined);
+            menuCommands.delete(commandId);
+          }
+        }
+        return {ok: true};
+      }
       case "script.error":
         await chrome.storage.local.set({
           [USER_SCRIPT_PREFIX + script.id + ":last_error"]: {
@@ -693,6 +745,15 @@
     ports.set(scriptId + ":" + tabId, port);
     port.onDisconnect.addListener(() => {
       ports.delete(scriptId + ":" + tabId);
+      for (const [listenerId, watcher] of valueWatchers.entries()) {
+        if (watcher.script_id === scriptId && watcher.tab_id === tabId) valueWatchers.delete(listenerId);
+      }
+      for (const [commandId, command] of menuCommands.entries()) {
+        if (command.script_id === scriptId && command.tab_id === tabId) {
+          chrome.contextMenus.remove(commandId).catch(() => undefined);
+          menuCommands.delete(commandId);
+        }
+      }
     });
   });
 

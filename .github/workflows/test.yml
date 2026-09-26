@@ -32,7 +32,7 @@ jobs:
         run: python -m pip install -e '.[dev]'
 
       - name: Build userscript TypeScript compiler
-        run: npm install --no-save typescript@7.0.2 && npm run build:userscript-compiler
+        run: npm install --no-save typescript@7.0.2 typescript-browser@npm:typescript@6.0.3 && npm run build:userscript-compiler
 
       - name: Lint userscript platform
         run: npm install --no-save eslint@10.11.0 && npm run lint:userscripts

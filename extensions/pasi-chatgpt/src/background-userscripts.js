@@ -449,7 +449,13 @@
     const value = String(pattern || "");
     if (!value) return false;
     if (value === "<all_urls>") return /^https?:/i.test(url);
-    let escaped = value.replace(/[.+^$()|{}[\]\\]/g, "\\  async function sourceGet(id) {
+    let escaped = value.replace(/[.+^$()|{}[\]\\]/g, "\\$&");
+    escaped = escaped.replace(/\*/g, ".*");
+    if (escaped.startsWith("*://")) escaped = "https?://" + escaped.slice(5);
+    return new RegExp("^" + escaped + "$", "i").test(url);
+  }
+
+  async function sourceGet(id) {
     const all = await registry();
     const script = scriptById(all, String(id));
     return {

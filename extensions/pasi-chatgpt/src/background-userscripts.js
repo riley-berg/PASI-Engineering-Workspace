@@ -1048,13 +1048,9 @@
       void cloudPush().catch(() => undefined);
       return;
     }
-    if (alarm.name !== SYNC_ALARM) return;
-    void sync({mode: "preview", automatic: true, backoff_ms: 120000});
-  });
-  /*
-  
-    if (alarm.name !== SYNC_ALARM) return;
-    void sync({mode: "preview", automatic: true, backoff_ms: 120000});
+    if (alarm.name === SYNC_ALARM) {
+      void sync({mode: "preview", automatic: true, backoff_ms: 120000});
+    }
   });
 
   async function restoreRegistered() {

@@ -27,6 +27,8 @@ class TestValidationWorkflow(unittest.TestCase):
             '"information": 0',
             "ALL AUTHORITATIVE VALIDATION PASSED: 0 errors, 0 warnings, 0 failed tests",
             "git ls-files -z",
+            "markdownlint-cli2@0.23.2",
+            "MARKDOWN_FILES",
         ):
             self.assertIn(required, script)
 
@@ -36,6 +38,13 @@ class TestValidationWorkflow(unittest.TestCase):
         self.assertIn("bash scripts/test_full_repo.sh", workflow)
         self.assertNotIn("self-hosted", workflow)
         self.assertNotIn("check_fast.sh", workflow)
+
+    def test_markdown_gate_uses_repo_baseline_without_disabling_structural_rules(self) -> None:
+        config = (ROOT / ".markdownlint.json").read_text(encoding="utf-8")
+        self.assertIn('"default": true', config)
+        self.assertIn('"MD013": false', config)
+        self.assertNotIn('"MD022": false', config)
+        self.assertNotIn('"MD032": false', config)
 
 
 if __name__ == "__main__":

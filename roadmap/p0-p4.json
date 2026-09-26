@@ -14,8 +14,8 @@
           "requirements": [
             "Prove one real task travels from an authenticated ChatGPT response through contract parsing, patch application, canonical validation, and a clean committed worktree.",
             "Produce the required durable evidence artifact.",
-            "Create a fresh chat after prior chat usage.",
-            "Run the accepted operation with Thinking enabled.",
+            "Reuse the durable automation chat; create a fresh chat only when ChatGPT explicitly reports a usage or context limit.",
+            "Run the accepted operation with Thinking enabled; verify the desired Thinking state before any usage-gated fresh-chat recovery.",
             "Stop the active response on connection loss, preserve a durable checkpoint, and resume the same operation once after reconnect."
           ]
         },

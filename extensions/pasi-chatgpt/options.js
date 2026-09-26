@@ -11,7 +11,7 @@
     sync: "pasi.userscript.sync",
   };
 
-  const state = {scripts: [], query: "", group: ""};
+  const state = {scripts: [], query: "", group: "", conflict: null};
   const $ = (id) => document.getElementById(id);
 
   function send(type, payload = {}) {
@@ -28,6 +28,61 @@
   function setStatus(message, error = false) {
     $("status").textContent = message;
     $("status").style.opacity = error ? "1" : ".8";
+  }
+
+
+  function showConflict(result) {
+    state.conflict = result;
+    const root = $("conflict");
+    root.hidden = false;
+    root.replaceChildren();
+    const heading = document.createElement("div");
+    heading.innerHTML = "<strong>Sync conflict</strong><div class=\"meta\">Choose local or cloud per changed script, then resolve.</div>";
+    root.append(heading);
+    const ids = [...new Set([...(result.diff?.added || []), ...(result.diff?.changed || []), ...(result.diff?.removed || [])])];
+    for (const id of ids) {
+      const local = (result.local?.scripts || []).find((item) => item.id === id);
+      const remote = (result.remote?.scripts || []).find((item) => item.id === id);
+      const item = document.createElement("div");
+      item.className = "conflict-item";
+      item.dataset.id = id;
+      const title = document.createElement("div");
+      title.textContent = remote?.name || local?.name || id;
+      item.append(title);
+      const select = document.createElement("select");
+      select.innerHTML = '<option value="local">Keep local</option><option value="cloud">Use cloud</option>';
+      item.append(select);
+      if (local?.source || remote?.source) {
+        const diff = document.createElement("pre");
+        diff.className = "diff";
+        const rows = globalThis.PASIUserScriptDiff.compare(local?.source || "", remote?.source || "");
+        for (const row of rows) {
+          const line = document.createElement("div");
+          line.className = row.type === "add" ? "diff-add" : row.type === "remove" ? "diff-remove" : "";
+          line.textContent = (row.type === "add" ? "+ " : row.type === "remove" ? "- " : "  ") + (row.type === "remove" ? row.left : row.right);
+          diff.append(line);
+        }
+        item.append(diff);
+      }
+      root.append(item);
+    }
+    const actions = document.createElement("div");
+    actions.className = "conflict-actions";
+    const resolve = document.createElement("button");
+    resolve.textContent = "Resolve sync";
+    resolve.onclick = async () => {
+      const decisions = {};
+      root.querySelectorAll(".conflict-item").forEach((item) => {
+        decisions[item.dataset.id] = item.querySelector("select").value;
+      });
+      await send("pasi.userscript.sync.resolve", {decisions});
+      root.hidden = true;
+      state.conflict = null;
+      setStatus("Sync conflict resolved.");
+      await refresh();
+    };
+    actions.append(resolve);
+    root.append(actions);
   }
 
   function renderGroups() {
@@ -163,10 +218,11 @@
   $("sync").onclick = async () => {
     let result = await send(TYPES.sync);
     if (result.status === "conflict") {
-      const mode = prompt("Sync conflict: replace local with synced copy or keep local?", "keep-local");
-      if (mode === "replace" || mode === "keep-local") result = await send(TYPES.sync, {mode});
+      showConflict(result);
+      setStatus("Review the visual diff before resolving.");
+    } else {
+      setStatus(`Sync complete: ${result.status}.`);
     }
-    setStatus(`Sync complete: ${result.status}.`);
     await refresh();
   };
 

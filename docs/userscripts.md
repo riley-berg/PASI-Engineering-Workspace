@@ -54,7 +54,7 @@ Google Drive and Dropbox are intentionally provider slots rather than partial OA
 
 The dashboard has a source editor with TypeScript mode, PASI/GM declarations in pasi-userscript.d.ts, and a modern ECMAScript ESLint environment.
 
-The editor uses the full TypeScript compiler when src/vendor/typescript.js has been produced by the build tool. The repository pins TypeScript 7.0.2 and provides npm run build:userscript-compiler.
+The editor uses the full JavaScript TypeScript compiler API when src/vendor/typescript.js has been produced by the build tool. The browser bundle uses TypeScript 6.0.3 because TypeScript 7's npm package is the native Go compiler and no longer ships the JavaScript Compiler API.
 
 When that artifact is absent, PASI falls back to a small built-in TypeScript syntax lowering path so source-only development remains usable. The full compiler artifact is the intended distribution path.
 

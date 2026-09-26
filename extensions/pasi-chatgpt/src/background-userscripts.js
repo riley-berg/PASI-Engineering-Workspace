@@ -246,6 +246,10 @@
       author_source: authored,
       source_language: message.typeScript === true ? "typescript" : "javascript",
     }, all[parsed.id]);
+    if (script.enabled && !(await hostsGranted(script))) {
+      script.enabled = false;
+      script.pending_host_access = true;
+    }
     await configureWorld();
     await saveRegistry({...all, [script.id]: script});
     try {
@@ -294,7 +298,11 @@
     ensureAvailable();
     const all = await registry();
     const script = scriptById(all, id);
+    if (enabled && !(await hostsGranted(script))) {
+      throw new Error("Grant the userscript host permissions before enabling it");
+    }
     script.enabled = Boolean(enabled);
+    script.pending_host_access = !enabled ? script.pending_host_access : false;
     const stamped = stamp(script, script);
     all[id] = stamped;
     await unregisterNative(id);
@@ -859,7 +867,7 @@
         try {
           const response = await fetch(url, {
             method: String(args.method || "GET").toUpperCase(),
-            headers: args.headers || {},
+            headers: c.normalizeHeaders(args.headers || {}),
             body: args.data || undefined,
             credentials: "omit",
             redirect: "error",

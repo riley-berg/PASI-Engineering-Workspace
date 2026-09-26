@@ -8,12 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-PROGRESSION_SCHEMA_VERSION = 1
+PROGRESSION_SCHEMA_VERSION = 2
+SUPPORTED_PROGRESSION_SCHEMA_VERSIONS = frozenset({1, 2})
 TASK_STATUSES = frozenset({"planned", "in_progress", "active", "completed"})
 PROGRESSION_STATUSES = frozenset({"active", "interrupted", "completed"})
 MAX_TASK_ID_CHARS = 128
 MAX_PROMPT_CHARS = 12_000
 MAX_EVIDENCE_CHARS = 4_000
+MAX_PROMPT_HANDOFF_CHARS = 2_000
 
 
 class TaskProgressionError(ValueError):
@@ -71,6 +73,7 @@ class ProgressionState:
     advance_count: int = 0
     checkpoint: str = ""
     completion_digest: str = ""
+    last_completion_evidence: str = ""
     completed_task_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -92,6 +95,8 @@ class ProgressionState:
             raise TaskProgressionError("checkpoint is too long")
         if self.completion_digest and len(self.completion_digest) != 64:
             raise TaskProgressionError("completion_digest must be SHA-256")
+        if len(self.last_completion_evidence) > MAX_EVIDENCE_CHARS:
+            raise TaskProgressionError("last_completion_evidence is too long")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -138,7 +143,7 @@ def _generic_completion_contract(task_id: str) -> str:
     )
 
 
-def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
+def _m0_completion_contract() -> str:
     return (
         "\n\nCompletion response contract:\n"
         "Your final response must include these exact machine-readable markers:\n\n"
@@ -154,22 +159,33 @@ def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
         "@@ -0,0 +1 @@\n"
         "+PASI M0 LIVE PROOF\n"
         "PASI_PATCH_END\n\n"
-        f"PASI_M0_NEXT_TASK_ID: {next_task_id}\n"
-        "PASI_M0_NEXT_PROMPT_START\n"
-        f"{next_prompt}\n"
-        "PASI_M0_NEXT_PROMPT_END"
+        "Do not invent or precompute the next task prompt. The PASI harness derives the next task and next prompt only after verified completion, including the verified completion evidence."
     )
 
 
-def _prompt_for_active_task(catalog: "RoadmapTaskCatalog", task: RoadmapTask) -> str:
+def _prompt_for_active_task(
+    catalog: "RoadmapTaskCatalog",
+    task: RoadmapTask,
+    *,
+    previous_task_id: str = "",
+    previous_completion_evidence: str = "",
+) -> str:
     prompt = _prompt_for(task)
+    if previous_task_id:
+        handoff = previous_completion_evidence.strip()[-MAX_PROMPT_HANDOFF_CHARS:]
+        prompt += (
+            "\n\nVerified progress handoff:\n"
+            f"- Previous verified task: {previous_task_id}\n"
+            "- The previous task passed the canonical acceptance gate.\n"
+            "- Do not redo completed work unless needed to validate dependencies.\n"
+        )
+        if handoff:
+            prompt += "- Previous verified evidence/checkpoint:\n" + handoff + "\n"
+        prompt += (
+            "- Continue from the verified repository state and make this prompt-specific task change.\n"
+        )
     if task.task_id == "P0.1":
-        next_task = catalog.next_task(task.task_id)
-        if next_task is not None:
-            prompt += _m0_completion_contract(
-                next_task_id=next_task.task_id,
-                next_prompt=_prompt_for_active_task(catalog, next_task),
-            )
+        prompt += _m0_completion_contract()
     else:
         prompt += _generic_completion_contract(task.task_id)
     return prompt
@@ -335,7 +351,8 @@ class TaskPromptProgression:
 
     @classmethod
     def from_dict(cls, *, catalog: RoadmapTaskCatalog, value: Mapping[str, Any]) -> "TaskPromptProgression":
-        if value.get("schema_version") != PROGRESSION_SCHEMA_VERSION:
+        schema_version = int(value.get("schema_version", 0))
+        if schema_version not in SUPPORTED_PROGRESSION_SCHEMA_VERSIONS:
             raise TaskProgressionError("unsupported progression schema version")
         state = ProgressionState(
             current_task_id=str(value.get("current_task_id", "")),
@@ -345,6 +362,7 @@ class TaskPromptProgression:
             advance_count=int(value.get("advance_count", 0)),
             checkpoint=str(value.get("checkpoint", "")),
             completion_digest=str(value.get("completion_digest", "")),
+            last_completion_evidence=str(value.get("last_completion_evidence", "")),
             completed_task_ids=tuple(str(item) for item in value.get("completed_task_ids", [])),
         )
         return cls(catalog=catalog, state=state)

@@ -16,6 +16,7 @@ from pasi.core.m0_acceptance import (
     apply_validate_commit,
     parse_response_file,
 )
+from scripts.run_m0_live_acceptance import persist_evidence
 
 
 class TestM0Acceptance(unittest.TestCase):
@@ -88,6 +89,18 @@ class TestM0Acceptance(unittest.TestCase):
         roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
         self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
         self.assertIn("generated exactly once after verified completion", roadmap)
+
+    def test_live_acceptance_evidence_survives_temp_worktree_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "temporary" / "m0-live.json"
+            destination = root / "durable" / "m0-live.json"
+            source.parent.mkdir(parents=True)
+            source.write_text("{\"status\": \"PASS\"}\n", encoding="utf-8")
+            persisted = persist_evidence(source, destination)
+            source.unlink()
+            self.assertEqual(persisted, destination)
+            self.assertEqual(destination.read_text(encoding="utf-8"), "{\"status\": \"PASS\"}\n")
 
     def test_live_acceptance_script_imports_from_repo_root(self) -> None:
         repo = Path(__file__).resolve().parents[1]

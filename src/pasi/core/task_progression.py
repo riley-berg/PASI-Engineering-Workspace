@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 
 PROGRESSION_SCHEMA_VERSION = 1
-TASK_STATUSES = frozenset({"planned", "active", "completed"})
+TASK_STATUSES = frozenset({"planned", "in_progress", "active", "completed"})
 PROGRESSION_STATUSES = frozenset({"active", "interrupted", "completed"})
 MAX_TASK_ID_CHARS = 128
 MAX_PROMPT_CHARS = 12_000

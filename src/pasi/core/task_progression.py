@@ -93,6 +93,9 @@ class ProgressionState:
         if self.completion_digest and len(self.completion_digest) != 64:
             raise TaskProgressionError("completion_digest must be SHA-256")
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 @dataclass(frozen=True)
 class CompletionReceipt:
@@ -272,8 +275,7 @@ class TaskPromptProgression:
         return self, receipt
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self.state)
-        return {"schema_version": PROGRESSION_SCHEMA_VERSION, **asdict(self.state)}
+        return {"schema_version": PROGRESSION_SCHEMA_VERSION, **self.state.to_dict()}
 
     @classmethod
     def from_dict(cls, *, catalog: RoadmapTaskCatalog, value: Mapping[str, Any]) -> "TaskPromptProgression":

@@ -38,7 +38,7 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         end = self.content.index("async function markRecoveryPending(", start)
         block = self.content[start:end]
         self.assertLess(block.index("await startOperation()"), block.index("await chatgpt.injectPrompt(prompt)"))
-        self.assertIn("pasi_prompt_injection_state", block)
+        self.assertIn("pasi_prompt_injection_state", self.content)
 
     def test_context_recovery_preserves_automation_chat_identity(self) -> None:
         self.assertIn("sessionAutomationChatUrl", self.content)

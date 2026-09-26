@@ -311,6 +311,93 @@
     return {ok: true, script: await clientScript(next)};
   }
 
+  async function networkAdd(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    requireGrant(script, "webRequest", "network.add");
+    const rule = JSON.parse(JSON.stringify(message.rule || {}));
+    const rules = Array.isArray(script.network_rules) ? script.network_rules : [];
+    if (!String(rule.id || "").trim()) throw new TypeError("Network rule id is required");
+    if (rules.some((item) => String(item.id || "") === String(rule.id))) {
+      throw new Error("Network rule already exists: " + rule.id);
+    }
+    rules.push(rule);
+    script.network_rules = rules.slice(0, dnr.MAX_RULES_PER_SCRIPT);
+    script.revision = Number(script.revision || 0) + 1;
+    script.updated_at = new Date().toISOString();
+    await saveRegistry(all);
+    await applyNetworkRulesForScript(script);
+    return {ok: true, rules: script.network_rules};
+  }
+
+  async function networkRemove(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    requireGrant(script, "webRequest", "network.remove");
+    const ruleId = String(message.rule_id || "");
+    script.network_rules = (script.network_rules || []).filter((rule) => String(rule.id || "") !== ruleId);
+    script.revision = Number(script.revision || 0) + 1;
+    script.updated_at = new Date().toISOString();
+    await saveRegistry(all);
+    await applyNetworkRulesForScript(script);
+    return {ok: true, rules: script.network_rules};
+  }
+
+  async function networkList(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    requireGrant(script, "webRequest", "network.list");
+    return {ok: true, rules: Array.isArray(script.network_rules) ? script.network_rules : []};
+  }
+
+  async function setHosts(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    const requested = Array.isArray(message.host_allowlist) ? [...new Set(message.host_allowlist.map(String))] : [];
+    const valid = new Set(script.matches);
+    if (requested.some((pattern) => !valid.has(pattern))) {
+      throw new Error("Host allowlist contains a non-matching pattern");
+    }
+    script.host_allowlist = requested;
+    script.revision = Number(script.revision || 0) + 1;
+    script.updated_at = new Date().toISOString();
+    await saveRegistry(all);
+    await registerNative(script);
+    return {ok: true, script: await clientScript(script)};
+  }
+
+  function urlMatchesPattern(url, pattern) {
+    const value = String(pattern || "");
+    if (!value) return false;
+    if (value === "<all_urls>") return /^https?:/i.test(url);
+    let escaped = value.replace(/[.+^$()|{}[\]\\]/g, "\\  async function info(id) {");
+    escaped = escaped.replace(/\*/g, ".*");
+    if (escaped.startsWith("*://")) escaped = "https?://" + escaped.slice(5);
+    return new RegExp("^" + escaped + "$", "i").test(url);
+  }
+
+  async function activeTab() {
+    const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+    const tab = tabs[0];
+    const url = String(tab?.url || "");
+    const all = await registry();
+    const scripts = [];
+    for (const script of Object.values(all)) {
+      const excluded = (script.excludes || []).some((pattern) => urlMatchesPattern(url, pattern));
+      const matched = !excluded && (script.matches || []).some((pattern) => urlMatchesPattern(url, pattern));
+      if (!matched) continue;
+      scripts.push({
+        id: script.id,
+        name: script.name,
+        enabled: script.enabled,
+        host_granted: await hostsGranted(script),
+        host_allowlist: Array.isArray(script.host_allowlist) ? script.host_allowlist : script.matches,
+        matches: script.matches,
+      });
+    }
+    return {ok: true, tab_id: tab?.id, url, scripts};
+  }
+
   async function info(id) {
     const all = await registry();
     return {ok: true, script: await clientScript(scriptById(all, String(id)))};
@@ -443,7 +530,7 @@
     if (!["replace", "keep-local"].includes(message.mode)) {
       return {ok: true, status: "conflict", diff};
     }
-    await restore({backup: remote, mode: message.mode});
+    await installQueue.run(() => restoreImpl({backup: remote, mode: message.mode}));
     const current = await backupNow();
     try {
       await syncSnapshot(current);
@@ -656,6 +743,11 @@
       case c.MESSAGE_TYPES.USERSCRIPT_BACKUP: return {ok: true, backup: await backupNow()};
       case c.MESSAGE_TYPES.USERSCRIPT_RESTORE: return installQueue.run(() => restoreImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC: return sync(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_NETWORK_ADD: return installQueue.run(() => networkAdd(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_NETWORK_REMOVE: return installQueue.run(() => networkRemove(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_NETWORK_LIST: return networkList(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_HOSTS: return installQueue.run(() => setHosts(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB: return activeTab();
       default: throw new Error("Unknown PASI userscript manager method");
     }
   }

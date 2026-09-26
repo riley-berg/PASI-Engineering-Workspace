@@ -54,7 +54,7 @@ Google Drive and Dropbox are intentionally provider slots rather than partial OA
 
 The dashboard has a source editor with TypeScript mode, PASI/GM declarations in pasi-userscript.d.ts, and a modern ECMAScript ESLint environment.
 
-The editor uses the full JavaScript TypeScript compiler API when src/vendor/typescript.js has been produced by the build tool. The browser bundle uses TypeScript 6.0.3 because TypeScript 7's npm package is the native Go compiler and no longer ships the JavaScript Compiler API.
+The editor uses the full TypeScript compiler API when src/vendor/typescript.js has been produced by the build tool. The repository pins the current TypeScript 7.0.2 package and builds its browser compiler artifact during CI.
 
 When that artifact is absent, PASI falls back to a small built-in TypeScript syntax lowering path so source-only development remains usable. The full compiler artifact is the intended distribution path.
 
@@ -81,3 +81,5 @@ Restore registers enabled scripts in batches. The service worker does not mainta
 PASI does not attempt to force JavaScript garbage collection because extension APIs do not provide a supported portable GC control. Memory reduction is therefore handled through smaller runtime state, teardown of broker registrations, bounded queues, and prompt cleanup of disconnected contexts.
 
 The platform is intentionally native-Chromium first. Firefox/Safari portability is a separate transport/execution-world project.
+
+Validation includes authoritative Python/JS parsing, Pyright, Markdown lint, userscript ESLint, and the generated TypeScript compiler bundle.

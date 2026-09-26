@@ -194,9 +194,13 @@
   async function registerNativeBatch(scripts) {
     ensureAvailable();
     const enabled = scripts.filter((script) => script.enabled);
-    if (!enabled.length) return;
-    await chrome.userScripts.register(enabled.map(userScriptDefinition));
-    for (const script of enabled) await applyNetworkRulesForScript(script);
+    if (enabled.length) {
+      await chrome.userScripts.register(enabled.map(userScriptDefinition));
+      for (const script of enabled) await applyNetworkRulesForScript(script);
+    }
+    for (const script of scripts.filter((item) => !item.enabled)) {
+      await removeNetworkRulesForScript(script);
+    }
   }
 
   async function configureWorld() {
@@ -255,6 +259,7 @@
     try {
       await registerNative(script);
     } catch (error) {
+      await unregisterNative(script.id).catch(() => undefined);
       const next = await registry();
       if (all[script.id]) next[script.id] = all[script.id];
       else delete next[script.id];
@@ -270,6 +275,7 @@
     const all = await registry();
     if (!all[id]) return {ok: true, removed: false};
     await unregisterNative(id);
+    await removeNetworkRulesForScript(all[id]).catch(() => undefined);
     delete all[id];
     await saveRegistry(all);
     const values = await chrome.storage.local.get(null);
@@ -656,6 +662,7 @@
     const merged = backup.merge(localScripts, incoming, mode);
     if (mode === "replace") {
       await chrome.userScripts.unregister({ids: localScripts.map((item) => item.id)}).catch(() => undefined);
+      for (const script of localScripts) await removeNetworkRulesForScript(script).catch(() => undefined);
       await removeValuesForScripts(localScripts.map((item) => item.id));
     }
     const next = Object.fromEntries(merged.map((item) => [item.id, item]));
@@ -701,12 +708,20 @@
   async function syncSnapshot(snapshot) {
     const chunks = backup.encodeSync(snapshot);
     const existing = await chrome.storage.sync.get(null);
-    const oldKeys = Object.keys(existing).filter((key) => key.startsWith(SYNC_PREFIX));
-    if (oldKeys.length) await chrome.storage.sync.remove(oldKeys);
     const record = {version: backup.VERSION, count: chunks.length};
-    const writes = {[SYNC_PREFIX + "index"]: record};
-    chunks.forEach((chunk, index) => { writes[SYNC_PREFIX + index] = chunk; });
-    await chrome.storage.sync.set(writes);
+    const writes = {};
+    const desired = new Set([SYNC_PREFIX + "index"]);
+    if (JSON.stringify(existing[SYNC_PREFIX + "index"]) !== JSON.stringify(record)) {
+      writes[SYNC_PREFIX + "index"] = record;
+    }
+    chunks.forEach((chunk, index) => {
+      const key = SYNC_PREFIX + index;
+      desired.add(key);
+      if (existing[key] !== chunk) writes[key] = chunk;
+    });
+    const oldKeys = Object.keys(existing).filter((key) => key.startsWith(SYNC_PREFIX) && !desired.has(key));
+    if (oldKeys.length) await chrome.storage.sync.remove(oldKeys);
+    if (Object.keys(writes).length) await chrome.storage.sync.set(writes);
     return chunks.length;
   }
 

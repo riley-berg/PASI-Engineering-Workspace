@@ -86,6 +86,7 @@ def test_all_userscript_javascript_parses():
         "background-userscripts.js",
         "api_v4.js",
         "background.js",
+        "options.js",
     ]:
         result = subprocess.run(
             ["node", "--check", str(EXT / "src" / name)],

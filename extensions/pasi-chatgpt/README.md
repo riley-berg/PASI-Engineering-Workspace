@@ -52,7 +52,6 @@ python scripts/run_m0_live_acceptance.py \
 
 The extension is deliberately conservative about ChatGPT UI details. It uses stable accessibility labels and the `data-message-author-role` attribute where available, and reports what it can observe instead of fabricating evidence.
 
-
 ## Automatic prompt progression
 
 After prior chat usage, a fresh ChatGPT conversation is detected by the extension. The bridge then provides the current durable roadmap prompt and the extension injects it exactly once for that prompt generation.

@@ -439,6 +439,13 @@
     }))};
   }
 
+  async function vcsFetch(message) {
+    const config = await vcs.readConfig();
+    if (!config) throw new Error("VCS configuration has not been set");
+    const remote = await vcs.pull({config});
+    return {ok: true, remote};
+  }
+
   async function vcsPull(message) {
     const all = await registry();
     const script = scriptById(all, String(message.id || ""));
@@ -947,6 +954,7 @@
       case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET: return sourceGet(String(message.id || ""));
       case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_SAVE: return sourceSave(message);
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG: return vcsConfig(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_VCS_FETCH: return vcsFetch(message);
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL: return installQueue.run(() => vcsPull(message));
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH: return installQueue.run(() => vcsPush(message));
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS: return syncStatus();

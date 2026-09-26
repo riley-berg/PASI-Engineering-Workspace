@@ -5,7 +5,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .task_progression import RoadmapTask, RoadmapTaskCatalog, TaskProgressionError
 
@@ -157,7 +157,7 @@ class GitHubIssueTaskCatalog(RoadmapTaskCatalog):
         self._sources = dict(sources)
 
     @classmethod
-    def from_issues(cls, issues: list[Mapping[str, Any]]) -> "GitHubIssueTaskCatalog":
+    def from_issues(cls, issues: Sequence[Mapping[str, Any]]) -> "GitHubIssueTaskCatalog":
         task_entries: list[tuple[int, int, int, RoadmapTask, IssueTaskSource]] = []
         backend_rank = 0
         frontend_rank = 1

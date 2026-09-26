@@ -12,7 +12,8 @@
     "scripting",
     "webRequest",
     "declarativeNetRequest",
-    "userScripts"
+    "userScripts",
+    "alarms"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",

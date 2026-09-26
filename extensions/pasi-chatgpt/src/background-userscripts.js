@@ -497,6 +497,32 @@
     return {ok: true, remote};
   }
 
+  async function syncResolve(message) {
+    const remote = await readSyncedSnapshot();
+    if (!remote) throw new Error("No synced conflict is available");
+    const local = await backupNow();
+    const decisions = message.decisions && typeof message.decisions === "object" ? message.decisions : {};
+    const byId = new Map(local.scripts.map((script) => [script.id, script]));
+    const remoteById = new Map(remote.scripts.map((script) => [script.id, script]));
+    for (const [id, choice] of Object.entries(decisions)) {
+      if (choice !== "cloud") continue;
+      if (remoteById.has(id)) byId.set(id, remoteById.get(id));
+      else byId.delete(id);
+    }
+    const values = {...local.values};
+    for (const [id, choice] of Object.entries(decisions)) {
+      if (choice !== "cloud") continue;
+      if (remote.values[id] !== undefined) values[id] = remote.values[id];
+      else delete values[id];
+    }
+    const merged = backup.buildSnapshot(Object.fromEntries([...byId.entries()].map(([id, script]) => [id, script])), values);
+    await installQueue.run(() => restoreImpl({backup: merged, mode: "replace"}));
+    const current = await backupNow();
+    await syncSnapshot(current);
+    await setSyncStatus({state: "ok", status: "resolved", decisions});
+    return {ok: true, status: "resolved", decisions};
+  }
+
   async function syncStatus() {
     const value = await chrome.storage.local.get(SYNC_STATUS_KEY);
     return {ok: true, status: value[SYNC_STATUS_KEY] || {state: "idle"}};
@@ -684,7 +710,7 @@
     }
     if (!["replace", "keep-local"].includes(message.mode)) {
       await setSyncStatus({state: "conflict", status: "conflict", diff});
-      return {ok: true, status: "conflict", diff};
+      return {ok: true, status: "conflict", diff, local, remote};
     }
     await installQueue.run(() => restoreImpl({backup: remote, mode: message.mode}));
     const current = await backupNow();
@@ -976,6 +1002,7 @@
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL: return installQueue.run(() => vcsPull(message));
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH: return installQueue.run(() => vcsPush(message));
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS: return syncStatus();
+      case c.MESSAGE_TYPES.USERSCRIPT_SYNC_RESOLVE: return syncResolve(message);
       default: throw new Error("Unknown PASI userscript manager method");
     }
   }

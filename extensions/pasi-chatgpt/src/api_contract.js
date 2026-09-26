@@ -46,6 +46,7 @@
     SCRIPT_UNREGISTER: "pasi.api.script.unregister",
     SCRIPT_EXECUTE: "pasi.api.script.execute",
     SCRIPT_LIST: "pasi.api.script.list",
+    USERSCRIPT_INSTALL: "pasi.userscript.install",
     USERSCRIPT_REGISTER: "pasi.userscript.register",
     USERSCRIPT_UNREGISTER: "pasi.userscript.unregister",
     USERSCRIPT_LIST: "pasi.userscript.list",

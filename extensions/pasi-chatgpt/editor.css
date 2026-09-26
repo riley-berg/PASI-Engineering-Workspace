@@ -1,0 +1,8 @@
+body{margin:0;padding:24px;font:13px system-ui,sans-serif;background:Canvas;color:CanvasText}
+header{display:flex;justify-content:space-between;gap:18px;align-items:start}.eyebrow{margin:0;letter-spacing:.15em;text-transform:uppercase;opacity:.55;font-size:10px}h1{margin:0}.muted{opacity:.65}.top-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button,input,select{font:inherit;padding:8px 10px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:7px;background:Canvas;color:CanvasText}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}.pane{border:1px solid color-mix(in srgb,CanvasText 15%,transparent);border-radius:10px;overflow:hidden}.pane h2{font-size:12px;margin:0;padding:9px 11px;background:color-mix(in srgb,CanvasText 6%,transparent)}
+textarea,#diff{display:block;width:100%;height:62vh;box-sizing:border-box;border:0;padding:12px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.5;background:Canvas;color:CanvasText;overflow:auto;white-space:pre-wrap}
+#diff{margin:0}.add{background:#dcfce7;color:#14532d}.remove{background:#fee2e2;color:#7f1d1d}.same{opacity:.78}
+.vcs{margin-top:18px;padding:14px;border:1px solid color-mix(in srgb,CanvasText 15%,transparent);border-radius:10px}.fields{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}.status{margin-top:10px;min-height:20px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.fields{grid-template-columns:1fr 1fr}}

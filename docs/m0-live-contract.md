@@ -21,3 +21,6 @@ The recovery state machine is implemented in `src/pasi/core/m0_runtime.py`. A co
 The live handoff must also establish that a new chat is created after the prior chat has been used and that Thinking is enabled for the accepted operation.
 
 The M0 harness owns patch application, canonical validation, commit creation, clean-worktree verification, and durable evidence creation. The model response must not claim those harness-side actions already occurred.
+The authenticated response may include `next_task_id` and `next_prompt` for transport compatibility, but those values are not authoritative. The durable task/prompt controller in `src/pasi/core/task_progression.py` derives the next task and prompt from `roadmap/p0-p4.json` and rejects a live response whose proposed next task or prompt differs from the roadmap.
+
+A connection loss must not advance the task. The controller resumes the exact persisted current prompt and task identity, then permits advancement only after verified completion.

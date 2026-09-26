@@ -33,6 +33,31 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("observationRunning = true", self.content)
         self.assertIn("observationRunning = false", self.content)
 
+    def test_operation_identity_exists_before_prompt_injection(self) -> None:
+        start = self.content.index("async function injectCurrentPrompt(")
+        end = self.content.index("async function markRecoveryPending(", start)
+        block = self.content[start:end]
+        self.assertLess(block.index("await startOperation()"), block.index("await chatgpt.injectPrompt(prompt)"))
+        self.assertIn("pasi_prompt_injection_state", block)
+
+    def test_prompt_delivery_is_verified_against_user_message(self) -> None:
+        self.assertIn("hasUserMessageText(prompt)", self.content)
+        self.assertIn('sessionInjection.status === "sending"', self.content)
+        self.assertIn('sessionInjection.status === "sent"', self.content)
+
+    def test_reconnect_only_marks_restored_after_generation_resumes(self) -> None:
+        start = self.content.index("async function handleOnline()")
+        end = self.content.index("function restoreContextRecoveryState()", start)
+        online = self.content[start:end]
+        self.assertNotIn("CONNECTION_RESTORED", online)
+        self.assertIn("RESUME_REQUEST", online)
+        self.assertIn("resumeRequestSent", online)
+        self.assertIn("resumed_after_reconnect: true", self.content)
+
+    def test_background_receives_real_prompt_delivery_ack(self) -> None:
+        self.assertIn("sendResponse", self.content)
+        self.assertIn("response?.ok === true", self.background)
+
     def test_no_synthetic_connection_recovery_prompt_exists(self) -> None:
         self.assertNotIn("PASI CONNECTION RECOVERY", self.content)
         self.assertNotIn("submitRecoveryPrompt", self.content)

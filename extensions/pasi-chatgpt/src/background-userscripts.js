@@ -171,7 +171,7 @@
     });
   }
 
-  async function register(message) {
+  async function registerImpl(message) {
     ensureAvailable();
     const parsed = sc.validateRegistration(message.source, {
       id: message.id,
@@ -197,7 +197,7 @@
     return {ok: true, script: await clientScript(script)};
   }
 
-  async function unregister(message) {
+  async function unregisterImpl(message) {
     ensureAvailable();
     const id = String(message.id || "");
     const all = await registry();
@@ -227,7 +227,7 @@
     };
   }
 
-  async function toggle(id, enabled) {
+  async function toggleImpl(id, enabled) {
     ensureAvailable();
     const all = await registry();
     const script = scriptById(all, id);
@@ -246,7 +246,7 @@
     return script;
   }
 
-  async function update(message) {
+  async function updateImpl(message) {
     ensureAvailable();
     const all = await registry();
     const current = scriptById(all, String(message.id || ""));
@@ -331,7 +331,7 @@
     if (keys.length) await chrome.storage.local.remove(keys);
   }
 
-  async function restore(message) {
+  async function restoreImpl(message) {
     ensureAvailable();
     const incoming = await normalizedBackupScripts(message.backup);
     const local = await registry();
@@ -614,15 +614,15 @@
 
   async function handle(message) {
     switch (message?.type) {
-      case c.MESSAGE_TYPES.USERSCRIPT_REGISTER: return register(message);
-      case c.MESSAGE_TYPES.USERSCRIPT_UNREGISTER: return unregister(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_REGISTER: return installQueue.run(() => registerImpl(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_UNREGISTER: return installQueue.run(() => unregisterImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_LIST: return list();
-      case c.MESSAGE_TYPES.USERSCRIPT_ENABLE: return toggle(String(message.id || ""), true);
-      case c.MESSAGE_TYPES.USERSCRIPT_DISABLE: return toggle(String(message.id || ""), false);
+      case c.MESSAGE_TYPES.USERSCRIPT_ENABLE: return installQueue.run(() => toggleImpl(String(message.id || ""), true));
+      case c.MESSAGE_TYPES.USERSCRIPT_DISABLE: return installQueue.run(() => toggleImpl(String(message.id || ""), false));
       case c.MESSAGE_TYPES.USERSCRIPT_INFO: return info(String(message.id || ""));
-      case c.MESSAGE_TYPES.USERSCRIPT_UPDATE: return update(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_UPDATE: return installQueue.run(() => updateImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_BACKUP: return {ok: true, backup: await backupNow()};
-      case c.MESSAGE_TYPES.USERSCRIPT_RESTORE: return restore(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_RESTORE: return installQueue.run(() => restoreImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_SYNC: return sync(message);
       default: throw new Error("Unknown PASI userscript manager method");
     }
@@ -633,6 +633,35 @@
     await configureWorld();
     const all = await registry();
     await registerNativeBatch(Object.values(all));
+    await recoverOpenTabs(Object.values(all));
+  }
+
+  function urlLooksLikeMatch(url, script) {
+    const excluded = (script.excludes || []).some((pattern) => urlMatchesPattern(url, pattern));
+    return !excluded && (script.matches || []).some((pattern) => urlMatchesPattern(url, pattern));
+  }
+
+  async function recoverOpenTabs(scripts) {
+    if (!chrome.userScripts?.execute) return;
+    const tabs = await chrome.tabs.query({});
+    for (const tab of tabs) {
+      const url = String(tab.url || "");
+      if (!/^https?:/.test(url) || typeof tab.id !== "number") continue;
+      for (const script of scripts) {
+        if (!script.enabled || !urlLooksLikeMatch(url, script)) continue;
+        if (Array.isArray(script.host_allowlist) && !script.host_allowlist.some((pattern) => urlMatchesPattern(url, pattern))) continue;
+        try {
+          await chrome.userScripts.execute({
+            target: {tabId: tab.id},
+            injectImmediately: true,
+            world: script.grants.includes("mainWorld") ? "MAIN" : "USER_SCRIPT",
+            js: [{code: runtime.build(script)}, {code: runtime.wrapSource(script.source)}],
+          });
+        } catch (error) {
+          console.warn("PASI userscript recovery failed:", script.id, tab.id, error);
+        }
+      }
+    }
   }
 
   globalThis.PASIUserScriptManager = Object.freeze({

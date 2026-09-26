@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from .m0_runtime import M0RuntimeEvidence
+
 
 CHAT_URL_PATTERN = re.compile(r"^https://chatgpt\.com/c/[A-Za-z0-9_-]+$")
 ALLOWED_PROVIDERS = frozenset({"chatgpt_browser"})
@@ -29,10 +31,11 @@ class M0Response:
     patch: str
     next_task_id: str
     next_prompt: str
+    runtime_evidence: M0RuntimeEvidence
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "M0Response":
-        required = ("provider", "authenticated", "chat_url", "task_id", "status", "summary", "evidence", "patch")
+        required = ("provider", "authenticated", "chat_url", "task_id", "status", "summary", "evidence", "patch", "runtime_evidence")
         missing = [key for key in required if key not in payload]
         if missing:
             raise M0AcceptanceError(f"missing response fields: {', '.join(missing)}")
@@ -62,6 +65,7 @@ class M0Response:
 
         next_task_id = payload.get("next_task_id")
         next_prompt = payload.get("next_prompt")
+        runtime_evidence = M0RuntimeEvidence.from_mapping(payload["runtime_evidence"])
         if not isinstance(next_task_id, str) or not next_task_id.strip():
             raise M0AcceptanceError("next_task_id is required after verified completion")
         if not isinstance(next_prompt, str) or not next_prompt.strip():
@@ -82,6 +86,7 @@ class M0Response:
             patch=patch,
             next_task_id=next_task_id.strip(),
             next_prompt=next_prompt.strip(),
+            runtime_evidence=runtime_evidence,
         )
 
 
@@ -243,6 +248,7 @@ def apply_validate_commit(
                 "branch": branch_name,
                 "proof_file": "acceptance/M0-LIVE-PROOF.txt",
                 "prompt_advance_rule": "advance only after verified completion",
+                "runtime_evidence": response.runtime_evidence.to_dict(),
                 "next_task_id": response.next_task_id,
                 "next_prompt": response.next_prompt,
                 "next_prompt_digest": hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest(),

@@ -22,6 +22,8 @@
   let contextAlive = true;
   let disposed = false;
 
+  connection.postMessage({type: "handshake", script_id: META.id, auth: AUTH});
+
   connection.onMessage.addListener((message) => {
     if (message?.type === "value-change") {
       const callbacks = listeners.get(message.listener_id);

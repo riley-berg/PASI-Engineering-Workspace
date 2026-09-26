@@ -132,7 +132,20 @@
       card.querySelector(".meta").textContent = `${script.id} · ${script.version} · ${script.group || "ungrouped"}`;
       card.querySelectorAll(".tag").forEach((node, i) => node.textContent = script.tags?.[i] || "");
       card.querySelector(".hosts").textContent = (script.matches || []).join(", ");
-      if (!script.hosts_granted) {
+      if (script.requires_unsafe_confirmation && !script.enabled) {
+      const warning = document.createElement("div");
+      warning.className = "warning";
+      warning.textContent = "Unsafe MAIN-world access is pending explicit confirmation.";
+      const confirm = document.createElement("button");
+      confirm.textContent = "Enable unsafe mode";
+      confirm.onclick = async () => {
+        await send(script.enabled ? "pasi.userscript.enable" : "pasi.userscript.enable", {id: script.id, confirmUnsafeMainWorld: true});
+        await refresh();
+      };
+      warning.append(" ", confirm);
+      card.append(warning);
+    }
+    if (!script.hosts_granted) {
         const warning = document.createElement("div");
         warning.className = "warning";
         warning.textContent = "Host access has not been granted for every match pattern.";
@@ -243,7 +256,17 @@
     const url = String($("install-url").value || "").trim();
     if (!url) return;
     try {
-      const result = await send("pasi.userscript.install", {url});
+      let result;
+      try {
+        result = await send("pasi.userscript.install", {url, confirmUnsafeMainWorld: false});
+      } catch (error) {
+        const message = String(error.message || error);
+        if (/MAIN\/unsafeWindow/.test(message) && confirm("The script requests MAIN-world/unsafeWindow access. Enable it anyway?")) {
+          result = await send("pasi.userscript.install", {url, confirmUnsafeMainWorld: true});
+        } else {
+          throw error;
+        }
+      }
       setStatus(`Installed ${result.script?.name || "userscript"}.`);
       $("install-url").value = "";
       await refresh();

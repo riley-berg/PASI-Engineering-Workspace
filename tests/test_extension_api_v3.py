@@ -18,6 +18,7 @@ def test_api_v3_exposes_requested_improvements():
         "PASI.http.fetch",
         "streamResponse",
         "modifyHeaders",
+        "include_headers",
         "menu_controls",
         "element_present_run_at",
         "structuredTypes",

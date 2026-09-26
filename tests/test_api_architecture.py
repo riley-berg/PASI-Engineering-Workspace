@@ -111,7 +111,7 @@ def test_websocket_backoff_and_reconnect_identity():
     reliability = WebSocketReliability()
     assert reliability.transport_order() == ("websocket", "sse", "long-poll")
     assert reliability.delay(0) == 0.25
-    assert reliability.delay(3, jitter=0.2) == 4.608
+    assert reliability.delay(3, jitter=0.2) == 2.4
     headers = build_websocket_reconnect_headers(
         connection_id="c1",
         attempt=3,

@@ -30,6 +30,19 @@ class TestM0Acceptance(unittest.TestCase):
             "summary": "Completed the task and produced direct evidence.",
             "evidence": "canonical validation passed",
             "patch": "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt",
+            "runtime_evidence": {
+                "fresh_chat_created_after_usage": True,
+                "thinking_enabled": True,
+                "connection_recovery": {
+                    "connection_loss_detected": True,
+                    "response_stopped_on_loss": True,
+                    "checkpoint_preserved": True,
+                    "resumed_after_reconnect": True,
+                    "same_operation_resumed": True,
+                    "operation_id": "op-1",
+                    "resume_phase": "contract_parsing",
+                },
+            },
             "next_task_id": "P0.2",
             "next_prompt": "Now complete P0.2 using the verified P0.1 result.",
         }
@@ -49,9 +62,16 @@ class TestM0Acceptance(unittest.TestCase):
             {"next_task_id": None},
             {"next_prompt": None},
             {"next_task_id": "P0.1"},
+            {"runtime_evidence": None},
         ):
             with self.assertRaises(M0AcceptanceError):
                 self.response(**overrides)
+
+    def test_live_contract_requires_fresh_chat_thinking_and_connection_recovery(self) -> None:
+        value = self.response()
+        self.assertTrue(value.runtime_evidence.fresh_chat_created_after_usage)
+        self.assertTrue(value.runtime_evidence.thinking_enabled)
+        self.assertTrue(value.runtime_evidence.connection_recovery.resumed_after_reconnect)
 
     def test_prompt_does_not_change_before_completion(self) -> None:
         state = PromptProgression(task_id="P0.1", prompt="Complete P0.1.")
@@ -143,6 +163,19 @@ class TestM0Acceptance(unittest.TestCase):
             "summary": "done",
             "evidence": "evidence",
             "patch": "diff --git a/a b/a",
+            "runtime_evidence": {
+                "fresh_chat_created_after_usage": True,
+                "thinking_enabled": True,
+                "connection_recovery": {
+                    "connection_loss_detected": True,
+                    "response_stopped_on_loss": True,
+                    "checkpoint_preserved": True,
+                    "resumed_after_reconnect": True,
+                    "same_operation_resumed": True,
+                    "operation_id": "op-1",
+                    "resume_phase": "contract_parsing",
+                },
+            },
             "next_task_id": "P0.2",
             "next_prompt": "Complete P0.2 using the verified P0.1 evidence.",
         }

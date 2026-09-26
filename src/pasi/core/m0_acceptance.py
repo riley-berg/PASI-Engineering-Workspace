@@ -27,8 +27,8 @@ class M0Response:
     summary: str
     evidence: str
     patch: str
-    next_task_id: str | None
-    next_prompt: str | None
+    next_task_id: str
+    next_prompt: str
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "M0Response":
@@ -80,8 +80,8 @@ class M0Response:
             summary=summary.strip(),
             evidence=evidence.strip(),
             patch=patch,
-            next_task_id=next_task_id.strip() if isinstance(next_task_id, str) else None,
-            next_prompt=next_prompt.strip() if isinstance(next_prompt, str) else None,
+            next_task_id=next_task_id.strip(),
+            next_prompt=next_prompt.strip(),
         )
 
 

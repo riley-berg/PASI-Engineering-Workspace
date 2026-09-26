@@ -2,7 +2,7 @@
   "use strict";
 
   const VERSION = 1;
-  const SYNC_CHUNK_CHARS = 7000;
+  const SYNC_CHUNK_CHARS = 6000;
   const SYNC_MAX_CHARS = 90000;
 
   function clone(value) {
@@ -64,8 +64,23 @@
     return [...incoming.values()].map(clone);
   }
 
+  function toBase64(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+    }
+    return btoa(binary);
+  }
+
+  function fromBase64(value) {
+    const binary = atob(value);
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  }
+
   function encodeSync(snapshot) {
-    const encoded = JSON.stringify(snapshot);
+    const encoded = toBase64(JSON.stringify(snapshot));
     if (encoded.length > SYNC_MAX_CHARS) {
       throw new RangeError("Backup is too large for Chrome sync storage");
     }
@@ -79,7 +94,7 @@
   function decodeSync(chunks) {
     const encoded = (chunks || []).join("");
     if (!encoded) throw new TypeError("No synced PASI userscript snapshot is available");
-    return validateSnapshot(JSON.parse(encoded));
+    return validateSnapshot(JSON.parse(fromBase64(encoded)));
   }
 
   globalThis.PASIUserScriptBackup = Object.freeze({

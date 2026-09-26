@@ -200,12 +200,16 @@ class GitHubIssueTaskCatalog(RoadmapTaskCatalog):
             raise GitHubIssueTaskError(f"unknown GitHub task: {task_id}") from exc
 
 
-def load_task_catalog(fallback_roadmap: Any) -> RoadmapTaskCatalog:
-    """Load the live GitHub issue plan, falling back to the repository roadmap when offline."""
+def load_task_catalog(
+    fallback_roadmap: Any = None,
+    *,
+    allow_fallback: bool = False,
+) -> RoadmapTaskCatalog:
+    """Load the authoritative GitHub issue plan, failing closed unless fallback is explicit."""
     try:
         return GitHubIssueTaskCatalog.from_github()
     except GitHubIssueTaskError:
-        if fallback_roadmap is None:
+        if not allow_fallback or fallback_roadmap is None:
             raise
         return RoadmapTaskCatalog.from_roadmap_file(fallback_roadmap)
 

@@ -119,3 +119,26 @@ def test_roadmap_task_ids_are_unique_and_nonempty() -> None:
     ids = [task.task_id for task in tasks]
     assert ids == ["P0.1", "P0.2"]
     assert len(ids) == len(set(ids))
+
+
+def test_p01_prompt_contains_exact_machine_readable_completion_contract() -> None:
+    progression = TaskPromptProgression.start(catalog=catalog(), task_id="P0.1")
+    prompt = progression.current_prompt()
+
+    assert "PASI_TASK_ID: P0.1" in prompt
+    assert "PASI_RESULT_STATUS: complete" in prompt
+    assert "PASI_PATCH_START" in prompt
+    assert "PASI M0 LIVE PROOF" in prompt
+    assert "PASI_M0_NEXT_TASK_ID: P0.2" in prompt
+    assert "PASI_M0_NEXT_PROMPT_START" in prompt
+    assert "[PASI TASK P0.2]" in prompt
+    assert "PASI_M0_NEXT_PROMPT_END" in prompt
+
+
+def test_p02_prompt_is_canonical_and_not_m0_marker_contract() -> None:
+    progression = TaskPromptProgression.start(catalog=catalog(), task_id="P0.2")
+    prompt = progression.current_prompt()
+
+    assert prompt.startswith("[PASI TASK P0.2]")
+    assert "20 uniquely marked consecutive browser operations" in prompt
+    assert "PASI_PATCH_START" not in prompt

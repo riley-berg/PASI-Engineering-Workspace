@@ -159,8 +159,14 @@ def test_capture_bridge_main_declares_and_returns_an_int() -> None:
 
 def test_current_prompt_payload_is_canonical_and_durable(tmp_path, monkeypatch) -> None:
     import scripts.run_m0_live_capture as capture
+    from pasi.core.task_progression import RoadmapTaskCatalog
 
     monkeypatch.setattr(capture, "PROGRESSION", tmp_path / "progression.json")
+    monkeypatch.setattr(
+        capture,
+        "load_task_catalog",
+        lambda roadmap, allow_fallback=False: RoadmapTaskCatalog.from_roadmap_file(roadmap),
+    )
 
     payload = capture.current_prompt_payload()
 

@@ -3,6 +3,73 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from scripts.run_m0_live_capture import CaptureState
+
+
+def complete_events() -> list[dict[str, object]]:
+    return [
+        {
+            "type": "page_ready",
+            "chat_url": "https://chatgpt.com/c/new",
+            "authenticated_page": True,
+            "thinking_enabled": True,
+        },
+        {
+            "type": "fresh_chat",
+            "fresh_chat_created_after_usage": True,
+            "fresh_chat_url": "https://chatgpt.com/c/new",
+        },
+        {
+            "type": "operation_started",
+            "operation_id": "op-1",
+            "chat_url": "https://chatgpt.com/c/new",
+            "thinking_enabled": True,
+        },
+        {
+            "type": "checkpoint",
+            "operation_id": "op-1",
+            "resume_phase": "response_generation",
+        },
+        {
+            "type": "connection_lost",
+            "operation_id": "op-1",
+            "response_stopped_on_loss": True,
+            "checkpoint_preserved": True,
+            "resume_phase": "response_generation",
+        },
+        {
+            "type": "connection_restored",
+            "operation_id": "op-1",
+            "resumed_after_reconnect": True,
+            "same_operation_resumed": True,
+            "resume_phase": "response_generation",
+        },
+        {
+            "type": "response_complete",
+            "operation_id": "op-1",
+            "chat_url": "https://chatgpt.com/c/new",
+            "thinking_enabled": True,
+            "fresh_chat_created_after_usage": True,
+            "response_text": """PASI_TASK_ID: P0.1
+PASI_RESULT_STATUS: complete
+PASI_SUMMARY: Completed the M0 task.
+PASI_EVIDENCE: Live evidence captured.
+PASI_M0_NEXT_TASK_ID: P0.2
+PASI_M0_NEXT_PROMPT_START
+[PASI TASK P0.2]
+M1 twenty-operation chain
+PASI_M0_NEXT_PROMPT_END
+PASI_PATCH_START
+diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt
+new file mode 100644
+--- /dev/null
++++ b/acceptance/M0-LIVE-PROOF.txt
+@@ -0,0 +1 @@
++PASI M0 LIVE PROOF
+PASI_PATCH_END""",
+        },
+    ]
+
 
 def test_independent_extension_manifest() -> None:
     root = Path(__file__).resolve().parents[1] / "extensions" / "pasi-chatgpt"
@@ -35,3 +102,38 @@ def test_extension_files_exist() -> None:
 def test_capture_bridge_is_repo_local() -> None:
     script = Path(__file__).resolve().parents[1] / "scripts" / "run_m0_live_capture.py"
     assert script.is_file()
+
+
+def test_capture_bridge_refuses_incomplete_live_response() -> None:
+    state = CaptureState()
+    for event in complete_events()[:-1]:
+        state.apply(event)
+    assert state.ready() is False
+
+
+def test_capture_bridge_materializes_real_runtime_evidence() -> None:
+    state = CaptureState()
+    for event in complete_events():
+        state.apply(event)
+
+    assert state.ready() is True
+    payload = state.materialize()
+
+    assert payload["provider"] == "chatgpt_browser"
+    assert payload["authenticated"] is True
+    assert payload["task_id"] == "P0.1"
+    assert payload["status"] == "complete"
+    assert payload["patch"].startswith("diff --git")
+    assert payload["next_task_id"] == "P0.2"
+    assert payload["next_prompt"] == "[PASI TASK P0.2]\nM1 twenty-operation chain"
+    assert payload["runtime_evidence"]["thinking_enabled"] is True
+    assert payload["runtime_evidence"]["connection_recovery"]["operation_id"] == "op-1"
+
+
+def test_capture_bridge_does_not_fill_missing_response_markers() -> None:
+    state = CaptureState()
+    for event in complete_events():
+        state.apply(event)
+    state.response_text = state.response_text.replace("PASI_M0_NEXT_TASK_ID: P0.2\n", "")
+
+    assert state.ready() is False

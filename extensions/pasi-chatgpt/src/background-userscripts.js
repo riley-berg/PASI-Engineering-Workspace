@@ -604,12 +604,6 @@
     return {ok: true, status: value[SYNC_STATUS_KEY] || {state: "idle"}};
   }
 
-  async function info(id) {");
-    escaped = escaped.replace(/\*/g, ".*");
-    if (escaped.startsWith("*://")) escaped = "https?://" + escaped.slice(5);
-    return new RegExp("^" + escaped + "$", "i").test(url);
-  }
-
   async function activeTab() {
     const tabs = await chrome.tabs.query({active: true, currentWindow: true});
     const tab = tabs[0];

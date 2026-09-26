@@ -28,6 +28,8 @@ Host permissions are separate from the userscript registry. A registered script 
 
 ## Safety boundaries
 
+The privileged bootstrap and the userscript source are injected as separate JavaScript units. The private RPC authorization token stays inside the bootstrap closure and is never part of the userscript's lexical environment.
+
 - Privileged APIs are mediated by the service worker.
 - Each script gets a private authorization token that is not exposed in the management UI or backup.
 - `@connect` is enforced before cross-origin HTTP.

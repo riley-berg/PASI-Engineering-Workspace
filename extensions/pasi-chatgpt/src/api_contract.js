@@ -62,6 +62,8 @@
     USERSCRIPT_NETWORK_LIST: "pasi.userscript.network.list",
     USERSCRIPT_HOSTS: "pasi.userscript.hosts",
     USERSCRIPT_ACTIVE_TAB: "pasi.userscript.active_tab",
+    USERSCRIPT_MENU_LIST: "pasi.userscript.menu.list",
+    USERSCRIPT_MENU_INVOKE: "pasi.userscript.menu.invoke",
     USERSCRIPT_SOURCE_GET: "pasi.userscript.source.get",
     USERSCRIPT_SOURCE_SAVE: "pasi.userscript.source.save",
     USERSCRIPT_VCS_CONFIG: "pasi.userscript.vcs.config",

@@ -2,18 +2,34 @@ name: test
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'pasi/**']
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pasi-engineering-workspace-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
-      - name: Install
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install development dependencies
         run: python -m pip install -e '.[dev]'
-      - name: Test
-        run: python -m pytest -q
+
+      - name: Run authoritative repository validation
+        run: bash scripts/test_full_repo.sh

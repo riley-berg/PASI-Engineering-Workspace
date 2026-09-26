@@ -43,6 +43,12 @@ def test_completion_derives_next_prompt_from_roadmap_exactly_once() -> None:
     assert advanced.state.prompt_generation == 2
     assert "20 uniquely marked consecutive browser operations" in advanced.current_prompt()
     assert "Create a fresh chat after prior chat usage." not in advanced.current_prompt()
+    assert "Verified progress handoff:" in advanced.current_prompt()
+    assert "Previous verified task: P0.1" in advanced.current_prompt()
+    assert "commit 123; clean worktree; runtime evidence recorded" in advanced.current_prompt()
+    assert advanced.state.last_completion_evidence.endswith(
+        "commit 123; clean worktree; runtime evidence recorded"
+    )
 
     with pytest.raises(TaskProgressionError):
         advanced.complete(
@@ -129,10 +135,9 @@ def test_p01_prompt_contains_exact_machine_readable_completion_contract() -> Non
     assert "PASI_RESULT_STATUS: complete" in prompt
     assert "PASI_PATCH_START" in prompt
     assert "PASI M0 LIVE PROOF" in prompt
-    assert "PASI_M0_NEXT_TASK_ID: P0.2" in prompt
-    assert "PASI_M0_NEXT_PROMPT_START" in prompt
-    assert "[PASI TASK P0.2]" in prompt
-    assert "PASI_M0_NEXT_PROMPT_END" in prompt
+    assert "PASI_M0_NEXT_TASK_ID" not in prompt
+    assert "PASI_M0_NEXT_PROMPT_START" not in prompt
+    assert "Do not invent or precompute the next task prompt" in prompt
 
 
 def test_p02_prompt_is_canonical_and_not_m0_marker_contract() -> None:
@@ -144,3 +149,19 @@ def test_p02_prompt_is_canonical_and_not_m0_marker_contract() -> None:
     assert "PASI_PATCH_START" in prompt
     assert "PASI_TASK_ID: P0.2" in prompt
     assert "PASI_RESULT_STATUS: complete" in prompt
+
+
+def test_next_prompt_changes_only_from_verified_completion_state() -> None:
+    progression = TaskPromptProgression.start(catalog=catalog(), task_id="P0.1")
+    first = progression.current_prompt()
+
+    advanced, receipt = progression.complete(
+        verified_task_id="P0.1",
+        evidence="verified state A",
+    )
+
+    assert receipt.next_prompt is not None
+    assert receipt.next_prompt != first
+    assert "Previous verified task: P0.1" in advanced.current_prompt()
+    assert "verified state A" in advanced.current_prompt()
+    assert advanced.state.prompt_generation == 2

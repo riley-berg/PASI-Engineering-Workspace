@@ -12,11 +12,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from pasi.core.task_progression import (  # noqa: E402
-    RoadmapTaskCatalog,
-    TaskPromptProgression,
-    TaskProgressionError,
-)
+from pasi.core.github_issue_tasks import load_task_catalog  # noqa: E402
+from pasi.core.task_progression import TaskPromptProgression, TaskProgressionError  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

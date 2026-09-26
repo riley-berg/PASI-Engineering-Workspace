@@ -13,6 +13,7 @@
     return `(() => {
   "use strict";
   const META = ${encoded};
+  const AUTH = ${JSON.stringify(auth)};
   const pending = new Map();
   let sequence = 0;
   const listeners = new Map();
@@ -83,29 +84,19 @@
   function call(method, args = {}) {
     if (!contextAlive || disposed) return Promise.reject(contextError());
     const requestId = META.id + ":" + (++sequence);
-    return new Promise((resolve, reject) => {
-      pending.set(requestId, {resolve, reject});
-      safeSendMessage({
-        type: "pasi.userscript.rpc",
-        script_id: META.id,
-        auth: ${JSON.stringify(auth)},
-        request_id: requestId,
-        method,
-        args,
-      }, (response) => {
-        const error = chrome.runtime.lastError;
-        if (error) {
-          pending.delete(requestId);
-          reject(new Error(error.message));
-          return;
-        }
-        pending.delete(requestId);
-        if (!response || response.ok !== true) {
-          reject(new Error(response?.error || "PASI userscript request failed"));
-          return;
-        }
-        resolve(response.value);
-      });
+    const payload = {
+      type: "pasi.userscript.rpc",
+      script_id: META.id,
+      auth: AUTH,
+      request_id: requestId,
+      method,
+      args,
+    };
+    return safeSendMessage(payload).then((response) => {
+      if (!response || response.ok !== true) {
+        throw new Error(response?.error || "PASI userscript request failed");
+      }
+      return response.value;
     });
   }
 
@@ -291,7 +282,7 @@
       safeSendMessage({
         type: "pasi.userscript.rpc",
         script_id: META.id,
-        auth: ${JSON.stringify(auth)},
+        auth: AUTH,
         method: "lifecycle.cleanup",
         args: {},
       }).catch(() => undefined);

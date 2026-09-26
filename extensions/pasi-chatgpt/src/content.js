@@ -12,6 +12,7 @@
   let checkpoint = null;
   let recoveryPending = false;
   let lossRecorded = false;
+  let recoveryCompleted = false;
   let awaitingFreshChat = false;
   let lastReadyUrl = null;
   let lastObservedLimitUrl = null;
@@ -46,6 +47,7 @@
       return;
     }
     operationId = protocol.makeId();
+    recoveryCompleted = false;
     active = true;
     await emit(protocol.TYPES.OPERATION_STARTED, {
       operation_id: operationId,
@@ -110,7 +112,12 @@
   }
 
   async function submitRecoveryPrompt(reason) {
-    if (!operationId || awaitingAcceptance || !recoveryPending) {
+    if (
+      !operationId ||
+      awaitingAcceptance ||
+      !recoveryPending ||
+      recoveryCompleted
+    ) {
       return false;
     }
     if (!chatgpt.isAuthenticatedPage() || chatgpt.isGenerating()) {
@@ -159,12 +166,12 @@
       recovery_via_new_prompt: true,
     });
     recoveryPending = false;
-    lossRecorded = false;
+    recoveryCompleted = true;
     return true;
   }
 
   async function beginRecovery(reason) {
-    if (!active || awaitingAcceptance) {
+    if (!active || awaitingAcceptance || recoveryCompleted) {
       return;
     }
     recoveryPending = true;
@@ -329,6 +336,7 @@
       checkpoint = null;
       recoveryPending = false;
       lossRecorded = false;
+      recoveryCompleted = false;
       lastAssistantText = "";
       priorChatUrl = chatgpt.currentChatUrl();
       awaitingFreshChat = true;

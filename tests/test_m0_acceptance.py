@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -83,6 +85,17 @@ class TestM0Acceptance(unittest.TestCase):
         roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
         self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
         self.assertIn("generated exactly once after verified completion", roadmap)
+
+    def test_live_acceptance_script_imports_from_repo_root(self) -> None:
+        repo = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, str(repo / "scripts" / "run_m0_live_acceptance.py"), "--help"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_response_file_round_trip(self) -> None:
         value = {

@@ -124,6 +124,31 @@ def _prompt_for(task: RoadmapTask) -> str:
     )
 
 
+def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
+    return (
+        "\n\nCompletion response contract:\n"
+        "Your final response must include these exact machine-readable markers:\n\n"
+        "PASI_TASK_ID: P0.1\n"
+        "PASI_RESULT_STATUS: complete\n"
+        "PASI_SUMMARY: <concise completion summary>\n"
+        "PASI_EVIDENCE: <direct evidence supporting completion>\n\n"
+        "PASI_PATCH_START\n"
+        "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/acceptance/M0-LIVE-PROOF.txt\n"
+        "@@ -0,0 +1 @@\n"
+        "+PASI M0 LIVE PROOF\n"
+        "PASI_PATCH_END\n\n"
+        f"PASI_M0_NEXT_TASK_ID: {next_task_id}\n"
+        "PASI_M0_NEXT_PROMPT_START\n"
+        f"{next_prompt}\n"
+        "PASI_M0_NEXT_PROMPT_END"
+    )
+
+
+
+
 class RoadmapTaskCatalog:
     """Machine-readable task catalog loaded from the canonical roadmap JSON."""
 
@@ -180,11 +205,18 @@ class TaskPromptProgression:
     @classmethod
     def start(cls, *, catalog: RoadmapTaskCatalog, task_id: str) -> "TaskPromptProgression":
         task = catalog.get(task_id)
+        prompt = _prompt_for(task)
+        next_task = catalog.next_task(task.task_id)
+        if task.task_id == "P0.1" and next_task is not None:
+            prompt += _m0_completion_contract(
+                next_task_id=next_task.task_id,
+                next_prompt=_prompt_for(next_task),
+            )
         return cls(
             catalog=catalog,
             state=ProgressionState(
                 current_task_id=task.task_id,
-                current_prompt=_prompt_for(task),
+                current_prompt=prompt,
             ),
         )
 

@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "scripts": {
+    "build:userscript-compiler": "node scripts/build_userscript_compiler.mjs"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -47,7 +47,8 @@ def main() -> int:
         raise TaskProgressionError("live response task does not match durable current task")
     expected_next_task_id, expected_next_prompt = progression.expected_next()
     if response.next_task_id != expected_next_task_id or response.next_prompt != expected_next_prompt:
-        raise TaskProgressionError("live response next task/prompt does not match the canonical roadmap")    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        raise TaskProgressionError("live response next task/prompt does not match the canonical roadmap")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     worktree = (
         args.worktree.expanduser().resolve()
         if args.worktree is not None

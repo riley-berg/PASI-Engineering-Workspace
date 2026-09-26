@@ -31,7 +31,8 @@ class TestM0Acceptance(unittest.TestCase):
             "evidence": "canonical validation passed",
             "patch": "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt",
             "runtime_evidence": {
-                "fresh_chat_created_after_usage": True,
+                "fresh_chat_created_after_usage": False,
+                "fresh_chat_creation_reason": "",
                 "thinking_enabled": True,
                 "connection_recovery": {
                     "connection_loss_detected": True,
@@ -43,8 +44,6 @@ class TestM0Acceptance(unittest.TestCase):
                     "resume_phase": "contract_parsing",
                 },
             },
-            "next_task_id": "P0.2",
-            "next_prompt": "Now complete P0.2 using the verified P0.1 result.",
         }
         payload.update(overrides)
         return M0Response.from_mapping(payload)
@@ -59,19 +58,37 @@ class TestM0Acceptance(unittest.TestCase):
             {"authenticated": False},
             {"status": "in_progress"},
             {"chat_url": "https://example.com/c/abc"},
-            {"next_task_id": None},
-            {"next_prompt": None},
-            {"next_task_id": "P0.1"},
+            {"task_id": "P0.2"},
             {"runtime_evidence": None},
         ):
             with self.assertRaises(M0AcceptanceError):
                 self.response(**overrides)
 
-    def test_live_contract_requires_fresh_chat_thinking_and_connection_recovery(self) -> None:
+    def test_live_contract_allows_same_chat_and_requires_thinking_and_connection_recovery(self) -> None:
         value = self.response()
-        self.assertTrue(value.runtime_evidence.fresh_chat_created_after_usage)
+        self.assertFalse(value.runtime_evidence.fresh_chat_created_after_usage)
         self.assertTrue(value.runtime_evidence.thinking_enabled)
         self.assertTrue(value.runtime_evidence.connection_recovery.resumed_after_reconnect)
+
+    def test_live_contract_allows_usage_gated_fresh_chat(self) -> None:
+        value = self.response(
+            runtime_evidence={
+                "fresh_chat_created_after_usage": True,
+                "fresh_chat_creation_reason": "usage_limit",
+                "thinking_enabled": True,
+                "connection_recovery": {
+                    "connection_loss_detected": True,
+                    "response_stopped_on_loss": True,
+                    "checkpoint_preserved": True,
+                    "resumed_after_reconnect": True,
+                    "same_operation_resumed": True,
+                    "operation_id": "op-1",
+                    "resume_phase": "contract_parsing",
+                },
+            }
+        )
+        self.assertTrue(value.runtime_evidence.fresh_chat_created_after_usage)
+        self.assertEqual(value.runtime_evidence.fresh_chat_creation_reason, "usage_limit")
 
     def test_prompt_does_not_change_before_completion(self) -> None:
         state = PromptProgression(task_id="P0.1", prompt="Complete P0.1.")
@@ -109,7 +126,7 @@ class TestM0Acceptance(unittest.TestCase):
         roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
         self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
         self.assertIn("generated exactly once after verified completion", roadmap)
-        self.assertIn("fresh chat after prior usage", roadmap)
+        self.assertIn("create a fresh chat only after an explicit ChatGPT usage/context limit", roadmap)
         self.assertIn("Thinking enabled", roadmap)
         self.assertIn("connection-loss stop/resume", roadmap)
 
@@ -167,7 +184,8 @@ class TestM0Acceptance(unittest.TestCase):
             "evidence": "evidence",
             "patch": "diff --git a/a b/a",
             "runtime_evidence": {
-                "fresh_chat_created_after_usage": True,
+                "fresh_chat_created_after_usage": False,
+                "fresh_chat_creation_reason": "",
                 "thinking_enabled": True,
                 "connection_recovery": {
                     "connection_loss_detected": True,
@@ -179,8 +197,6 @@ class TestM0Acceptance(unittest.TestCase):
                     "resume_phase": "contract_parsing",
                 },
             },
-            "next_task_id": "P0.2",
-            "next_prompt": "Complete P0.2 using the verified P0.1 evidence.",
         }
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "response.json"

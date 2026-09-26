@@ -346,6 +346,29 @@
     },
   });
 
+  const tabs = Object.freeze({
+    ...base.tabs,
+    channel(tabId) {
+      const id = Number(tabId);
+      if (!Number.isInteger(id) || id <= 0) throw new TypeError("Invalid PASI tab id");
+      return Object.freeze({
+        send(payload) {
+          return base.tabs.send(id, payload);
+        },
+        onMessage(listener) {
+          const off = base.tabs.onMessage(listener);
+          return off;
+        },
+        close() {
+          return base.tabs.close(id);
+        },
+        focus() {
+          return base.tabs.focus(id);
+        },
+      });
+    },
+  });
+
   const web = Object.freeze({
     ...base.web,
     async observe(options = {}, listener) {

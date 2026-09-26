@@ -58,7 +58,7 @@
 
   async function storageGet(keys) {
     try {
-      return await storageGet(keys);
+      return await chrome.storage.local.get(keys);
     } catch (error) {
       scheduleContextRecovery(error);
       return {};
@@ -67,7 +67,7 @@
 
   async function storageSet(values) {
     try {
-      await storageSet(values);
+      await chrome.storage.local.set(values);
       return true;
     } catch (error) {
       scheduleContextRecovery(error);

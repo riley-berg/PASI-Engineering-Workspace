@@ -62,7 +62,7 @@ class RoadmapTask:
         )
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProgressionState:
     current_task_id: str
     current_prompt: str
@@ -200,29 +200,140 @@ class TaskPromptProgression:
             raise TaskProgressionError("completed progression cannot be checkpointed")
         if not checkpoint.strip():
             raise TaskProgressionError("checkpoint is required")
-        return TaskPromptProgression(
-            catalog=self.catalog,
-            state=ProgressionState(
+        self.state = ProgressionState(**{**asdict(self.state), "checkpoint": checkpoint})
+        return self
+    def resume(self) -> "TaskPromptProgression":
+        if self.state.status != "interrupted":
+            raise TaskProgressionError("only an interrupted task can be resumed")
+        self.state = ProgressionState(**{**asdict(self.state), "status": "active"})
+        return self
+    def complete(
+        self,
+        *,
+        verified_task_id: str,
+        evidence: str,
+    ) -> tuple["TaskPromptProgression", CompletionReceipt]:
+        if self.state.status != "active":
+            raise TaskProgressionError("only an active task can advance")
+        if verified_task_id != self.state.current_task_id:
+            raise TaskProgressionError("verified task does not match current task")
+        if not evidence.strip():
+            raise TaskProgressionError("verified completion evidence is required")
+        if verified_task_id in self.state.completed_task_ids:
+            raise TaskProgressionError("task has already advanced")
+
+        next_task = self.catalog.next_task(self.state.current_task_id)
+        evidence_digest = _digest(evidence)
+
+        if next_task is None:
+            next_state = ProgressionState(
                 **{
                     **asdict(self.state),
-                    "checkpoint": checkpoint,
+                    "status": "completed",
+                    "advance_count": self.state.advance_count + 1,
+                    "completion_digest": evidence_digest,
+                    "completed_task_ids": self.state.completed_task_ids + (verified_task_id,),
                 },
-            ),
-        )
+            )
+            receipt = CompletionReceipt(
+                task_id=verified_task_id,
+                evidence_digest=evidence_digest,
+                next_task_id=None,
+                next_prompt=None,
+                advance_count=next_state.advance_count,
+            )
+            self.state = next_state
+            return self, receipt
 
+        next_prompt = _prompt_for(next_task)
+        if next_prompt == self.state.current_prompt:
+            raise TaskProgressionError("roadmap produced an unchanged next prompt")
+
+        next_state = ProgressionState(
+            current_task_id=next_task.task_id,
+            current_prompt=next_prompt,
+            status="active",
+            prompt_generation=self.state.prompt_generation + 1,
+            advance_count=self.state.advance_count + 1,
+            checkpoint="",
+            completion_digest=evidence_digest,
+            completed_task_ids=self.state.completed_task_ids + (verified_task_id,),
+        )
+        receipt = CompletionReceipt(
+            task_id=verified_task_id,
+            evidence_digest=evidence_digest,
+            next_task_id=next_task.task_id,
+            next_prompt=next_prompt,
+            advance_count=next_state.advance_count,
+        )
+        self.state = next_state
+        return self, receipt
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": PROGRESSION_SCHEMA_VERSION,
+            **asdict(self.state),
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        *,
+        catalog: RoadmapTaskCatalog,
+        value: Mapping[str, Any],
+    ) -> "TaskPromptProgression":
+        if value.get("schema_version") != PROGRESSION_SCHEMA_VERSION:
+            raise TaskProgressionError("unsupported progression schema version")
+        state = ProgressionState(
+            current_task_id=str(value.get("current_task_id", "")),
+            current_prompt=str(value.get("current_prompt", "")),
+            status=str(value.get("status", "active")),
+            prompt_generation=int(value.get("prompt_generation", 1)),
+            advance_count=int(value.get("advance_count", 0)),
+            checkpoint=str(value.get("checkpoint", "")),
+            completion_digest=str(value.get("completion_digest", "")),
+            completed_task_ids=tuple(str(item) for item in value.get("completed_task_ids", [])),
+        )
+        return cls(catalog=catalog, state=state)
+
+    def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(self.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, path)
+
+    @classmethod
+    def load(
+        cls,
+        *,
+        catalog: RoadmapTaskCatalog,
+        path: Path,
+    ) -> "TaskPromptProgression":
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise TaskProgressionError(f"invalid progression state: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise TaskProgressionError("progression state must be an object")
+        return cls.from_dict(catalog=catalog, value=payload)
+
+
+__all__ = [
+    "CompletionReceipt",
+    "ProgressionState",
+    "RoadmapTask",
+    "RoadmapTaskCatalog",
+    "TASK_STATUSES",
+    "TaskPromptProgression",
+    "TaskProgressionError",
     def interrupt(self) -> "TaskPromptProgression":
         if self.state.status == "completed":
             raise TaskProgressionError("completed progression cannot be interrupted")
-        return TaskPromptProgression(
-            catalog=self.catalog,
-            state=ProgressionState(
-                **{
-                    **asdict(self.state),
-                    "status": "interrupted",
-                },
-            ),
-        )
-
+        self.state = ProgressionState(**{**asdict(self.state), "status": "interrupted"})
+        return self
     def resume(self) -> "TaskPromptProgression":
         if self.state.status != "interrupted":
             raise TaskProgressionError("only an interrupted task can be resumed")

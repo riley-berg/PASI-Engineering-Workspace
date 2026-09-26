@@ -336,6 +336,46 @@
 })(${JSON.stringify(auth)});`;
   }
 
+  function buildMainWorld(definition) {
+    const source = String(definition.source || "");
+    let code = build(definition);
+    const open = code.indexOf("  Object.defineProperties(globalThis, {");
+    const close = code.indexOf("  });", open);
+    if (open < 0 || close < 0) throw new Error("PASI main-world wrapper boundary not found");
+    const globalBlockEnd = close + "  });".length;
+    const lexicalBindings = `
+  const PASIUserScriptGlobal = Object.freeze(PASIUserScript);
+  const GM_info = Object.freeze({script: Object.freeze({...META})});
+  const GM_getValue = getValue;
+  const GM_setValue = setValue;
+  const GM_deleteValue = deleteValue;
+  const GM_listValues = listValues;
+  const GM_addValueChangeListener = addValueChangeListener;
+  const GM_removeValueChangeListener = removeValueChangeListener;
+  const GM_openInTab = openInTab;
+  const GM_notification = notify;
+  const GM_setClipboard = setClipboard;
+  const GM_download = download;
+  const GM_registerMenuCommand = registerMenuCommand;
+  const GM_xmlhttpRequest = request;
+  const GM_fetch = fetchApi;
+  const GM_webRequest = Object.freeze({
+    addRule: addNetworkRule,
+    removeRule: removeNetworkRule,
+    listRules: listNetworkRules,
+  });
+  const __pageRuntime = chrome.runtime;
+  const __runtimeConnect = __pageRuntime.connect.bind(__pageRuntime);
+  const __runtimeSendMessage = __pageRuntime.sendMessage.bind(__pageRuntime);
+`.replaceAll("chrome.runtime.connect", "__runtimeConnect").replaceAll("chrome.runtime.sendMessage", "__runtimeSendMessage");
+    code = code.slice(0, open) + lexicalBindings + code.slice(globalBlockEnd);
+    const suffix = "\n  Promise.resolve((async () => {\n    " + source + "\n  })()).catch((error) => {\n    reportError(error);\n  });\n";
+    const closeIndex = code.lastIndexOf("\n})(");
+    if (closeIndex < 0) throw new Error("PASI main-world wrapper terminator not found");
+    code = code.slice(0, closeIndex) + suffix + code.slice(closeIndex);
+    return code;
+  }
+
   function wrapSource(source) {
     return `(() => {
   "use strict";
@@ -350,5 +390,5 @@
 })()`;
   }
 
-  globalThis.PASIUserScriptRuntime = Object.freeze({build, wrapSource});
+  globalThis.PASIUserScriptRuntime = Object.freeze({build, buildMainWorld, wrapSource});
 })();

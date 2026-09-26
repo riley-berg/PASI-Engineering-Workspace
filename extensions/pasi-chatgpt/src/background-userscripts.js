@@ -205,6 +205,23 @@
     });
   }
 
+  async function installImpl(message) {
+    ensureAvailable();
+    const url = String(message.url || "");
+    const parsed = new URL(url);
+    if (!/^https?:$/.test(parsed.protocol)) throw new TypeError("Userscript install requires an http(s) URL");
+    const response = await fetch(url, {redirect: "error", cache: "no-store"});
+    if (!response.ok) throw new Error("Userscript download failed: HTTP " + response.status);
+    const source = await response.text();
+    if (source.length > c.LIMITS.userScriptSourceChars) throw new Error("Downloaded userscript exceeds the safety limit");
+    return registerImpl({
+      source,
+      enabled: message.enabled !== false,
+      typeScript: message.typeScript === true,
+      replace: message.replace === true,
+    });
+  }
+
   async function registerImpl(message) {
     ensureAvailable();
     const authored = String(message.source || "");
@@ -936,6 +953,7 @@
 
   async function handle(message) {
     switch (message?.type) {
+      case c.MESSAGE_TYPES.USERSCRIPT_INSTALL: return installQueue.run(() => installImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_REGISTER: return installQueue.run(() => registerImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_UNREGISTER: return installQueue.run(() => unregisterImpl(message));
       case c.MESSAGE_TYPES.USERSCRIPT_LIST: return list();

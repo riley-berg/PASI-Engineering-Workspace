@@ -7,6 +7,7 @@ from typing import Any, Mapping
 MAX_OPERATION_ID_CHARS = 256
 MAX_PHASE_CHARS = 128
 MAX_CHECKPOINT_CHARS = 512
+MAX_CHAT_CREATION_REASON_CHARS = 64
 
 
 class M0RuntimeError(ValueError):
@@ -86,6 +87,7 @@ class ConnectionRecoveryEvidence:
 @dataclass(frozen=True)
 class M0RuntimeEvidence:
     fresh_chat_created_after_usage: bool
+    fresh_chat_creation_reason: str
     thinking_enabled: bool
     connection_recovery: ConnectionRecoveryEvidence
 
@@ -93,19 +95,36 @@ class M0RuntimeEvidence:
     def from_mapping(cls, value: Mapping[str, Any]) -> "M0RuntimeEvidence":
         if not isinstance(value, Mapping):
             raise M0RuntimeError("runtime_evidence must be an object")
-        for key in ("fresh_chat_created_after_usage", "thinking_enabled", "connection_recovery"):
+        for key in (
+            "fresh_chat_created_after_usage",
+            "fresh_chat_creation_reason",
+            "thinking_enabled",
+            "connection_recovery",
+        ):
             if key not in value:
                 raise M0RuntimeError(f"runtime_evidence missing field: {key}")
 
-        if value["fresh_chat_created_after_usage"] is not True:
+        fresh_chat_created = value["fresh_chat_created_after_usage"] is True
+        reason = _text(
+            value["fresh_chat_creation_reason"],
+            name="runtime_evidence.fresh_chat_creation_reason",
+            limit=MAX_CHAT_CREATION_REASON_CHARS,
+            required=False,
+        )
+        if fresh_chat_created and reason != "usage_limit":
             raise M0RuntimeError(
-                "M0 requires a fresh chat to be created after prior chat usage"
+                "M0 forbids fresh-chat creation except as usage-limit recovery"
+            )
+        if not fresh_chat_created and reason:
+            raise M0RuntimeError(
+                "fresh_chat_creation_reason must be empty when no fresh chat was created"
             )
         if value["thinking_enabled"] is not True:
             raise M0RuntimeError("M0 requires Thinking to be enabled")
 
         return cls(
-            fresh_chat_created_after_usage=True,
+            fresh_chat_created_after_usage=fresh_chat_created,
+            fresh_chat_creation_reason=reason,
             thinking_enabled=True,
             connection_recovery=ConnectionRecoveryEvidence.from_mapping(
                 value["connection_recovery"]
@@ -115,6 +134,7 @@ class M0RuntimeEvidence:
     def to_dict(self) -> dict[str, Any]:
         return {
             "fresh_chat_created_after_usage": self.fresh_chat_created_after_usage,
+            "fresh_chat_creation_reason": self.fresh_chat_creation_reason,
             "thinking_enabled": self.thinking_enabled,
             "connection_recovery": {
                 "connection_loss_detected": self.connection_recovery.connection_loss_detected,

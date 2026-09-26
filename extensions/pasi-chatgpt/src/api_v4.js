@@ -32,6 +32,9 @@
         replace: options.replace === true,
         tags: options.tags,
         group: options.group,
+        typeScript: options.typeScript === true,
+        host_allowlist: options.hostAllowlist,
+        network_rules: options.networkRules,
       }).then((result) => result.script);
     },
     unregister(id) {
@@ -99,6 +102,9 @@
     },
     vcsConfig(config = {}) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG, {config}).then((result) => result.config);
+    },
+    vcsFetch(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_FETCH, {id: String(id)}).then((result) => result);
     },
     vcsPull(id) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL, {id: String(id)}).then((result) => result);

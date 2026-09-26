@@ -57,7 +57,7 @@ The current task prompt is immutable while that task is incomplete. The bridge d
 
 The extension reuses the durable automation conversation after task completion. It switches back to that stored automation chat when the browser is elsewhere. It does not create a fresh chat merely because a task completed, a chat has prior messages, or Thinking is currently off.
 
-A connection loss does not advance progression. The current operation keeps its operation ID and checkpoint and may resume once after reconnect.
+A connection loss does not advance progression. The current operation keeps its operation ID and checkpoint and resumes through the existing conversation state; PASI does not inject a synthetic recovery message.
 
 ## Automatic run loop
 
@@ -71,6 +71,13 @@ When a task response is complete, PASI requires the task marker, completion evid
 
 If ChatGPT reports that the current conversation has reached its usage/context limit, PASI stops the active response when necessary, creates a fresh chat, and resubmits the same current task. This does not advance progression.
 
-If ChatGPT reports a connection/network generation failure, PASI stops the active response, preserves the latest checkpoint/output, and submits a recovery prompt containing the most recent captured assistant output and the same task identity. Recovery never advances the task.
+If ChatGPT reports a connection/network generation failure, PASI stops the active response, preserves the latest checkpoint/output, and records the same task identity for continuation. Recovery never advances the task and never creates a second synthetic ChatGPT prompt.
 
 The extension requires Thinking to be enabled before a task or recovery prompt is submitted. It attempts to enable the Thinking control automatically when the UI exposes it; otherwise it refuses to send the task and reports a runtime error instead of silently running with the wrong mode.
+
+
+## Extension context lifecycle
+
+Chrome can invalidate an existing content-script context when the unpacked extension is reloaded, updated, or the page navigates. PASI treats that as an extension lifecycle event, not as a ChatGPT connection failure.
+
+The old content script records its bounded operation state in page session storage, stops its observers/timers, and does not reload the ChatGPT page or inject any recovery message. Reload the extension and refresh the ChatGPT page to acquire the new content-script context; the preserved operation state can then be restored without creating a new task or chat.

@@ -6,10 +6,9 @@ It is independent of the abandoned `personal-ai-system` repository and has no de
 
 ## Load unpacked
 
-From WSL:
+From the Engineering Workspace root:
 
 ```bash
-cd ~/workspace/personal-ai-system/PASI-Engineering-Workspace
 wslpath -w extensions/pasi-chatgpt
 ```
 

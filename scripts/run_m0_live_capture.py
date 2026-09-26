@@ -23,13 +23,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 ROADMAP = REPO_ROOT / "roadmap" / "p0-p4.json"
 PROGRESSION = REPO_ROOT / ".runtime" / "acceptance" / "task-progression.json"
 OUTPUT = REPO_ROOT / ".runtime" / "acceptance" / "m0-authenticated-response.json"
-ACCEPTANCE = REPO_ROOT / "scripts" / "run_m0_live_acceptance.py"
+ACCEPTANCE = REPO_ROOT / "scripts" / "run_live_task_acceptance.py"
 EXPECTED_CHAT_PREFIX = "https://chatgpt.com/c/"
 ACCEPTANCE_TIMEOUT = 900
 
 
 def load_progression() -> TaskPromptProgression:
-    catalog = RoadmapTaskCatalog.from_roadmap_file(ROADMAP)
+    catalog = load_task_catalog(ROADMAP)
     if PROGRESSION.exists():
         return TaskPromptProgression.load(catalog=catalog, path=PROGRESSION)
     progression = TaskPromptProgression.start(catalog=catalog, task_id="P0.1")
@@ -154,36 +154,56 @@ class CaptureState:
     def ready(self) -> bool:
         with self.lock:
             text = self.response_text
-            required_markers = (
-                extract_marker(text, "PASI_TASK_ID"),
-                extract_marker(text, "PASI_RESULT_STATUS"),
+            task_id = extract_marker(text, "PASI_TASK_ID")
+            status = extract_marker(text, "PASI_RESULT_STATUS")
+            required = (
+                task_id,
+                status,
                 extract_marker(text, "PASI_SUMMARY"),
                 extract_marker(text, "PASI_EVIDENCE"),
-                extract_marker(text, "PASI_M0_NEXT_TASK_ID"),
-                extract_block(
-                    text,
-                    "PASI_M0_NEXT_PROMPT_START",
-                    "PASI_M0_NEXT_PROMPT_END",
-                ),
                 extract_patch(text),
             )
-            return (
+            if not (
                 self.response_complete
                 and self.authenticated
                 and self.chat_url.startswith(EXPECTED_CHAT_PREFIX)
                 and self.thinking_enabled
-                and self.fresh_chat_created_after_usage
-                and all(required_markers)
-                and required_markers[1].strip().lower() == "complete"
-                and self.connection_loss_detected
-                and self.response_stopped_on_loss
-                and self.checkpoint_preserved
-                and self.resumed_after_reconnect
-                and self.same_operation_resumed
+                and all(required)
+                and status.strip().lower() == "complete"
                 and bool(self.operation_id)
-                and bool(self.resume_phase)
                 and not self.acceptance_in_progress
-            )
+            ):
+                return False
+
+            try:
+                expected_task = current_prompt_payload()["task_id"]
+            except TaskProgressionError:
+                return False
+
+            if task_id != expected_task:
+                return False
+
+            if task_id == "P0.1":
+                m0_markers = (
+                    extract_marker(text, "PASI_M0_NEXT_TASK_ID"),
+                    extract_block(
+                        text,
+                        "PASI_M0_NEXT_PROMPT_START",
+                        "PASI_M0_NEXT_PROMPT_END",
+                    ),
+                )
+                return (
+                    self.fresh_chat_created_after_usage
+                    and all(m0_markers)
+                    and self.connection_loss_detected
+                    and self.response_stopped_on_loss
+                    and self.checkpoint_preserved
+                    and self.resumed_after_reconnect
+                    and self.same_operation_resumed
+                    and bool(self.resume_phase)
+                )
+
+            return True
 
     def materialize(self) -> dict[str, Any]:
         with self.lock:

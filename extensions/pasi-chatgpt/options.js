@@ -3,7 +3,6 @@
 
   const TYPES = {
     list: "pasi.userscript.list",
-    toggle: "pasi.userscript.toggle",
     update: "pasi.userscript.update",
     backup: "pasi.userscript.backup",
     restore: "pasi.userscript.restore",
@@ -104,8 +103,7 @@
   }
 
   async function requestHostAccess(script) {
-    const origins = [...new Set((script.matches || []).filter((p) => /^\*?:?\/\//.test(p)).map((p) => p.replace(/\*\/[^/]*$/, "*").replace(/\*\/\*$/, "/*")))];
-    const normalized = origins.length ? origins : script.matches || [];
+    const normalized = [...new Set(script.hosts || script.matches || [])];
     try {
       const granted = await chrome.permissions.request({origins: normalized});
       setStatus(granted ? "Host access granted." : "Host access was declined.");
@@ -145,7 +143,11 @@
     await refresh();
   };
   $("sync").onclick = async () => {
-    const result = await send(TYPES.sync);
+    let result = await send(TYPES.sync);
+    if (result.status === "conflict") {
+      const mode = prompt("Sync conflict: replace local with synced copy or keep local?", "keep-local");
+      if (mode === "replace" || mode === "keep-local") result = await send(TYPES.sync, {mode});
+    }
     setStatus(`Sync complete: ${result.status}.`);
     await refresh();
   };

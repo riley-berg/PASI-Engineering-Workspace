@@ -40,6 +40,9 @@ class TestM0Acceptance(unittest.TestCase):
             {"authenticated": False},
             {"status": "in_progress"},
             {"chat_url": "https://example.com/c/abc"},
+            {"next_task_id": None},
+            {"next_prompt": None},
+            {"next_task_id": "P0.1"},
         ):
             with self.assertRaises(M0AcceptanceError):
                 self.response(**overrides)

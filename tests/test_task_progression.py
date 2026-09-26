@@ -141,4 +141,6 @@ def test_p02_prompt_is_canonical_and_not_m0_marker_contract() -> None:
 
     assert prompt.startswith("[PASI TASK P0.2]")
     assert "20 uniquely marked consecutive browser operations" in prompt
-    assert "PASI_PATCH_START" not in prompt
+    assert "PASI_PATCH_START" in prompt
+    assert "PASI_TASK_ID: P0.2" in prompt
+    assert "PASI_RESULT_STATUS: complete" in prompt

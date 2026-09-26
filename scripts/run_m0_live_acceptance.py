@@ -38,7 +38,7 @@ def main() -> int:
     args = parser.parse_args()
 
     response = parse_response_file(args.response)
-    catalog = load_task_catalog(args.roadmap.expanduser().resolve())
+    catalog = load_task_catalog(args.roadmap.expanduser().resolve(), allow_fallback=True)
     progression_path = args.progression_state.expanduser().resolve()
     if progression_path.exists():
         progression = TaskPromptProgression.load(catalog=catalog, path=progression_path)

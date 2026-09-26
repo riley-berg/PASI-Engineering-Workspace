@@ -137,3 +137,21 @@ def test_capture_bridge_does_not_fill_missing_response_markers() -> None:
     state.response_text = state.response_text.replace("PASI_M0_NEXT_TASK_ID: P0.2\n", "")
 
     assert state.ready() is False
+
+
+def test_capture_bridge_main_declares_and_returns_an_int() -> None:
+    import ast
+
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_m0_live_capture.py"
+    )
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+
+    assert isinstance(main.returns, ast.Name)
+    assert main.returns.id == "int"
+    assert isinstance(main.body[-1], ast.Return)
+    assert isinstance(main.body[-1].value, ast.Constant)
+    assert main.body[-1].value.value == 0

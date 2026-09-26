@@ -66,4 +66,6 @@ def test_checked_tasks_are_skipped_when_progression_finds_the_next_task() -> Non
         ]
     )
 
-    assert catalog.next_task("P0.1").task_id == "P0.2"
+    next_task = catalog.next_task("P0.1")
+    assert next_task is not None
+    assert next_task.task_id == "P0.2"

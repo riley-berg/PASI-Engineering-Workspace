@@ -86,6 +86,29 @@
     activeTab() {
       return send(c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB).then((result) => result);
     },
+    source(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET, {id: String(id)}).then((result) => result);
+    },
+    saveSource(id, source, options = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SOURCE_SAVE, {
+        id: String(id),
+        source: String(source || ""),
+        compile: options.compile !== false,
+        typeScript: options.typeScript === true,
+      }).then((result) => result.script);
+    },
+    vcsConfig(config = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG, {config}).then((result) => result.config);
+    },
+    vcsPull(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL, {id: String(id)}).then((result) => result);
+    },
+    vcsPush(id, message) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH, {id: String(id), message: String(message || "")}).then((result) => result);
+    },
+    syncStatus() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS).then((result) => result.status);
+    },
   });
 
   globalThis.PASI = Object.freeze({
@@ -105,6 +128,9 @@
       userscript_network_rules: true,
       userscript_context_recovery: true,
       userscript_host_scoping: true,
+      userscript_editor: true,
+      userscript_vcs: true,
+      userscript_sync_status: true,
     }),
   });
 })();

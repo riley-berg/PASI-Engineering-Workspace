@@ -29,6 +29,22 @@
     return /extension context invalidated/i.test(String(error?.message || error || ""));
   }
 
+  function sessionAutomationChatUrl() {
+    try {
+      return sessionStorage.getItem("pasi_automation_chat_url") || "";
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function setSessionAutomationChatUrl(url) {
+    try {
+      sessionStorage.setItem("pasi_automation_chat_url", String(url || ""));
+    } catch (_error) {
+      // Page session storage is best-effort.
+    }
+  }
+
   function promptInjectionState() {
     try {
       const raw = sessionStorage.getItem("pasi_prompt_injection_state");
@@ -77,6 +93,7 @@
           resume_request_sent: resumeRequestSent,
           awaiting_fresh_chat: awaitingFreshChat,
           fresh_chat_created_after_usage: freshChatCreatedAfterUsage,
+          automation_chat_url: sessionAutomationChatUrl(),
           prompt_injection: promptInjectionState(),
           at: new Date().toISOString(),
         })
@@ -407,11 +424,16 @@
 
     const url = chatgpt.currentChatUrl();
     const stored = await storageGet(["pasi_automation_chat_url"]);
-    const automationChatUrl = stored.pasi_automation_chat_url || url;
+    const sessionUrl = sessionAutomationChatUrl();
+    const automationChatUrl =
+      sessionUrl || stored.pasi_automation_chat_url || url;
 
+    if (!sessionUrl) {
+      setSessionAutomationChatUrl(automationChatUrl);
+    }
     if (!stored.pasi_automation_chat_url) {
       await storageSet({
-        pasi_automation_chat_url: url,
+        pasi_automation_chat_url: automationChatUrl,
       });
     }
 
@@ -455,6 +477,7 @@
     if (awaitingFreshChat && url !== priorChatUrl) {
       awaitingFreshChat = false;
       freshChatCreatedAfterUsage = true;
+      setSessionAutomationChatUrl(url);
       await storageSet({
         pasi_automation_chat_url: url,
       });
@@ -588,6 +611,7 @@
       recoveryCompleted = false;
       lastAssistantText = "";
       priorChatUrl = chatgpt.currentChatUrl();
+      setSessionAutomationChatUrl(priorChatUrl);
       awaitingFreshChat = false;
       lastReadyUrl = null;
       lastObservedLimitUrl = null;
@@ -659,6 +683,9 @@
       resumeRequestSent = Boolean(state.resume_request_sent);
       awaitingFreshChat = Boolean(state.awaiting_fresh_chat);
       freshChatCreatedAfterUsage = Boolean(state.fresh_chat_created_after_usage);
+      if (typeof state.automation_chat_url === "string" && state.automation_chat_url) {
+        setSessionAutomationChatUrl(state.automation_chat_url);
+      }
       recoveringFromContextInvalidation = true;
       return true;
     } catch (_error) {

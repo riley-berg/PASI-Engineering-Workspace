@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-CHAT_URL_PATTERN = re.compile(r"^https://chatgpt\\.com/c/[A-Za-z0-9_-]+$")
+CHAT_URL_PATTERN = re.compile(r"^https://chatgpt\.com/c/[A-Za-z0-9_-]+$")
 ALLOWED_PROVIDERS = frozenset({"chatgpt_browser"})
 
 

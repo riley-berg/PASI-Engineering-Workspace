@@ -5,6 +5,10 @@
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function sleep(milliseconds) {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+
   function visibleElements(selector) {
     return Array.from(document.querySelectorAll(selector)).filter((element) => {
       const style = globalThis.getComputedStyle(element);
@@ -75,39 +79,50 @@
     );
   }
 
-  function ensureThinkingEnabled() {
-    const direct = thinkingControl();
-    if (direct?.enabled) {
-      return true;
-    }
-    if (direct?.element && !direct.element.disabled) {
-      direct.element.click();
-      return thinkingEnabled();
-    }
-
-    const picker = findAction([
-      /thinking/i,
-      /model/i,
-      /instant/i,
-    ]);
-    if (picker && !picker.disabled) {
-      picker.click();
-      const option = visibleElements(
-        "[role=\"menuitemradio\"], [role=\"option\"], button, [role=\"menuitem\"]"
-      ).find((element) => {
-        const label = elementLabel(element);
-        return /^thinking(?:\s+mode)?$/i.test(label) || /\bthinking\b/i.test(label);
-      });
-      if (option && !option.disabled) {
-        const pressed = option.getAttribute("aria-pressed");
-        const checked = option.getAttribute("aria-checked");
-        const state = option.getAttribute("data-state");
-        if (pressed !== "true" && checked !== "true" && state !== "on") {
-          option.click();
-        }
+  async function ensureThinkingEnabled() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const direct = thinkingControl();
+      if (direct?.enabled) {
+        return true;
       }
-    }
 
+      if (direct?.element && !direct.element.disabled) {
+        direct.element.click();
+        await sleep(100);
+        continue;
+      }
+
+      const picker = findAction([
+        /thinking/i,
+        /model/i,
+        /instant/i,
+      ]);
+      if (picker && !picker.disabled) {
+        picker.click();
+        await sleep(100);
+        const option = visibleElements(
+          "[role=\"menuitemradio\"], [role=\"option\"], button, [role=\"menuitem\"]"
+        ).find((element) => {
+          const label = elementLabel(element);
+          return /^thinking(?:\s+mode)?$/i.test(label) || /\bthinking\b/i.test(label);
+        });
+        if (option && !option.disabled) {
+          const pressed = option.getAttribute("aria-pressed");
+          const checked = option.getAttribute("aria-checked");
+          const state = option.getAttribute("data-state");
+          if (pressed !== "true" && checked !== "true" && state !== "on") {
+            option.click();
+          }
+        }
+        await sleep(150);
+        continue;
+      }
+
+      if (thinkingEnabled()) {
+        return true;
+      }
+      await sleep(100);
+    }
     return thinkingEnabled();
   }
 
@@ -184,15 +199,18 @@
     return true;
   }
 
-  function sendPrompt() {
-    const button = findAction([
-      /send prompt/i,
-      /^send$/i,
-      /send message/i,
-    ]);
-    if (button && !button.disabled) {
-      button.click();
-      return true;
+  async function sendPrompt() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const button = findAction([
+        /send prompt/i,
+        /^send$/i,
+        /send message/i,
+      ]);
+      if (button && !button.disabled) {
+        button.click();
+        return true;
+      }
+      await sleep(100);
     }
 
     const composer = findComposer();
@@ -209,11 +227,11 @@
     return true;
   }
 
-  function injectPrompt(prompt) {
+  async function injectPrompt(prompt) {
     if (!prompt || isGenerating() || !isAuthenticatedPage()) {
       return false;
     }
-    if (!ensureThinkingEnabled()) {
+    if (!await ensureThinkingEnabled()) {
       return false;
     }
     const composer = findComposer();
@@ -249,7 +267,7 @@
 
   function chatLimitReached() {
     const text = visibleAlertText();
-    return /you(?:'|’)ve\s+reached.*(?:limit|max|maximum)|maximum.*(?:reached|length)|conversation.*(?:too\s+long|limit)|start\s+a\s+new\s+chat|new\s+chat\s+to\s+continue/i.test(text);
+    return /you(?:'|’)\ve\s+reached.*(?:limit|max|maximum)|maximum.*(?:reached|length)|conversation.*(?:too\s+long|limit)|start\s+a\s+new\s+chat|new\s+chat\s+to\s+continue/i.test(text);
   }
 
   function hasCompletePasiResponse(text) {

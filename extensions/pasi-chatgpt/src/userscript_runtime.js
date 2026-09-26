@@ -10,6 +10,7 @@
     };
     const source = String(definition.source || "");
     const encoded = JSON.stringify({id: script.id, name: script.name, grants: script.grants, mainWorld: script.mainWorld});
+    const auth = String(definition.auth || "");
     return `(() => {
   "use strict";
   const META = ${encoded};
@@ -39,6 +40,7 @@
       chrome.runtime.sendMessage({
         type: "pasi.userscript.rpc",
         script_id: META.id,
+        auth: ${JSON.stringify(auth)},
         request_id: requestId,
         method,
         args,

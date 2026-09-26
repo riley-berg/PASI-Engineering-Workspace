@@ -109,6 +109,9 @@ class TestM0Acceptance(unittest.TestCase):
         roadmap = (Path(__file__).resolve().parents[1] / "roadmap" / "p0-p4.md").read_text(encoding="utf-8")
         self.assertIn("current task prompt is immutable while the task is incomplete", roadmap)
         self.assertIn("generated exactly once after verified completion", roadmap)
+        self.assertIn("fresh chat after prior usage", roadmap)
+        self.assertIn("Thinking enabled", roadmap)
+        self.assertIn("connection-loss stop/resume", roadmap)
 
     def test_live_acceptance_evidence_survives_temp_worktree_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

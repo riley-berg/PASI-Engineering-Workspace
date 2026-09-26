@@ -97,6 +97,12 @@
     activeTab() {
       return send(c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB).then((result) => result);
     },
+    activeMenu() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_MENU_LIST).then((result) => result.commands);
+    },
+    invokeMenu(commandId) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_MENU_INVOKE, {command_id: String(commandId)}).then((result) => result);
+    },
     source(id) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET, {id: String(id)}).then((result) => result);
     },

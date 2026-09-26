@@ -333,7 +333,7 @@
     GM_fetch: {value: fetchApi, configurable: false},
     GM_webRequest: {value: Object.freeze({addRule: addNetworkRule, removeRule: removeNetworkRule, listRules: listNetworkRules}), configurable: false},
   });
-})(JSON.stringify(auth));`;
+})(${JSON.stringify(auth)});`;
   }
 
   function wrapSource(source) {

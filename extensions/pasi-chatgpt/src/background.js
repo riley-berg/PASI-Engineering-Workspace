@@ -13,6 +13,20 @@
     };
   }
 
+  async function sendCurrentPrompt(tabId) {
+    const prompt = await bridgeRequest(PROMPT_URL);
+    if (!prompt.ok) {
+      return prompt;
+    }
+    await chrome.tabs.sendMessage(tabId, {
+      type: "pasi.inject_prompt",
+      task_id: prompt.payload.task_id,
+      prompt: prompt.payload.prompt,
+      prompt_generation: prompt.payload.prompt_generation,
+    });
+    return prompt;
+  }
+
   async function forward(event, sender) {
     try {
       const result = await bridgeRequest(EVENT_URL, {
@@ -23,16 +37,12 @@
         body: JSON.stringify(event),
       });
 
-      if (event.type === "fresh_chat" && sender.tab?.id && result.ok) {
-        const prompt = await bridgeRequest(PROMPT_URL);
-        if (prompt.ok) {
-          await chrome.tabs.sendMessage(sender.tab.id, {
-            type: "pasi.inject_prompt",
-            task_id: prompt.payload.task_id,
-            prompt: prompt.payload.prompt,
-            prompt_generation: prompt.payload.prompt_generation,
-          });
-        }
+      if (
+        (event.type === "chat_ready" || event.type === "fresh_chat") &&
+        sender.tab?.id &&
+        result.ok
+      ) {
+        await sendCurrentPrompt(sender.tab.id);
       }
 
       if (
@@ -68,7 +78,7 @@
   chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.set({
       installed_at: new Date().toISOString(),
-      protocol_version: "m0-v1",
+      protocol_version: "m0-v2",
     });
   });
 })();

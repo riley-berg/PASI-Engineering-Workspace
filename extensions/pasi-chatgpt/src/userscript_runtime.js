@@ -10,10 +10,10 @@
     };
     const encoded = JSON.stringify({id: script.id, name: script.name, grants: script.grants, mainWorld: script.mainWorld});
     const auth = String(definition.auth || "");
-    return `(() => {
+    return `((AUTH) => {
   "use strict";
   const META = ${encoded};
-  const AUTH = ${JSON.stringify(auth)};
+
   const pending = new Map();
   let sequence = 0;
   const listeners = new Map();
@@ -333,7 +333,7 @@
     GM_fetch: {value: fetchApi, configurable: false},
     GM_webRequest: {value: Object.freeze({addRule: addNetworkRule, removeRule: removeNetworkRule, listRules: listNetworkRules}), configurable: false},
   });
-})()`;
+})(JSON.stringify(auth));`;
   }
 
   function wrapSource(source) {

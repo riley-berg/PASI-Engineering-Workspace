@@ -124,15 +124,26 @@ def _prompt_for(task: RoadmapTask) -> str:
     )
 
 
-def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
+def _generic_completion_contract(task_id: str) -> str:
     return (
         "\n\nCompletion response contract:\n"
         "Your final response must include these exact machine-readable markers:\n\n"
-        "PASI_TASK_ID: P0.1\n"
+        f"PASI_TASK_ID: {task_id}\n"
         "PASI_RESULT_STATUS: complete\n"
         "PASI_SUMMARY: <concise completion summary>\n"
-        "PASI_EVIDENCE: <direct evidence supporting completion>\n\n"
+        "PASI_EVIDENCE: <direct evidence supporting completion>\n"
         "PASI_PATCH_START\n"
+        "<unified git patch containing the implemented changes>\n"
+        "PASI_PATCH_END\n"
+    )
+
+
+def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
+    return (
+        _generic_completion_contract("P0.1")
+        + "\n"
+        + "M0-specific completion requirements:\n"
+        + "PASI_PATCH_START\n"
         "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt\n"
         "new file mode 100644\n"
         "--- /dev/null\n"
@@ -145,8 +156,6 @@ def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
         f"{next_prompt}\n"
         "PASI_M0_NEXT_PROMPT_END"
     )
-
-
 
 
 class RoadmapTaskCatalog:
@@ -189,8 +198,12 @@ class RoadmapTaskCatalog:
     def next_task(self, current_task_id: str) -> RoadmapTask | None:
         tasks = self.ordered_tasks()
         for index, task in enumerate(tasks):
-            if task.task_id == current_task_id:
-                return tasks[index + 1] if index + 1 < len(tasks) else None
+            if task.task_id != current_task_id:
+                continue
+            for candidate in tasks[index + 1 :]:
+                if candidate.status != "completed":
+                    return candidate
+            return None
         raise TaskProgressionError(f"unknown roadmap task: {current_task_id}")
 
 
@@ -212,6 +225,8 @@ class TaskPromptProgression:
                 next_task_id=next_task.task_id,
                 next_prompt=_prompt_for(next_task),
             )
+        elif task.task_id != "P0.1":
+            prompt += _generic_completion_contract(task.task_id)
         return cls(
             catalog=catalog,
             state=ProgressionState(

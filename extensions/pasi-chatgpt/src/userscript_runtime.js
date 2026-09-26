@@ -339,6 +339,7 @@
   function buildMainWorld(definition) {
     const source = String(definition.source || "");
     let code = build(definition);
+    code = code.replaceAll("chrome.runtime.connect", "__runtimeConnect").replaceAll("chrome.runtime.sendMessage", "__runtimeSendMessage");
     const open = code.indexOf("  Object.defineProperties(globalThis, {");
     const close = code.indexOf("  });", open);
     if (open < 0 || close < 0) throw new Error("PASI main-world wrapper boundary not found");

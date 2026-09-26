@@ -133,7 +133,7 @@
       id: script.id,
       matches: script.matches,
       excludeMatches: script.excludes.length ? script.excludes : undefined,
-      js: [{code: source}],
+      js: [{code: source}, {code: runtime.wrapSource(script.source)}],
       runAt: script.runAt,
       allFrames: !script.noframes,
       world: script.grants.includes("mainWorld") ? "MAIN" : "USER_SCRIPT",

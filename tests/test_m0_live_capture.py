@@ -17,6 +17,7 @@ def complete_events() -> list[dict[str, object]]:
         {
             "type": "fresh_chat",
             "fresh_chat_created_after_usage": True,
+            "fresh_chat_creation_reason": "usage_limit",
             "fresh_chat_url": "https://chatgpt.com/c/new",
         },
         {
@@ -54,11 +55,6 @@ def complete_events() -> list[dict[str, object]]:
 PASI_RESULT_STATUS: complete
 PASI_SUMMARY: Completed the M0 task.
 PASI_EVIDENCE: Live evidence captured.
-PASI_M0_NEXT_TASK_ID: P0.2
-PASI_M0_NEXT_PROMPT_START
-[PASI TASK P0.2]
-M1 twenty-operation chain
-PASI_M0_NEXT_PROMPT_END
 PASI_PATCH_START
 diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt
 new file mode 100644
@@ -124,8 +120,9 @@ def test_capture_bridge_materializes_real_runtime_evidence() -> None:
     assert payload["task_id"] == "P0.1"
     assert payload["status"] == "complete"
     assert payload["patch"].startswith("diff --git")
-    assert payload["next_task_id"] == "P0.2"
-    assert payload["next_prompt"] == "[PASI TASK P0.2]\nM1 twenty-operation chain"
+    assert payload["next_task_id"] == ""
+    assert payload["next_prompt"] == ""
+    assert payload["runtime_evidence"]["fresh_chat_creation_reason"] == "usage_limit"
     assert payload["runtime_evidence"]["thinking_enabled"] is True
     assert payload["runtime_evidence"]["connection_recovery"]["operation_id"] == "op-1"
 
@@ -172,6 +169,7 @@ def test_current_prompt_payload_is_canonical_and_durable(tmp_path, monkeypatch) 
 
     assert payload["task_id"] == "P0.1"
     assert "PASI_RESULT_STATUS: complete" in payload["prompt"]
+    assert "Do not invent or precompute the next task prompt" in payload["prompt"]
     assert isinstance(payload["prompt_generation"], int)
     assert payload["prompt_generation"] == 1
     assert payload["advance_count"] == 0

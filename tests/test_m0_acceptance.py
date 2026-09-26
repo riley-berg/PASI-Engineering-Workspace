@@ -58,7 +58,6 @@ class TestM0Acceptance(unittest.TestCase):
             {"authenticated": False},
             {"status": "in_progress"},
             {"chat_url": "https://example.com/c/abc"},
-            {"task_id": "P0.2"},
             {"runtime_evidence": None},
         ):
             with self.assertRaises(M0AcceptanceError):

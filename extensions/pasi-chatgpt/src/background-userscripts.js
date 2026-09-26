@@ -149,7 +149,9 @@
       id: script.id,
       matches: effectiveMatches(script),
       excludeMatches: script.excludes.length ? script.excludes : undefined,
-      js: [{code: source}, {code: runtime.wrapSource(script.source)}],
+      js: script.grants.includes("mainWorld")
+        ? [{code: runtime.buildMainWorld(script)}]
+        : [{code: source}, {code: runtime.wrapSource(script.source)}],
       runAt: script.runAt,
       allFrames: !script.noframes,
       world: script.grants.includes("mainWorld") ? "MAIN" : "USER_SCRIPT",

@@ -365,6 +365,31 @@
     return {ok: true, script: await clientScript(next)};
   }
 
+  async function menuList() {
+    const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+    const tabId = tabs[0]?.id;
+    const commands = [];
+    for (const [commandId, command] of menuCommands.entries()) {
+      if (command.tab_id !== tabId) continue;
+      commands.push({id: commandId, script_id: command.script_id, title: command.title});
+    }
+    return {ok: true, commands};
+  }
+
+  async function menuInvoke(message) {
+    const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+    const tabId = tabs[0]?.id;
+    const commandId = String(message.command_id || "");
+    const command = menuCommands.get(commandId);
+    if (!command || command.tab_id !== tabId) throw new Error("Unknown active userscript menu command");
+    ports.get(command.script_id + ":" + tabId)?.postMessage({
+      type: "menu-command",
+      command_id: commandId,
+      info: {source: "action_popup"},
+    });
+    return {ok: true};
+  }
+
   async function networkAdd(message) {
     const all = await registry();
     const script = scriptById(all, String(message.id || ""));
@@ -869,7 +894,7 @@
         requireGrant(script, "menu", method);
         const commandId = "pasi-userscript:" + script.id + ":" + crypto.randomUUID();
         await chrome.contextMenus.create({id: commandId, title: String(args.title || script.name), contexts: ["page"]});
-        menuCommands.set(commandId, {script_id: script.id, tab_id: sender?.tab?.id});
+        menuCommands.set(commandId, {script_id: script.id, tab_id: sender?.tab?.id, title: String(args.title || script.name)});
         return {ok: true, value: commandId};
       }
       case "http.request": {
@@ -1049,6 +1074,8 @@
       case c.MESSAGE_TYPES.USERSCRIPT_NETWORK_LIST: return networkList(message);
       case c.MESSAGE_TYPES.USERSCRIPT_HOSTS: return installQueue.run(() => setHosts(message));
       case c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB: return activeTab();
+      case c.MESSAGE_TYPES.USERSCRIPT_MENU_LIST: return menuList();
+      case c.MESSAGE_TYPES.USERSCRIPT_MENU_INVOKE: return menuInvoke(message);
       case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET: return sourceGet(String(message.id || ""));
       case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_SAVE: return sourceSave(message);
       case c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG: return vcsConfig(message);

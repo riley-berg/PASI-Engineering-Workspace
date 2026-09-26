@@ -155,3 +155,17 @@ def test_capture_bridge_main_declares_and_returns_an_int() -> None:
     assert isinstance(main.body[-1], ast.Return)
     assert isinstance(main.body[-1].value, ast.Constant)
     assert main.body[-1].value.value == 0
+
+
+def test_current_prompt_payload_is_canonical_and_durable() -> None:
+    from scripts.run_m0_live_capture import current_prompt_payload
+
+    payload = current_prompt_payload()
+
+    assert payload["task_id"] in {"P0.1", "P0.2"}
+    assert isinstance(payload["prompt"], str)
+    assert payload["prompt"].strip()
+    assert isinstance(payload["prompt_generation"], int)
+    assert payload["prompt_generation"] >= 1
+    assert isinstance(payload["advance_count"], int)
+    assert payload["advance_count"] >= 0

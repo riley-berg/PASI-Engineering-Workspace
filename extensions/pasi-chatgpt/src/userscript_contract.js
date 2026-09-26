@@ -48,9 +48,10 @@
     for (const rawLine of match[2].split(/\r?\n/)) {
       const line = rawLine.replace(/^\s*\/\/\s?/, "").trim();
       if (!line.startsWith("@")) continue;
-      const space = line.indexOf(/\s/.test(line) ? " " : "\t");
-      const key = (space === -1 ? line.slice(1) : line.slice(1, space)).trim();
-      const value = (space === -1 ? "" : line.slice(space).trim());
+      const match = line.match(/^@(\\S+)(?:\\s+(.*))?$/);
+      if (!match) continue;
+      const key = match[1];
+      const value = String(match[2] || "").trim();
       switch (key) {
         case "name": metadata.name = value || metadata.name; break;
         case "namespace": metadata.namespace = value || metadata.namespace; break;

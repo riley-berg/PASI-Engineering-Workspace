@@ -94,6 +94,8 @@ class TestM0Acceptance(unittest.TestCase):
             "summary": "done",
             "evidence": "evidence",
             "patch": "diff --git a/a b/a",
+            "next_task_id": "P0.2",
+            "next_prompt": "Complete P0.2 using the verified P0.1 evidence.",
         }
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "response.json"

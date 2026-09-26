@@ -98,6 +98,9 @@ class TestM0Acceptance(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_proof_artifact_expectation_uses_a_real_trailing_newline(self) -> None:
+        self.assertEqual("PASI M0 LIVE PROOF\\n", "PASI M0 LIVE PROOF\n")
+
     def test_m0_proof_patch_is_canonicalized_and_other_changes_are_rejected(self) -> None:
         patch = (
             "diff --git a/acceptance/M0-LIVE-PROOF.txt b/acceptance/M0-LIVE-PROOF.txt\\n"

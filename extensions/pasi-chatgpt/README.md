@@ -1,82 +1,68 @@
-# PASI ChatGPT Handoff
+# PASI browser API
 
-This is the authoritative PASI browser extension for the `PASI-Engineering-Workspace` repository.
+The PASI extension is self-contained. It does not depend on Tampermonkey or Greasemonkey.
 
-It is independent of the abandoned `personal-ai-system` repository and has no dependency on its Chromium/controller code.
+The API borrows the useful shape of userscript managers but uses native Chromium extension primitives and a narrower security model.
 
-## Load unpacked
+## Data
 
-From the Engineering Workspace root:
+Use PASI.storage for namespaced persistent state. It supports get, set, remove, list, quota profiling, and cross-tab change notifications.
 
-```bash
-wslpath -w extensions/pasi-chatgpt
-```
+For large datasets, PASI.db wraps extension IndexedDB using structured-clone storage.
 
-Use the resulting Windows path in the browser's **Load unpacked** control.
+PASI.codec.register provides opt-in application type serialization for classes that need reconstruction after storage.
 
-## Runtime boundary
+## Network
 
-The extension observes the authenticated `chatgpt.com` page, tracks the active operation, records a bounded checkpoint, reacts to browser online/offline transitions, and sends structured events to the local PASI capture bridge at:
+PASI.http.request provides Promise-based fetch-style requests through the service worker. Origins are granted at runtime using the browser permission system.
 
-```text
-http://127.0.0.1:8765
-```
+PASI.http.stream exposes response-body streaming through a ReadableStream.
 
-The extension does not depend on the abandoned `personal-ai-system` project.
+PASI.web.observe provides request/complete/error metadata. PASI.web.rules uses declarative network rules for supported request/response header modifications. Arbitrary response-body interception is intentionally not exposed.
 
-## M0 capture
+## DOM
 
-Run the local capture bridge from the repository root:
+PASI.dom.addElement and PASI.dom.addStyle provide controlled DOM helpers.
 
-```bash
-python scripts/run_m0_live_capture.py
-```
+PASI.dom.waitFor and PASI.dom.onPresent implement an element-present style lifecycle without forcing every controller to maintain interval loops.
 
-The bridge writes:
+Shadow DOM roots can be requested when UI isolation is needed.
 
-```text
-.runtime/acceptance/m0-authenticated-response.json
-```
+## Browser/system
 
-when it receives a complete authenticated M0 response plus the required runtime evidence.
+PASI.tabs supports open, close, focus, send, broadcast, list, and subscriptions.
 
-The existing M0 acceptance harness then consumes that file:
+PASI.notifications provides native notifications. PASI.downloads supports relative download paths, including subdirectories below Downloads. PASI.copyText provides a user-gesture-friendly text copy primitive; ambient reads are intentionally not exposed.
 
-```bash
-python scripts/run_m0_live_acceptance.py \
-  --response .runtime/acceptance/m0-authenticated-response.json \
-  --roadmap roadmap/p0-p4.json \
-  --progression-state .runtime/acceptance/task-progression.json
-```
+Dynamic context menus are exposed by PASI.menu.
 
-The extension is deliberately conservative about ChatGPT UI details. It uses stable accessibility labels and the `data-message-author-role` attribute where available, and reports what it can observe instead of fabricating evidence.
+## Permissions and scripts
 
-## Automatic prompt progression
+PASI.permissions wraps Chrome runtime permission checks, requests, and removals.
 
-The current task prompt is immutable while that task is incomplete. The bridge derives the next task prompt exactly once, only after the current task passes the authoritative acceptance harness. The derived prompt carries a bounded handoff from the verified prior task so prompts evolve with the actual repository state instead of repeating a static template.
+PASI.scripts wraps dynamic content-script registration. Scripts must remain extension-local, and host access remains permission-gated.
 
-The extension reuses the durable automation conversation after task completion. It switches back to that stored automation chat when the browser is elsewhere. It does not create a fresh chat merely because a task completed, a chat has prior messages, or Thinking is currently off.
+## Reliability
 
-A connection loss does not advance progression. The current operation keeps its operation ID and checkpoint and resumes through the existing conversation state; PASI does not inject a synthetic recovery message.
+All APIs are Promise-first. Network operations have bounded timeouts and size limits. Storage is namespaced. Cross-tab messaging is explicit.
 
-## Automatic run loop
+The next controller work can migrate the strongest old PASI DOM-controller primitives against this API without bringing back the abandoned controller or adding a userscript-manager dependency.
 
-After the extension loads on an authenticated ChatGPT page, it verifies Thinking and locates the durable automation chat. If the browser is on another chat, it switches back to the stored automation chat. It then injects the current task prompt from the GitHub issue plan.
+## API v3 improvements
 
-A fresh chat is created only when the current automation chat explicitly reports a ChatGPT usage/context limit. Before that recovery chat is created, PASI verifies the desired Thinking state. The fresh-chat event records fresh_chat_creation_reason=usage_limit; no other fresh-chat reason is accepted by the M0 runtime contract.
+The v3 layer adds the improvements that motivated the PASI-native API:
 
-Task order is deterministic: backend phase P0 through P22, with the matching FE-P0 through FE-P22 issue tasks immediately after each backend phase. The order is derived from the issue plan at runtime; issue number order is not used as the execution order.
+- structured values for Date, RegExp, Map, Set, ArrayBuffer, typed arrays, BigInt, and registered application classes;
+- `PASI.http.fetch()` with a Fetch-style `Response`, plus streaming `Response.body`;
+- high-level `PASI.http.rules.modifyHeaders()` for declarative request/response header changes;
+- optional request/response header observation through `PASI.web.observe({include_headers: true}, listener)`;
+- menu controls for text, textarea, number, checkbox, and select inputs rendered in an isolated Shadow DOM panel;
+- automatic `element-present` script execution through `PASI.scripts.register({runAt: {type: "element-present", selector: "..."}, ...})`;
+- explicit runtime `PASI.scripts.execute()` for extension-local files;
+- a capability manifest exposed through `PASI.capabilities`.
 
-When a task response is complete, PASI requires the task marker, completion evidence, and unified patch. The authoritative task acceptance path applies the patch in an isolated worktree, runs `scripts/check_all.sh`, commits only after validation passes, fast-forwards the authoritative worktree, records durable evidence, and only then advances the task prompt.
+Chrome MV3 scripting itself provides document-start, document-end, and document-idle registration phases. PASI implements `element-present` as a bounded page-local lifecycle helper on top of the DOM observer rather than pretending Chrome provides a native fourth run phase.
 
-If ChatGPT reports that the current conversation has reached its usage/context limit, PASI stops the active response when necessary, creates a fresh chat, and resubmits the same current task. This does not advance progression.
+Network header modification uses Chrome declarative network rules, which support modifying request and response headers without exposing raw response bodies to the extension.
 
-If ChatGPT reports a connection/network generation failure, PASI stops the active response, preserves the latest checkpoint/output, and records the same task identity for continuation. Recovery never advances the task and never creates a second synthetic ChatGPT prompt.
-
-The extension requires Thinking to be enabled before a task or recovery prompt is submitted. It attempts to enable the Thinking control automatically when the UI exposes it; otherwise it refuses to send the task and reports a runtime error instead of silently running with the wrong mode.
-
-## Extension context lifecycle
-
-Chrome can invalidate an existing content-script context when the unpacked extension is reloaded, updated, or the page navigates. PASI treats that as an extension lifecycle event, not as a ChatGPT connection failure.
-
-The old content script records its bounded operation state in page session storage, stops its observers/timers, and does not reload the ChatGPT page or inject any recovery message. Reload the extension and refresh the ChatGPT page to acquire the new content-script context; the preserved operation state can then be restored without creating a new task or chat.
+Downloads accept relative paths beneath the browser Downloads directory, including subdirectories; parent traversal is rejected.

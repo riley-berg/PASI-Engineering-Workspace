@@ -13,17 +13,49 @@
     };
   }
 
+  function isContextInvalidated(error) {
+    return /extension context invalidated/i.test(String(error?.message || error || ""));
+  }
+
+  async function sendTabMessage(tabId, message) {
+    try {
+      await chrome.tabs.sendMessage(tabId, message);
+      return true;
+    } catch (error) {
+      // A stale content script can disappear while the service worker is
+      // delivering a prompt. Treat that as a delivery failure, not as a new
+      // task or a reason to create a new chat.
+      return false;
+    }
+  }
+
+  async function safeStorageSet(values) {
+    try {
+      await chrome.storage.local.set(values);
+    } catch (error) {
+      if (!isContextInvalidated(error)) {
+        throw error;
+      }
+    }
+  }
+
   async function sendCurrentPrompt(tabId) {
     const prompt = await bridgeRequest(PROMPT_URL);
     if (!prompt.ok) {
       return prompt;
     }
-    await chrome.tabs.sendMessage(tabId, {
+    const delivered = await sendTabMessage(tabId, {
       type: "pasi.inject_prompt",
       task_id: prompt.payload.task_id,
       prompt: prompt.payload.prompt,
       prompt_generation: prompt.payload.prompt_generation,
     });
+    if (!delivered) {
+      return {
+        ok: false,
+        error: "prompt_delivery_failed",
+      };
+    }
     return prompt;
   }
 
@@ -51,7 +83,7 @@
         result.ok &&
         result.payload.acceptance?.status === "passed"
       ) {
-        await chrome.tabs.sendMessage(sender.tab.id, {
+        await sendTabMessage(sender.tab.id, {
           type: "pasi.acceptance_passed",
           task_id: result.payload.next_task_id,
           prompt_generation: result.payload.prompt_generation,
@@ -60,12 +92,18 @@
 
       return result.payload;
     } catch (error) {
-      await chrome.storage.local.set({
-        last_bridge_error: {
-          message: String(error),
-          at: new Date().toISOString(),
-        },
-      });
+      try {
+        await safeStorageSet({
+          last_bridge_error: {
+            message: String(error),
+            at: new Date().toISOString(),
+          },
+        });
+      } catch (_storageError) {
+        // The service worker may be terminating at the same time as the
+        // bridge request. Do not turn that lifecycle event into another
+        // automation failure.
+      }
       return { ok: false, error: String(error) };
     }
   }
@@ -76,7 +114,7 @@
   });
 
   chrome.runtime.onInstalled.addListener(() => {
-    chrome.storage.local.set({
+    void safeStorageSet({
       installed_at: new Date().toISOString(),
       protocol_version: "m0-v2",
     });

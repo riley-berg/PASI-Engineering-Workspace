@@ -287,6 +287,15 @@
 
   function cleanup() {
     if (disposed) return;
+    try {
+      safeSendMessage({
+        type: "pasi.userscript.rpc",
+        script_id: META.id,
+        auth: "",
+        method: "lifecycle.cleanup",
+        args: {},
+      }).catch(() => undefined);
+    } catch (_) {}
     disposed = true;
     contextAlive = false;
     for (const callback of cleanupCallbacks) {
@@ -294,9 +303,6 @@
     }
     cleanupCallbacks.clear();
     rejectPending(contextError("PASI extension context closed"));
-    try {
-      call("lifecycle.cleanup");
-    } catch (_) {}
     try { connection.disconnect(); } catch (_) {}
   }
 

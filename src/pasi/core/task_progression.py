@@ -125,7 +125,11 @@ def _prompt_for(task: RoadmapTask) -> str:
         "- Work only on this task.\n"
         "- Do not start the next task early.\n"
         "- Do not claim harness-side verification or commit actions before they occur.\n"
-        "- Preserve the current task identity until verified completion."
+        "- Preserve the current task identity until verified completion.\n"
+        "- Reuse the durable PASI automation chat; do not create a new chat because a task completed or the chat already contains messages.\n"
+        "- Create a fresh chat only when ChatGPT explicitly reports a usage or context limit.\n"
+        "- If the browser is on another chat, switch back to the durable automation chat rather than creating one.\n"
+        "- Keep this task prompt immutable until authoritative acceptance verifies completion; the next prompt is derived only after that verification."
     )
 
 

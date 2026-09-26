@@ -318,6 +318,50 @@
     });
   }
 
+  const web = Object.freeze({
+    ...base.web,
+    async observe(options = {}, listener) {
+      if (typeof listener !== "function") throw new TypeError("PASI.web.observe needs a listener");
+      const observerId = options.requestId || crypto.randomUUID();
+      const result = await new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({
+          protocol_version: c.VERSION,
+          type: c.MESSAGE_TYPES.WEB_OBSERVE,
+          urls: options.urls || [],
+          types: options.types || [],
+          requestId: observerId,
+          include_headers: options.include_headers === true,
+        }, (response) => {
+          const error = chrome.runtime.lastError;
+          if (error) reject(new Error(error.message));
+          else if (!response || response.ok !== true) reject(new Error(response?.error || "PASI web observer failed"));
+          else resolve(response);
+        });
+      });
+      const eventName = "pasi-web-event:" + result.observer_id;
+      const handler = (event) => listener(event.detail);
+      globalThis.addEventListener(eventName, handler);
+      return {
+        observer_id: result.observer_id,
+        stop: async () => {
+          globalThis.removeEventListener(eventName, handler);
+          await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({
+              protocol_version: c.VERSION,
+              type: c.MESSAGE_TYPES.WEB_UNOBSERVE,
+              observer_id: result.observer_id,
+            }, (response) => {
+              const error = chrome.runtime.lastError;
+              if (error) reject(new Error(error.message));
+              else if (!response || response.ok !== true) reject(new Error(response?.error || "PASI web observer stop failed"));
+              else resolve(response);
+            });
+          });
+        },
+      };
+    },
+  });
+
   const menu = Object.freeze({
     async register(options, handler) {
       const controls = Array.isArray(options?.controls) ? options.controls.map(normalizeControl) : [];

@@ -205,22 +205,21 @@ def main() -> int:
     response = parse_response(args.response)
 
     if response.task_id == "P0.1":
-        from scripts.run_m0_live_acceptance import main as m0_main
-
-        original_argv = sys.argv
-        try:
-            sys.argv = [
-                "run_m0_live_acceptance.py",
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "run_m0_live_acceptance.py"),
                 "--response",
                 str(args.response),
                 "--roadmap",
                 str(args.roadmap),
                 "--progression-state",
                 str(args.progression_state),
-            ]
-            return m0_main()
-        finally:
-            sys.argv = original_argv
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        return result.returncode
 
     catalog = load_task_catalog(args.roadmap)
     progression_path = args.progression_state.expanduser().resolve()

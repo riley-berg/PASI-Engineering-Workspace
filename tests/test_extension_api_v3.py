@@ -19,6 +19,7 @@ def test_api_v3_exposes_requested_improvements():
         "streamResponse",
         "modifyHeaders",
         "include_headers",
+        "clipboard write was rejected",
         "menu_controls",
         "element_present_run_at",
         "structuredTypes",
@@ -33,6 +34,7 @@ def test_api_v3_has_no_userscript_manager_dependency():
         assert "Tampermonkey" not in source
         assert "Greasemonkey" not in source
         assert "GM_xmlhttpRequest" not in source
+        assert "ensureOffscreen" not in source
 
 
 def test_api_v3_and_background_parse():

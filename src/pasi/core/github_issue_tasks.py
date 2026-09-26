@@ -163,7 +163,7 @@ class GitHubIssueTaskCatalog(RoadmapTaskCatalog):
         frontend_rank = 1
 
         for issue in issues:
-            if issue.get("state") != "open":
+            if issue.get("state", "open") != "open":
                 continue
             parsed = _issue_tasks(issue)
             for ordinal, (task, source) in enumerate(parsed, start=1):

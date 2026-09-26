@@ -13,7 +13,7 @@ from .task_progression import RoadmapTask, RoadmapTaskCatalog, TaskProgressionEr
 GITHUB_REPOSITORY = "th3-st0v3/PASI-Engineering-Workspace"
 GITHUB_ISSUES_URL = (
     "https://api.github.com/repos/"
-    f"{GITHUB_REPOSITORY}/issues?state=all&per_page=100&page=1"
+    f"{GITHUB_REPOSITORY}/issues?state=open&per_page=100&page=1"
 )
 PHASE_ORDER = tuple(range(23))
 ISSUE_FETCH_TIMEOUT = 20.0
@@ -62,7 +62,7 @@ def _fetch_issues() -> list[dict[str, Any]]:
     return [
         item
         for item in payload
-        if isinstance(item, dict) and "pull_request" not in item
+        if isinstance(item, dict) and "pull_request" not in item and item.get("state") == "open"
     ]
 
 

@@ -70,6 +70,10 @@
     USERSCRIPT_VCS_PUSH: "pasi.userscript.vcs.push",
     USERSCRIPT_SYNC_STATUS: "pasi.userscript.sync.status",
     USERSCRIPT_SYNC_RESOLVE: "pasi.userscript.sync.resolve",
+    USERSCRIPT_CLOUD_CONFIG: "pasi.userscript.cloud.config",
+    USERSCRIPT_CLOUD_STATUS: "pasi.userscript.cloud.status",
+    USERSCRIPT_CLOUD_PUSH: "pasi.userscript.cloud.push",
+    USERSCRIPT_CLOUD_PULL: "pasi.userscript.cloud.pull",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 

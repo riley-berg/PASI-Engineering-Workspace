@@ -49,6 +49,11 @@ def test_completion_derives_next_prompt_from_roadmap_exactly_once() -> None:
             verified_task_id="P0.1",
             evidence="duplicate completion",
         )
+    with pytest.raises(TaskProgressionError):
+        progression.complete(
+            verified_task_id="P0.1",
+            evidence="replayed completion against the same controller",
+        )
 
 
 def test_connection_loss_resume_returns_exact_same_prompt_and_checkpoint() -> None:

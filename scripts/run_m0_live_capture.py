@@ -181,14 +181,6 @@ class CaptureState:
                 return False
 
             if task_id == "P0.1":
-                m0_markers = (
-                    extract_marker(text, "PASI_M0_NEXT_TASK_ID"),
-                    extract_block(
-                        text,
-                        "PASI_M0_NEXT_PROMPT_START",
-                        "PASI_M0_NEXT_PROMPT_END",
-                    ),
-                )
                 valid_chat_creation_policy = (
                     not self.fresh_chat_created_after_usage
                     or self.fresh_chat_creation_reason == "usage_limit"

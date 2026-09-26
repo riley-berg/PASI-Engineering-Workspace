@@ -1132,7 +1132,9 @@
             target: {tabId: tab.id},
             injectImmediately: true,
             world: script.grants.includes("mainWorld") ? "MAIN" : "USER_SCRIPT",
-            js: [{code: runtime.build(script)}, {code: runtime.wrapSource(script.source)}],
+            js: script.grants.includes("mainWorld")
+              ? [{code: runtime.buildMainWorld(script)}]
+              : [{code: runtime.build(script)}, {code: runtime.wrapSource(script.source)}],
           });
         } catch (error) {
           console.warn("PASI userscript recovery failed:", script.id, tab.id, error);

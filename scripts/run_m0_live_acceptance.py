@@ -47,8 +47,6 @@ def main() -> int:
     if progression.state.current_task_id != response.task_id:
         raise TaskProgressionError("live response task does not match durable current task")
     expected_next_task_id, expected_next_prompt = progression.expected_next()
-    if response.next_task_id != expected_next_task_id or response.next_prompt != expected_next_prompt:
-        raise TaskProgressionError("live response next task/prompt does not match the canonical roadmap")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     worktree = (
         args.worktree.expanduser().resolve()
@@ -68,6 +66,8 @@ def main() -> int:
             repo=worktree,
             response=response,
             branch_name=branch,
+            next_task_id=expected_next_task_id,
+            next_prompt=expected_next_prompt,
         )
         progression, receipt = progression.complete(
             verified_task_id=response.task_id,

@@ -66,6 +66,7 @@
         <div class="hosts"></div>
         <div class="actions">
           <button data-action="toggle">${script.enabled ? "Disable" : "Enable"}</button>
+          <button data-action="edit">Edit</button>
           <button data-action="host">Host access</button>
           <button data-action="tag">Edit tags</button>
           <button data-action="remove">Remove</button>
@@ -83,6 +84,9 @@
       card.querySelector('[data-action="toggle"]').onclick = async () => {
         await send(script.enabled ? TYPES.disable : TYPES.enable, {id: script.id});
         await refresh();
+      };
+      card.querySelector('[data-action="edit"]').onclick = () => {
+        window.open("editor.html?id=" + encodeURIComponent(script.id), "_blank");
       };
       card.querySelector('[data-action="host"]').onclick = async () => {
         await requestHostAccess(script);
@@ -143,6 +147,18 @@
     const result = await send(TYPES.restore, {backup, mode});
     setStatus(`Restore complete: ${result.imported} scripts imported.`);
     await refresh();
+  };
+  $("install").onclick = async () => {
+    const url = String($("install-url").value || "").trim();
+    if (!url) return;
+    try {
+      const result = await send("pasi.userscript.install", {url});
+      setStatus(`Installed ${result.script?.name || "userscript"}.`);
+      $("install-url").value = "";
+      await refresh();
+    } catch (error) {
+      setStatus(String(error.message || error), true);
+    }
   };
   $("sync").onclick = async () => {
     let result = await send(TYPES.sync);

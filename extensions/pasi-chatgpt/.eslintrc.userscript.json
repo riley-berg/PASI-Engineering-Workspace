@@ -1,0 +1,26 @@
+{
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "script"
+  },
+  "globals": {
+    "PASIUserScript": "readonly",
+    "GM_info": "readonly",
+    "GM_getValue": "readonly",
+    "GM_setValue": "readonly",
+    "GM_deleteValue": "readonly",
+    "GM_listValues": "readonly",
+    "GM_addValueChangeListener": "readonly",
+    "GM_removeValueChangeListener": "readonly",
+    "GM_openInTab": "readonly",
+    "GM_notification": "readonly",
+    "GM_setClipboard": "readonly",
+    "GM_download": "readonly",
+    "GM_registerMenuCommand": "readonly",
+    "GM_xmlhttpRequest": "readonly"
+  }
+}

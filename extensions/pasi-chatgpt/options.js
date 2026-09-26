@@ -52,10 +52,12 @@
       const select = document.createElement("select");
       select.innerHTML = '<option value="local">Keep local</option><option value="cloud">Use cloud</option>';
       item.append(select);
-      if (local?.source || remote?.source) {
+      const localSource = local?.author_source || local?.source || "";
+      const remoteSource = remote?.author_source || remote?.source || "";
+      if (localSource || remoteSource) {
         const diff = document.createElement("pre");
         diff.className = "diff";
-        const rows = globalThis.PASIUserScriptDiff.compare(local?.source || "", remote?.source || "");
+        const rows = globalThis.PASIUserScriptDiff.compare(localSource, remoteSource);
         for (const row of rows) {
           const line = document.createElement("div");
           line.className = row.type === "add" ? "diff-add" : row.type === "remove" ? "diff-remove" : "";
@@ -263,6 +265,9 @@
 
   send("pasi.userscript.cloud.status").then((result) => {
     if (result.status?.state) $("cloud-state").textContent = result.status.state;
+  }).catch(() => undefined);
+  send("pasi.userscript.sync.status").then((result) => {
+    if (result.status?.state) setStatus("Sync: " + result.status.state);
   }).catch(() => undefined);
   refresh().catch((error) => setStatus(String(error.message || error), true));
 })();

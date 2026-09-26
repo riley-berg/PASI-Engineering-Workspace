@@ -29,9 +29,9 @@ class M0Response:
     summary: str
     evidence: str
     patch: str
+    runtime_evidence: M0RuntimeEvidence
     next_task_id: str = ""
     next_prompt: str = ""
-    runtime_evidence: M0RuntimeEvidence
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "M0Response":

@@ -309,6 +309,7 @@ class TaskPromptProgression:
                     "status": "completed",
                     "advance_count": self.state.advance_count + 1,
                     "completion_digest": evidence_digest,
+                    "last_completion_evidence": evidence[-MAX_EVIDENCE_CHARS:],
                     "completed_task_ids": self.state.completed_task_ids + (verified_task_id,),
                 },
             )
@@ -322,7 +323,12 @@ class TaskPromptProgression:
             self.state = next_state
             return self, receipt
 
-        next_prompt = _prompt_for_active_task(self.catalog, next_task)
+        next_prompt = _prompt_for_active_task(
+            self.catalog,
+            next_task,
+            previous_task_id=verified_task_id,
+            previous_completion_evidence=evidence,
+        )
         if next_prompt == self.state.current_prompt:
             raise TaskProgressionError("roadmap produced an unchanged next prompt")
 
@@ -334,6 +340,7 @@ class TaskPromptProgression:
             advance_count=self.state.advance_count + 1,
             checkpoint="",
             completion_digest=evidence_digest,
+            last_completion_evidence=evidence[-MAX_EVIDENCE_CHARS:],
             completed_task_ids=self.state.completed_task_ids + (verified_task_id,),
         )
         receipt = CompletionReceipt(

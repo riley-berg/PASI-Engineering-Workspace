@@ -566,6 +566,33 @@
     };
   }
 
+  function validateScriptFiles(files) {
+    const js = Array.isArray(files) ? files.map(String) : [];
+    if (!js.length || js.length > 32 || js.some((file) => (
+      !file || file.startsWith("/") || file.includes("..") || /[\\\r\n]/.test(file)
+    ))) {
+      throw new TypeError("PASI scripts must use bounded extension-local file paths");
+    }
+    return js;
+  }
+
+  async function handleScriptExecute(message, sender) {
+    const files = validateScriptFiles(message.files);
+    const tabId = Number.isInteger(message.tab_id) && message.tab_id > 0
+      ? message.tab_id
+      : senderTabId(sender);
+    if (tabId === null) throw new Error("PASI script execution requires a browser tab");
+
+    const world = ["ISOLATED", "MAIN"].includes(message.world) ? message.world : "ISOLATED";
+    const results = await chrome.scripting.executeScript({
+      target: {tabId},
+      files,
+      world,
+      injectImmediately: message.inject_immediately !== false,
+    });
+    return {ok: true, tab_id: tabId, results};
+  }
+
   async function handleScriptRegister(message) {
     const options = validateScriptOptions(message.options);
     await chrome.scripting.registerContentScripts([options]);
@@ -715,6 +742,7 @@
       case contract.MESSAGE_TYPES.PERMISSION_REMOVE:
         return handlePermissions(message.type, message);
       case contract.MESSAGE_TYPES.SCRIPT_REGISTER: return handleScriptRegister(message);
+      case contract.MESSAGE_TYPES.SCRIPT_EXECUTE: return handleScriptExecute(message, sender);
       case contract.MESSAGE_TYPES.SCRIPT_UNREGISTER: return handleScriptUnregister(message);
       case contract.MESSAGE_TYPES.SCRIPT_LIST: return handleScriptList();
       case contract.MESSAGE_TYPES.WEB_OBSERVE: return handleWebObserve(message, sender);

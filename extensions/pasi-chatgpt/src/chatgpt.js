@@ -251,7 +251,7 @@
 
   function visibleAlertText() {
     return visibleElements(
-      '[role="alert"], [data-testid*="error"], [data-testid*="toast"], [data-testid*="notification"]'
+      '[role="alert"], [data-testid*="error"], [data-testid*="toast"], [data-testid*="notification"], [data-testid*="limit"], [class*="error"], [class*="warning"], [class*="limit"]'
     )
       .map((element) => cleanText(element.innerText || element.textContent))
       .filter(Boolean)

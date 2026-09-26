@@ -30,6 +30,8 @@
         metadata: options.metadata,
         enabled: options.enabled !== false,
         replace: options.replace === true,
+        tags: options.tags,
+        group: options.group,
       }).then((result) => result.script);
     },
     unregister(id) {

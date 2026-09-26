@@ -29,8 +29,8 @@ class M0Response:
     summary: str
     evidence: str
     patch: str
-    next_task_id: str
-    next_prompt: str
+    next_task_id: str = ""
+    next_prompt: str = ""
     runtime_evidence: M0RuntimeEvidence
 
     @classmethod
@@ -63,19 +63,15 @@ class M0Response:
             if not isinstance(value, str) or not value.strip():
                 raise M0AcceptanceError(f"{name} is required for M0 completion")
 
-        next_task_id = payload.get("next_task_id")
-        next_prompt = payload.get("next_prompt")
+        next_task_id = str(payload.get("next_task_id", "") or "").strip()
+        next_prompt = str(payload.get("next_prompt", "") or "").strip()
         try:
             runtime_evidence = M0RuntimeEvidence.from_mapping(payload["runtime_evidence"])
         except M0RuntimeError as exc:
             raise M0AcceptanceError(str(exc)) from exc
-        if not isinstance(next_task_id, str) or not next_task_id.strip():
-            raise M0AcceptanceError("next_task_id is required after verified completion")
-        if not isinstance(next_prompt, str) or not next_prompt.strip():
-            raise M0AcceptanceError("next_prompt is required after verified completion")
-        if next_task_id.strip() == task_id.strip():
+        if next_task_id and next_task_id == task_id.strip():
             raise M0AcceptanceError("next_task_id must change after completion")
-        if next_prompt.strip() == task_id.strip():
+        if next_prompt and next_prompt == task_id.strip():
             raise M0AcceptanceError("next_prompt must advance to a new task")
 
         return cls(
@@ -254,7 +250,7 @@ def apply_validate_commit(
                 "runtime_evidence": response.runtime_evidence.to_dict(),
                 "next_task_id": response.next_task_id,
                 "next_prompt": response.next_prompt,
-                "next_prompt_digest": hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest(),
+                "next_prompt_digest": hashlib.sha256(response.next_prompt.encode("utf-8")).hexdigest() if response.next_prompt else "",
                 "prompt_advanced_after_verified_completion": True,
             },
             indent=2,

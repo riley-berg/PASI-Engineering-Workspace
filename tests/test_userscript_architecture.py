@@ -88,8 +88,9 @@ def test_all_userscript_javascript_parses():
         "background.js",
         "options.js",
     ]:
+        target = EXT / name if name == "options.js" else EXT / "src" / name
         result = subprocess.run(
-            ["node", "--check", str(EXT / "src" / name)],
+            ["node", "--check", str(target)],
             capture_output=True,
             text=True,
             check=False,

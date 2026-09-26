@@ -1,3 +1,5 @@
+importScripts("src/api_contract.js", "src/background-api.js");
+
 (() => {
   "use strict";
 
@@ -22,9 +24,6 @@
       const response = await chrome.tabs.sendMessage(tabId, message);
       return response?.ok === true;
     } catch (error) {
-      // A stale content script can disappear while the service worker is
-      // delivering a prompt. Treat that as a delivery failure, not as a new
-      // task or a reason to create a new chat.
       return false;
     }
   }
@@ -100,15 +99,24 @@
           },
         });
       } catch (_storageError) {
-        // The service worker may be terminating at the same time as the
-        // bridge request. Do not turn that lifecycle event into another
-        // automation failure.
+        // Keep browser lifecycle failures from becoming a second automation error.
       }
       return { ok: false, error: String(error) };
     }
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (String(message?.type || "").startsWith("pasi.api.")) {
+      globalThis.PASIBackgroundAPI
+        .handle(message, sender)
+        .then(sendResponse)
+        .catch((error) => sendResponse({
+          ok: false,
+          error: String(error?.message || error),
+        }));
+      return true;
+    }
+
     forward(message, sender).then((result) => sendResponse(result));
     return true;
   });
@@ -117,6 +125,7 @@
     void safeStorageSet({
       installed_at: new Date().toISOString(),
       protocol_version: "m0-v2",
+      pasi_api_version: globalThis.PASIExtensionAPIContract.VERSION,
     });
   });
 })();

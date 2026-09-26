@@ -20,6 +20,8 @@
       ],
       "js": [
         "src/protocol.js",
+        "src/api_contract.js",
+        "src/api.js",
         "src/chatgpt.js",
         "src/content.js"
       ],

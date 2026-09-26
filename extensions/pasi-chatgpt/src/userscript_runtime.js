@@ -8,15 +8,15 @@
       grants: Array.isArray(definition.grants) ? definition.grants.map(String) : [],
       mainWorld: definition.grants?.includes("mainWorld") === true,
     };
-    const source = String(definition.source || "");
     const encoded = JSON.stringify({id: script.id, name: script.name, grants: script.grants, mainWorld: script.mainWorld});
     const auth = String(definition.auth || "");
     return `(() => {
   "use strict";
   const META = ${encoded};
-  const SOURCE = ${JSON.stringify(source)};
   const pending = new Map();
   let sequence = 0;
+  const listeners = new Map();
+  const menuCallbacks = new Map();
   const connection = chrome.runtime.connect({name: "pasi.userscript:" + META.id});
 
   connection.onMessage.addListener((message) => {
@@ -32,12 +32,13 @@
     if (message?.type === "menu-command") {
       const callback = menuCallbacks.get(message.command_id);
       if (callback) Promise.resolve(callback(message.info)).catch((error) => {
-        void call("script.error", {message: String(error?.message || error), stack: String(error?.stack || "")});
+        void call("script.error", {
+          message: String(error?.message || error),
+          stack: String(error?.stack || ""),
+        });
       });
     }
   });
-
-  const listeners = new Map();
 
   function call(method, args = {}) {
     const requestId = META.id + ":" + (++sequence);
@@ -105,8 +106,7 @@
 
   function removeValueChangeListener(listenerId) {
     const id = String(listenerId);
-    const listenersForId = listeners.get(id);
-    if (listenersForId) listeners.delete(id);
+    listeners.delete(id);
     return call("storage.unwatch", {listener_id: id});
   }
 
@@ -143,8 +143,6 @@
       return commandId;
     });
   }
-
-  const menuCallbacks = new Map();
 
   function request(config) {
     requireGrant("http", "xmlhttpRequest");
@@ -195,6 +193,16 @@
     },
   };
 
+  function reportError(error) {
+    void call("script.error", {
+      message: String(error?.message || error || ""),
+      stack: String(error?.stack || ""),
+    }).catch(() => undefined);
+  }
+
+  globalThis.addEventListener?.("error", (event) => reportError(event.error || new Error(event.message || "userscript error")), true);
+  globalThis.addEventListener?.("unhandledrejection", (event) => reportError(event.reason), true);
+
   Object.defineProperties(globalThis, {
     PASIUserScript: {value: Object.freeze(PASIUserScript), configurable: false, enumerable: true},
     GM_info: {value: Object.freeze({script: Object.freeze({...META})}), configurable: false},
@@ -211,23 +219,22 @@
     GM_registerMenuCommand: {value: registerMenuCommand, configurable: false},
     GM_xmlhttpRequest: {value: request, configurable: false},
   });
-
-  (async () => {
-    try {
-      const result = (async () => {
-        ${source}
-      })();
-      await result;
-      return result;
-    } catch (error) {
-      try {
-        await call("script.error", {message: String(error?.message || error), stack: String(error?.stack || "")});
-      } catch (_) {}
-      throw error;
-    }
-  })();
 })()`;
   }
 
-  globalThis.PASIUserScriptRuntime = Object.freeze({build});
+  function wrapSource(source) {
+    return `(() => {
+  "use strict";
+  Promise.resolve((async () => {
+    ${String(source || "")}
+  })()).catch((error) => {
+    globalThis.dispatchEvent(new ErrorEvent("error", {
+      error,
+      message: String(error?.message || error || "userscript error"),
+    }));
+  });
+})()`;
+  }
+
+  globalThis.PASIUserScriptRuntime = Object.freeze({build, wrapSource});
 })();

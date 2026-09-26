@@ -179,7 +179,7 @@ def apply_validate_commit(
     if "acceptance/M0-LIVE-PROOF.txt" not in staged:
         raise M0AcceptanceError("M0 proof artifact was not staged")
 
-    commit = _run(
+    _run(
         [
             "git",
             "commit",
@@ -188,10 +188,10 @@ def apply_validate_commit(
         ],
         repo,
         timeout=30,
-    ).strip()
+    )
 
     after = _run(["git", "rev-parse", "HEAD"], repo, timeout=10).strip()
-    if after == before or after != commit.splitlines()[-1]:
+    if after == before:
         raise M0AcceptanceError("M0 did not produce a new commit")
 
     parents = _run(["git", "rev-list", "--parents", "-n", "1", after], repo, timeout=10).strip().split()

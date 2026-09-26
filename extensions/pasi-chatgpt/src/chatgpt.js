@@ -39,7 +39,10 @@
   }
 
   function isAuthenticatedPage() {
-    const urlOk = /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+$/.test(currentChatUrl());
+    const url = currentChatUrl();
+    const urlOk =
+      url === "https://chatgpt.com/" ||
+      /^https:\/\/chatgpt\.com\/c\/[A-Za-z0-9_-]+$/.test(url);
     const composer = findComposer();
     return urlOk && Boolean(composer);
   }

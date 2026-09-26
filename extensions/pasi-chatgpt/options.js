@@ -3,6 +3,8 @@
 
   const TYPES = {
     list: "pasi.userscript.list",
+    enable: "pasi.userscript.enable",
+    disable: "pasi.userscript.disable",
     update: "pasi.userscript.update",
     backup: "pasi.userscript.backup",
     restore: "pasi.userscript.restore",
@@ -79,7 +81,7 @@
         card.append(warning);
       }
       card.querySelector('[data-action="toggle"]').onclick = async () => {
-        await send(script.enabled ? TYPES.toggle : TYPES.toggle, {id: script.id, enabled: !script.enabled});
+        await send(script.enabled ? TYPES.disable : TYPES.enable, {id: script.id});
         await refresh();
       };
       card.querySelector('[data-action="host"]').onclick = async () => {

@@ -7,11 +7,15 @@
   const backup = globalThis.PASIUserScriptBackup;
   const dnr = globalThis.PASIUserScriptDNR;
   const installQueue = globalThis.PASIUserScriptInstallQueue;
-  if (!c || !sc || !runtime || !backup || !dnr || !installQueue) throw new Error("PASI userscript manager dependencies are missing");
+  const vcs = globalThis.PASIUserScriptVCS;
+  const compiler = globalThis.PASIUserScriptCompiler;
+  if (!c || !sc || !runtime || !backup || !dnr || !installQueue || !vcs || !compiler) throw new Error("PASI userscript manager dependencies are missing");
 
   const STORE_KEY = "pasi:userscripts:registry";
   const USER_SCRIPT_PREFIX = "pasi:userscript:";
   const SYNC_PREFIX = "pasi:userscripts:sync:";
+  const SYNC_STATUS_KEY = "pasi:userscripts:sync_status";
+  const SYNC_ALARM = "pasi-userscripts-sync-retry";
   const ports = new Map();
   const valueWatchers = new Map();
   const menuCommands = new Map();
@@ -73,9 +77,11 @@
   }
 
   async function clientScript(script) {
-    const {source, auth, ...safe} = script;
+    const {source, auth, author_source, ...safe} = script;
     return {
       ...safe,
+      source_language: script.source_language || "javascript",
+      source_chars: String(author_source || source || "").length,
       hosts: hostPatterns(script),
       hosts_granted: await hostsGranted(script),
     };
@@ -201,7 +207,9 @@
 
   async function registerImpl(message) {
     ensureAvailable();
-    const parsed = sc.validateRegistration(message.source, {
+    const authored = String(message.source || "");
+    const compiled = compiler.compile(authored, {typeScript: message.typeScript === true});
+    const parsed = sc.validateRegistration(compiled.code, {
       id: message.id,
       metadata: message.metadata,
       enabled: message.enabled !== false,
@@ -210,7 +218,15 @@
     if (all[parsed.id] && message.replace !== true) {
       throw new Error("PASI userscript already exists: " + parsed.id);
     }
-    const script = stamp({...parsed, tags: message.tags, group: message.group, host_allowlist: message.host_allowlist, network_rules: Array.isArray(message.network_rules) ? message.network_rules : []}, all[parsed.id]);
+    const script = stamp({
+      ...parsed,
+      tags: message.tags,
+      group: message.group,
+      host_allowlist: message.host_allowlist,
+      network_rules: Array.isArray(message.network_rules) ? message.network_rules : [],
+      author_source: authored,
+      source_language: message.typeScript === true ? "typescript" : "javascript",
+    }, all[parsed.id]);
     await configureWorld();
     await saveRegistry({...all, [script.id]: script});
     try {
@@ -278,7 +294,10 @@
     ensureAvailable();
     const all = await registry();
     const current = scriptById(all, String(message.id || ""));
-    const source = message.source === undefined ? current.source : String(message.source);
+    const authored = message.source === undefined ? String(current.author_source || current.source) : String(message.source);
+    const typeScript = message.typeScript === undefined ? current.source_language === "typescript" : message.typeScript === true;
+    const compiled = compiler.compile(authored, {typeScript});
+    const source = compiled.code;
     const metadata = {
       name: current.name,
       namespace: current.namespace,
@@ -303,6 +322,8 @@
       group: message.group === undefined ? current.group : message.group,
       host_allowlist: message.host_allowlist === undefined ? current.host_allowlist : message.host_allowlist,
       network_rules: message.network_rules === undefined ? current.network_rules : message.network_rules,
+      author_source: authored,
+      source_language: typeScript ? "typescript" : "javascript",
     }, current);
     all[current.id] = next;
     await configureWorld();
@@ -370,7 +391,94 @@
     const value = String(pattern || "");
     if (!value) return false;
     if (value === "<all_urls>") return /^https?:/i.test(url);
-    let escaped = value.replace(/[.+^$()|{}[\]\\]/g, "\\  async function info(id) {");
+    let escaped = value.replace(/[.+^$()|{}[\]\\]/g, "\\  async function sourceGet(id) {
+    const all = await registry();
+    const script = scriptById(all, String(id));
+    return {
+      ok: true,
+      id: script.id,
+      source: String(script.author_source || script.source || ""),
+      compiled_source: String(script.source || ""),
+      typeScript: script.source_language === "typescript",
+      revision: script.revision || 0,
+      metadata: {
+        name: script.name,
+        namespace: script.namespace,
+        version: script.version,
+        description: script.description,
+        matches: script.matches,
+        excludes: script.excludes,
+        grants: script.grants,
+        connects: script.connects,
+        runAt: script.runAt,
+        noframes: script.noframes,
+      },
+    };
+  }
+
+  async function sourceSave(message) {
+    return installQueue.run(async () => {
+      const all = await registry();
+      const current = scriptById(all, String(message.id || ""));
+      const authored = String(message.source || "");
+      const typeScript = message.typeScript === true;
+      const result = await updateImpl({
+        id: current.id,
+        source: authored,
+        typeScript,
+        metadata: message.metadata || {},
+      });
+      return result;
+    });
+  }
+
+  async function vcsConfig(message) {
+    return {ok: true, ...(await vcs.saveConfig({
+      config: message.config || {},
+      token: message.token,
+    }))};
+  }
+
+  async function vcsPull(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    const config = await vcs.readConfig();
+    if (!config) throw new Error("VCS configuration has not been set");
+    const remote = await vcs.pull({config});
+    const result = await updateImpl({
+      id: script.id,
+      source: remote.source,
+      typeScript: script.source_language === "typescript",
+    });
+    const next = await registry();
+    next[script.id].vcs_remote_sha = remote.sha || remote.commit_id || "";
+    next[script.id].vcs_last_sync = new Date().toISOString();
+    await saveRegistry(next);
+    return {ok: true, remote, script: await clientScript(next[script.id]), update: result};
+  }
+
+  async function vcsPush(message) {
+    const all = await registry();
+    const script = scriptById(all, String(message.id || ""));
+    const config = await vcs.readConfig();
+    if (!config) throw new Error("VCS configuration has not been set");
+    const remote = await vcs.push({
+      config,
+      source: String(script.author_source || script.source || ""),
+      message: String(message.message || "Update PASI userscript"),
+    });
+    script.vcs_last_sync = new Date().toISOString();
+    script.vcs_remote_sha = remote.sha || remote.commit || "";
+    await saveRegistry(all);
+    return {ok: true, remote};
+  }
+
+  async function syncStatus() {
+    const value = await chrome.storage.local.get(SYNC_STATUS_KEY);
+    return {ok: true, status: value[SYNC_STATUS_KEY] || {state: "idle"}};
+  }
+
+  async function info(id) {");
     escaped = escaped.replace(/\*/g, ".*");
     if (escaped.startsWith("*://")) escaped = "https?://" + escaped.slice(5);
     return new RegExp("^" + escaped + "$", "i").test(url);
@@ -485,6 +593,22 @@
     };
   }
 
+  async function setSyncStatus(status) {
+    await chrome.storage.local.set({
+      [SYNC_STATUS_KEY]: {
+        ...status,
+        updated_at: new Date().toISOString(),
+      },
+    });
+  }
+
+  async function scheduleSyncRetry(backoffMs) {
+    const delay = Math.min(Math.max(Number(backoffMs) || 60000, 60000), 3600000);
+    const retryAt = Date.now() + delay;
+    await chrome.alarms.create(SYNC_ALARM, {when: retryAt});
+    return retryAt;
+  }
+
   async function syncSnapshot(snapshot) {
     const chunks = backup.encodeSync(snapshot);
     const existing = await chrome.storage.sync.get(null);
@@ -508,26 +632,34 @@
   }
 
   async function sync(message) {
+    await setSyncStatus({state: "syncing", automatic: Boolean(message.automatic)});
     const local = await backupNow();
     let remote = null;
     try {
       remote = await readSyncedSnapshot();
     } catch (error) {
-      return {ok: false, status: "remote-invalid", error: String(error?.message || error)};
+      const retryAt = await scheduleSyncRetry(message.backoff_ms || 60000);
+      await setSyncStatus({state: "error", reason: "remote-invalid", error: String(error?.message || error), retry_at: retryAt});
+      return {ok: false, status: "remote-invalid", error: String(error?.message || error), retry_at: retryAt};
     }
     if (!remote) {
       try {
         const chunks = await syncSnapshot(local);
+        await setSyncStatus({state: "ok", status: "pushed", chunks, backoff_ms: 60000});
         return {ok: true, status: "pushed", chunks};
       } catch (error) {
-        return {ok: false, status: "too-large", error: String(error?.message || error)};
+        const retryAt = await scheduleSyncRetry(message.backoff_ms || 60000);
+        await setSyncStatus({state: "error", reason: "too-large", error: String(error?.message || error), retry_at: retryAt});
+        return {ok: false, status: "too-large", error: String(error?.message || error), retry_at: retryAt};
       }
     }
     const diff = backup.diff(local.scripts, remote.scripts);
     if (!diff.added.length && !diff.changed.length && !diff.removed.length) {
+      await setSyncStatus({state: "ok", status: "same", diff});
       return {ok: true, status: "same", diff};
     }
     if (!["replace", "keep-local"].includes(message.mode)) {
+      await setSyncStatus({state: "conflict", status: "conflict", diff});
       return {ok: true, status: "conflict", diff};
     }
     await installQueue.run(() => restoreImpl({backup: remote, mode: message.mode}));
@@ -535,8 +667,11 @@
     try {
       await syncSnapshot(current);
     } catch (error) {
-      return {ok: false, status: "too-large", error: String(error?.message || error)};
+      const retryAt = await scheduleSyncRetry(message.backoff_ms || 60000);
+      await setSyncStatus({state: "error", reason: "write-failed", error: String(error?.message || error), retry_at: retryAt});
+      return {ok: false, status: "too-large", error: String(error?.message || error), retry_at: retryAt};
     }
+    await setSyncStatus({state: "ok", status: message.mode === "replace" ? "pulled" : "merged", diff});
     return {ok: true, status: message.mode === "replace" ? "pulled" : "merged", diff};
   }
 
@@ -809,9 +944,21 @@
       case c.MESSAGE_TYPES.USERSCRIPT_NETWORK_LIST: return networkList(message);
       case c.MESSAGE_TYPES.USERSCRIPT_HOSTS: return installQueue.run(() => setHosts(message));
       case c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB: return activeTab();
+      case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET: return sourceGet(String(message.id || ""));
+      case c.MESSAGE_TYPES.USERSCRIPT_SOURCE_SAVE: return sourceSave(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG: return vcsConfig(message);
+      case c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL: return installQueue.run(() => vcsPull(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH: return installQueue.run(() => vcsPush(message));
+      case c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS: return syncStatus();
       default: throw new Error("Unknown PASI userscript manager method");
     }
   }
+
+
+  chrome.alarms?.onAlarm.addListener((alarm) => {
+    if (alarm.name !== SYNC_ALARM) return;
+    void sync({mode: "preview", automatic: true, backoff_ms: 120000});
+  });
 
   async function restoreRegistered() {
     if (!chrome.userScripts?.register) return;

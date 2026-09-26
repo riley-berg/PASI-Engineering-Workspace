@@ -652,8 +652,16 @@
       }).catch(() => undefined);
     };
 
-    chrome.webRequest.onBeforeRequest.addListener(onBeforeRequest, filter);
-    chrome.webRequest.onCompleted.addListener(onCompleted, filter);
+    chrome.webRequest.onBeforeRequest.addListener(
+      onBeforeRequest,
+      filter,
+      message.include_headers ? ["requestBody", "extraHeaders"] : []
+    );
+    chrome.webRequest.onCompleted.addListener(
+      onCompleted,
+      filter,
+      message.include_headers ? ["responseHeaders", "extraHeaders"] : []
+    );
     chrome.webRequest.onErrorOccurred.addListener(onError, filter);
     webObservers.set(observerId, {tabId, onBeforeRequest, onCompleted, onError});
     return {ok: true, observer_id: observerId};

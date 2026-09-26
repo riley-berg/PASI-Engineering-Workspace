@@ -161,6 +161,20 @@ def _m0_completion_contract(*, next_task_id: str, next_prompt: str) -> str:
     )
 
 
+def _prompt_for_active_task(catalog: "RoadmapTaskCatalog", task: RoadmapTask) -> str:
+    prompt = _prompt_for(task)
+    if task.task_id == "P0.1":
+        next_task = catalog.next_task(task.task_id)
+        if next_task is not None:
+            prompt += _m0_completion_contract(
+                next_task_id=next_task.task_id,
+                next_prompt=_prompt_for_active_task(catalog, next_task),
+            )
+    else:
+        prompt += _generic_completion_contract(task.task_id)
+    return prompt
+
+
 class RoadmapTaskCatalog:
     """Machine-readable task catalog loaded from the canonical roadmap JSON."""
 
@@ -221,15 +235,7 @@ class TaskPromptProgression:
     @classmethod
     def start(cls, *, catalog: RoadmapTaskCatalog, task_id: str) -> "TaskPromptProgression":
         task = catalog.get(task_id)
-        prompt = _prompt_for(task)
-        next_task = catalog.next_task(task.task_id)
-        if task.task_id == "P0.1" and next_task is not None:
-            prompt += _m0_completion_contract(
-                next_task_id=next_task.task_id,
-                next_prompt=_prompt_for(next_task),
-            )
-        elif task.task_id != "P0.1":
-            prompt += _generic_completion_contract(task.task_id)
+        prompt = _prompt_for_active_task(catalog, task)
         return cls(
             catalog=catalog,
             state=ProgressionState(
@@ -265,7 +271,7 @@ class TaskPromptProgression:
         next_task = self.catalog.next_task(self.state.current_task_id)
         if next_task is None:
             return None, None
-        return next_task.task_id, _prompt_for(next_task)
+        return next_task.task_id, _prompt_for_active_task(self.catalog, next_task)
 
     def complete(self, *, verified_task_id: str, evidence: str) -> tuple["TaskPromptProgression", CompletionReceipt]:
         if self.state.status != "active":
@@ -300,7 +306,7 @@ class TaskPromptProgression:
             self.state = next_state
             return self, receipt
 
-        next_prompt = _prompt_for(next_task)
+        next_prompt = _prompt_for_active_task(self.catalog, next_task)
         if next_prompt == self.state.current_prompt:
             raise TaskProgressionError("roadmap produced an unchanged next prompt")
 

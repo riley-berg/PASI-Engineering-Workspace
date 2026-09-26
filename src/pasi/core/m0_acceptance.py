@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from .m0_runtime import M0RuntimeEvidence
+from .m0_runtime import M0RuntimeError, M0RuntimeEvidence
 
 
 CHAT_URL_PATTERN = re.compile(r"^https://chatgpt\.com/c/[A-Za-z0-9_-]+$")
@@ -65,7 +65,10 @@ class M0Response:
 
         next_task_id = payload.get("next_task_id")
         next_prompt = payload.get("next_prompt")
-        runtime_evidence = M0RuntimeEvidence.from_mapping(payload["runtime_evidence"])
+        try:
+            runtime_evidence = M0RuntimeEvidence.from_mapping(payload["runtime_evidence"])
+        except M0RuntimeError as exc:
+            raise M0AcceptanceError(str(exc)) from exc
         if not isinstance(next_task_id, str) or not next_task_id.strip():
             raise M0AcceptanceError("next_task_id is required after verified completion")
         if not isinstance(next_prompt, str) or not next_prompt.strip():

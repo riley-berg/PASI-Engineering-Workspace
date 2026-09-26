@@ -221,7 +221,7 @@ def main() -> int:
         )
         return result.returncode
 
-    catalog = load_task_catalog(args.roadmap)
+    catalog = load_task_catalog(args.roadmap, allow_fallback=False)
     progression_path = args.progression_state.expanduser().resolve()
     if progression_path.exists():
         progression = TaskPromptProgression.load(catalog=catalog, path=progression_path)

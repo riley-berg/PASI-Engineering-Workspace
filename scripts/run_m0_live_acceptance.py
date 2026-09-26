@@ -14,7 +14,8 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pasi.core.m0_acceptance import apply_validate_commit, parse_response_file
-from pasi.core.task_progression import RoadmapTaskCatalog, TaskPromptProgression, TaskProgressionError
+from pasi.core.github_issue_tasks import load_task_catalog
+from pasi.core.task_progression import TaskPromptProgression, TaskProgressionError
 
 
 def persist_evidence(source: Path, destination: Path) -> Path:
@@ -37,7 +38,7 @@ def main() -> int:
     args = parser.parse_args()
 
     response = parse_response_file(args.response)
-    catalog = RoadmapTaskCatalog.from_roadmap_file(args.roadmap.expanduser().resolve())
+    catalog = load_task_catalog(args.roadmap.expanduser().resolve())
     progression_path = args.progression_state.expanduser().resolve()
     if progression_path.exists():
         progression = TaskPromptProgression.load(catalog=catalog, path=progression_path)

@@ -129,6 +129,8 @@ def test_capture_bridge_materializes_real_runtime_evidence() -> None:
 
 def test_capture_bridge_accepts_same_chat_when_no_usage_limit_requires_fresh_chat() -> None:
     events = [event for event in complete_events() if event["type"] != "fresh_chat"]
+    response_complete = next(event for event in events if event["type"] == "response_complete")
+    response_complete["fresh_chat_created_after_usage"] = False
     state = CaptureState()
     for event in events:
         state.apply(event)

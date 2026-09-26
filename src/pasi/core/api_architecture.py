@@ -295,6 +295,7 @@ class GraphQLGuardrails:
         max_depth = 0
         field_count = 0
         total_cost = 0
+        paren_depth = 0
         tokens = _tokenize_graphql(query)
         for index, token in enumerate(tokens):
             if token == "{":
@@ -308,7 +309,13 @@ class GraphQLGuardrails:
             if token == "}":
                 depth = max(0, depth - 1)
                 continue
-            if depth == 0 or token in {"query", "mutation", "subscription", "fragment", "on"}:
+            if token == "(":
+                paren_depth += 1
+                continue
+            if token == ")":
+                paren_depth = max(0, paren_depth - 1)
+                continue
+            if depth == 0 or paren_depth > 0 or token in {"query", "mutation", "subscription", "fragment", "on"}:
                 continue
             if token in {"(", ")", "[", "]"}:
                 continue
@@ -525,7 +532,9 @@ class WebhookSigner:
         self._lock = threading.Lock()
 
     def sign(self, body: bytes, *, timestamp: int, delivery_id: str) -> str:
-        canonical = f"{int(timestamp)}.".encode("ascii") + bytes(body)
+        canonical = (
+            f"{int(timestamp)}.{delivery_id}.".encode("utf-8") + bytes(body)
+        )
         digest = hmac.new(self._secret, canonical, hashlib.sha256).hexdigest()
         return f"t={int(timestamp)},v1={digest}"
 

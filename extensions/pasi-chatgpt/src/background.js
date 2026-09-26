@@ -1,3 +1,4 @@
+try { importScripts("src/vendor/typescript.js"); } catch (_) {}
 importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/userscript_backup.js", "src/userscript_dnr.js", "src/userscript_install_queue.js", "src/userscript_vcs.js", "src/userscript_compiler.js", "src/userscript_cloud.js", "src/background-userscripts.js", "src/background-api.js");
 
 (() => {

@@ -5,7 +5,7 @@
     "lint:userscripts": "eslint --config eslint.config.mjs extensions/pasi-chatgpt/src/userscript_*.js extensions/pasi-chatgpt/src/background-userscripts.js extensions/pasi-chatgpt/src/api_v4.js extensions/pasi-chatgpt/src/background.js extensions/pasi-chatgpt/options.js extensions/pasi-chatgpt/popup.js extensions/pasi-chatgpt/editor.js"
   },
   "devDependencies": {
-    "typescript": "6.0.3",
+    "typescript": "7.0.2",
     "eslint": "10.11.0"
   }
 }

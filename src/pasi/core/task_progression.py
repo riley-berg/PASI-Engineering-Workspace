@@ -238,6 +238,11 @@ class TaskPromptProgression:
 
     def current_prompt(self) -> str:
         return self.state.current_prompt
+    def expected_next(self) -> tuple[str | None, str | None]:
+        next_task = self.catalog.next_task(self.state.current_task_id)
+        if next_task is None:
+            return None, None
+        return next_task.task_id, _prompt_for(next_task)
 
     def complete(
         self,

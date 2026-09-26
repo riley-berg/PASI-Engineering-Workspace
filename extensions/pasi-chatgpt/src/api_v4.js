@@ -29,6 +29,7 @@
         enabled: options.enabled !== false,
         typeScript: options.typeScript === true,
         replace: options.replace === true,
+        confirmUnsafeMainWorld: options.confirmUnsafeMainWorld === true,
       }).then((result) => result.script);
     },
     register(source, options = {}) {
@@ -43,6 +44,7 @@
         typeScript: options.typeScript === true,
         host_allowlist: options.hostAllowlist,
         network_rules: options.networkRules,
+        confirmUnsafeMainWorld: options.confirmUnsafeMainWorld === true,
       }).then((result) => result.script);
     },
     unregister(id) {
@@ -68,6 +70,7 @@
         tags: changes.tags,
         group: changes.group,
         enabled: changes.enabled,
+        confirmUnsafeMainWorld: changes.confirmUnsafeMainWorld === true,
       }).then((result) => result.script);
     },
     backup() {

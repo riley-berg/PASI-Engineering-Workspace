@@ -158,3 +158,22 @@ def test_userscript_runtime_contracts():
     assert "pasi-typescript-lite" in compiler
     assert "github.com" in vcs
     assert "gitlab" in vcs
+
+
+def test_userscript_toolchain_contracts():
+    package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+    assert package["devDependencies"]["typescript"] == "7.0.2"
+    assert package["devDependencies"]["eslint"] == "10.11.0"
+    assert "build:userscript-compiler" in package["scripts"]
+    assert "lint:userscripts" in package["scripts"]
+    assert (ROOT / "eslint.config.mjs").is_file()
+    manager = (EXT / "src/background-userscripts.js").read_text(encoding="utf-8")
+    for token in [
+        "USERSCRIPT_MENU_LIST",
+        "USERSCRIPT_MENU_INVOKE",
+        "USERSCRIPT_CLOUD_PUSH",
+        "USERSCRIPT_CLOUD_PULL",
+        "USERSCRIPT_VCS_FETCH",
+        "USERSCRIPT_SYNC_RESOLVE",
+    ]:
+        assert token in manager or token in (ROOT / "extensions/pasi-chatgpt/src/api_contract.js").read_text(encoding="utf-8")

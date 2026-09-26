@@ -18,6 +18,8 @@
   const listeners = new Map();
   const menuCallbacks = new Map();
   const connection = chrome.runtime.connect({name: "pasi.userscript:" + META.id});
+  let contextAlive = true;
+  let disposed = false;
 
   connection.onMessage.addListener((message) => {
     if (message?.type === "value-change") {
@@ -40,11 +42,50 @@
     }
   });
 
+  function contextError(message) {
+    const error = new Error(message || "PASI extension context invalidated");
+    error.name = "PASIExtensionContextError";
+    return error;
+  }
+
+  function rejectPending(error) {
+    for (const [requestId, pendingRequest] of pending.entries()) {
+      pending.delete(requestId);
+      pendingRequest.reject(error);
+    }
+  }
+
+  async function safeSendMessage(payload, attempt = 0) {
+    if (!contextAlive || disposed || !chrome.runtime?.id) {
+      throw contextError("PASI extension context invalidated");
+    }
+    return new Promise((resolve, reject) => {
+      try {
+        chrome.runtime.sendMessage(payload, (response) => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+            const message = String(error.message || error);
+            if (/context|receiving end|message port/i.test(message) && attempt < 2 && contextAlive && chrome.runtime?.id) {
+              setTimeout(() => safeSendMessage(payload, attempt + 1).then(resolve, reject), 100 * (attempt + 1));
+              return;
+            }
+            reject(new Error(message));
+            return;
+          }
+          resolve(response);
+        });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
   function call(method, args = {}) {
+    if (!contextAlive || disposed) return Promise.reject(contextError());
     const requestId = META.id + ":" + (++sequence);
     return new Promise((resolve, reject) => {
       pending.set(requestId, {resolve, reject});
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         type: "pasi.userscript.rpc",
         script_id: META.id,
         auth: ${JSON.stringify(auth)},
@@ -172,6 +213,50 @@
     });
   }
 
+  async function fetchApi(input, init = {}) {
+    requireGrant("http", "fetch");
+    const payload = typeof input === "string" ? {url: input, ...init} : {url: String(input?.url || ""), ...init};
+    const result = await call("http.fetch", {
+      url: String(payload.url || ""),
+      method: String(payload.method || "GET").toUpperCase(),
+      headers: payload.headers || {},
+      body: payload.body == null ? undefined : String(payload.body),
+      timeout_ms: Number(payload.timeout || 10000),
+    });
+    return {
+      ok: result.ok,
+      status: result.status,
+      statusText: result.statusText,
+      url: result.url,
+      headers: result.headers,
+      text: async () => result.body || "",
+      json: async () => JSON.parse(result.body || "null"),
+    };
+  }
+
+  function addNetworkRule(rule) {
+    requireGrant("webRequest", "network.add");
+    return call("network.add", {rule});
+  }
+
+  function removeNetworkRule(ruleId) {
+    requireGrant("webRequest", "network.remove");
+    return call("network.remove", {rule_id: String(ruleId)});
+  }
+
+  function listNetworkRules() {
+    requireGrant("webRequest", "network.list");
+    return call("network.list");
+  }
+
+  function trackCleanup(callback) {
+    if (typeof callback !== "function") throw new TypeError("cleanup callback must be a function");
+    cleanupCallbacks.add(callback);
+    return () => cleanupCallbacks.delete(callback);
+  }
+
+  const cleanupCallbacks = new Set();
+
   const PASIUserScript = {
     info: Object.freeze({...META}),
     getValue,
@@ -187,11 +272,41 @@
     registerMenuCommand,
     xmlhttpRequest: request,
     httpRequest: request,
+    fetch: fetchApi,
+    network: Object.freeze({
+      addRule: addNetworkRule,
+      removeRule: removeNetworkRule,
+      listRules: listNetworkRules,
+    }),
+    trackCleanup,
     get unsafeWindow() {
       if (!META.mainWorld) throw new Error("unsafeWindow requires @grant unsafeWindow and @grant mainWorld");
       return window;
     },
   };
+
+  function cleanup() {
+    if (disposed) return;
+    disposed = true;
+    contextAlive = false;
+    for (const callback of cleanupCallbacks) {
+      try { callback(); } catch (_) {}
+    }
+    cleanupCallbacks.clear();
+    rejectPending(contextError("PASI extension context closed"));
+    try {
+      call("lifecycle.cleanup");
+    } catch (_) {}
+    try { connection.disconnect(); } catch (_) {}
+  }
+
+  connection.onDisconnect.addListener(() => {
+    contextAlive = false;
+    rejectPending(contextError("PASI extension context invalidated"));
+  });
+
+  globalThis.addEventListener?.("pagehide", cleanup, {once: true});
+  globalThis.addEventListener?.("beforeunload", cleanup, {once: true});
 
   function reportError(error) {
     void call("script.error", {
@@ -218,6 +333,8 @@
     GM_download: {value: download, configurable: false},
     GM_registerMenuCommand: {value: registerMenuCommand, configurable: false},
     GM_xmlhttpRequest: {value: request, configurable: false},
+    GM_fetch: {value: fetchApi, configurable: false},
+    GM_webRequest: {value: Object.freeze({addRule: addNetworkRule, removeRule: removeNetworkRule, listRules: listNetworkRules}), configurable: false},
   });
 })()`;
   }

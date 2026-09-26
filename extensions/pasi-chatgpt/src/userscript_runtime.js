@@ -291,7 +291,7 @@
       safeSendMessage({
         type: "pasi.userscript.rpc",
         script_id: META.id,
-        auth: "",
+        auth: ${JSON.stringify(auth)},
         method: "lifecycle.cleanup",
         args: {},
       }).catch(() => undefined);

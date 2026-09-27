@@ -9,6 +9,9 @@ from .health import HealthClassification, ProviderHealthError, ProviderHealthMon
 
 __all__ = [
     "ChatMessage",
+    "CodingTierError",
+    "CodingTierSmokeResult",
+    "LocalCodingTier",
     "HealthClassification",
     "ProviderHealthError",
     "ProviderHealthMonitor",

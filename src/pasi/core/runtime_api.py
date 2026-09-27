@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+from pathlib import Path
 
 from pasi.core.operation_store import OperationStateNotFound
 from pasi.core.runtime_controls import (
@@ -102,7 +104,11 @@ class RuntimeAPIService:
         return HTTPStatus.NOT_FOUND, {"error": "not found"}
 
 
-def make_handler(service: RuntimeAPIService):
+def make_handler(
+    service: RuntimeAPIService,
+    *,
+    static_root: Path | None = None,
+):
     class Handler(BaseHTTPRequestHandler):
         server_version = "PASI-Runtime/0.1"
 
@@ -115,6 +121,27 @@ def make_handler(service: RuntimeAPIService):
             self.wfile.write(body)
 
         def do_GET(self) -> None:
+            if static_root is not None and self.path.split("?", 1)[0] in {"/", "/index.html", "/app.js", "/app.css"}:
+                requested = self.path.split("?", 1)[0]
+                relative = "index.html" if requested in {"/", "/index.html"} else requested.lstrip("/")
+                target = (static_root / unquote(relative)).resolve()
+                root = static_root.resolve()
+                try:
+                    target.relative_to(root)
+                except ValueError:
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                if not target.is_file():
+                    self._send(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                    return
+                body = target.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", mimetypes.guess_type(str(target))[0] or "application/octet-stream")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
             status, payload = service.request(
                 method="GET",
                 path=self.path,
@@ -153,7 +180,11 @@ def serve(
     service: RuntimeAPIService,
     host: str = "127.0.0.1",
     port: int = 8790,
+    static_root: Path | None = None,
 ) -> None:
-    server = ThreadingHTTPServer((host, port), make_handler(service))
+    server = ThreadingHTTPServer(
+        (host, port),
+        make_handler(service, static_root=static_root),
+    )
     print(f"PASI runtime API listening on http://{host}:{port}", flush=True)
     server.serve_forever()

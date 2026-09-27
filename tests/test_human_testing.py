@@ -62,7 +62,7 @@ def test_trust_requires_all_qualification_dimensions():
         run(i, negative=i in {17, 18, 19}, code_head=f"{(i % 3) + 1:040x}")
         for i in range(20)
     ]
-    cert = HumanTestTrustEvaluator().evaluate(runs, policy=policy)
+    cert = HumanTestTrustEvaluator().evaluate(runs, policy=policy, issuer_secret="test-secret")
     assert cert.status is TrustStatus.TRUSTED
     assert cert.successful_runs == 20
     assert cert.distinct_code_heads == 3
@@ -86,6 +86,7 @@ def test_self_improvement_requires_trust_and_exact_candidate_head():
             run(2, code_head="2" * 40),
         ],
         policy=policy,
+        issuer_secret="test-secret",
     )
     decision = SelfImprovementGate().evaluate(
         trusted,

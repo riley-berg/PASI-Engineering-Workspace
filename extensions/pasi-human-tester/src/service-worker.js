@@ -1,0 +1,222 @@
+importScripts("protocol.js");
+
+const BACKEND_DEFAULT = "http://127.0.0.1:8765";
+let running = false;
+
+function now() { return new Date().toISOString(); }
+
+function backendUrl() {
+  return globalThis.__PASI_HUMAN_TEST_BACKEND__ || BACKEND_DEFAULT;
+}
+
+async function backendRequest(path, method = "GET", body = null, token = "") {
+  const response = await fetch(backendUrl() + path, {
+    method,
+    headers: {
+      ...(body ? {"Content-Type": "application/json"} : {}),
+      ...(token ? {"Authorization": "Bearer " + token} : {})
+    },
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: "omit",
+    cache: "no-store"
+  });
+  const text = await response.text();
+  let payload = null;
+  try { payload = JSON.parse(text); } catch (_) {}
+  if (!response.ok) throw new Error("backend HTTP " + response.status);
+  return payload;
+}
+
+async function sha256Text(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function captureEvidenceScreenshot(tabId, failureOnly = false) {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(undefined, {format: "png"});
+    const digest = await sha256Text(dataUrl);
+    const key = "pasi-human-test:screenshot:" + digest;
+    await chrome.storage.local.set({[key]: {
+      captured_at: now(),
+      tab_id: tabId,
+      failure_only: failureOnly,
+      sha256: digest
+    }});
+    return {sha256: digest, stored_locally: true};
+  } catch (error) {
+    return {sha256: "", stored_locally: false, error: String(error?.message || error)};
+  }
+}
+
+async function ensurePermission(origin) {
+  const permission = origin.endsWith("/") ? origin + "*" : origin + "/*";
+  const present = await chrome.permissions.contains({origins: [permission]});
+  if (present) return true;
+  throw new Error("origin permission is not granted: " + origin);
+}
+
+async function tabComplete(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  return tab.status === "complete";
+}
+
+async function navigate(tabId, url, allowedOrigins) {
+  if (!PASIHumanTestProtocol.originAllowed(url, allowedOrigins)) {
+    throw new Error("navigation target is outside suite allowlist");
+  }
+  await chrome.tabs.update(tabId, {url});
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (await tabComplete(tabId)) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("navigation timed out");
+}
+
+async function injectRunner(tabId) {
+  await chrome.scripting.executeScript({
+    target: {tabId},
+    files: ["runner.js"]
+  });
+}
+
+async function runContentStep(tabId, step) {
+  await injectRunner(tabId);
+  return await chrome.tabs.sendMessage(tabId, {
+    type: "pasi-human-test-step",
+    step
+  });
+}
+
+async function runStep(tabId, step, allowedOrigins) {
+  const startedAt = now();
+  try {
+    let observed = {};
+    if (step.action === "navigate") {
+      const url = new URL(String(step.url || location.href));
+      await navigate(tabId, url.toString(), allowedOrigins);
+      await injectRunner(tabId);
+      observed = {url: url.toString()};
+    } else if (step.action === "reload") {
+      await chrome.tabs.reload(tabId);
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline && !(await tabComplete(tabId))) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      await injectRunner(tabId);
+      observed = {url: (await chrome.tabs.get(tabId)).url || ""};
+    } else if (step.action === "screenshot") {
+      observed = await captureEvidenceScreenshot(tabId, false);
+    } else if (step.action === "api_get_json") {
+      const target = String(step.url || "");
+      if (!PASIHumanTestProtocol.originAllowed(target, allowedOrigins)) {
+        throw new Error("API target is outside suite allowlist");
+      }
+      const response = await fetch(target, {credentials: "omit", cache: "no-store"});
+      if (step.expected_status && response.status !== Number(step.expected_status)) {
+        throw new Error("expected HTTP " + step.expected_status + ", got " + response.status);
+      }
+      const payload = await response.json();
+      observed = {status: response.status, json: payload};
+      if (step.json_path) {
+        const value = String(step.json_path).split(".").reduce(
+          (current, key) => current == null ? undefined : current[key],
+          payload
+        );
+        if (value === undefined) throw new Error("json_path was not found");
+        observed.json_path_value = value;
+      }
+    } else {
+      const response = await runContentStep(tabId, step);
+      if (!response?.ok) throw new Error(response?.error || "content step failed");
+      observed = response.observed || {};
+    }
+    return {
+      step_id: step.id,
+      action: step.action,
+      status: "PASS",
+      started_at: startedAt,
+      ended_at: now(),
+      observed,
+      error: ""
+    };
+  } catch (error) {
+    const screenshot = await captureEvidenceScreenshot(tabId, true);
+    return {
+      step_id: step.id,
+      action: step.action,
+      status: "FAIL",
+      started_at: startedAt,
+      ended_at: now(),
+      observed: {failure_screenshot: screenshot},
+      error: String(error?.message || error)
+    };
+  }
+}
+
+async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
+  if (running) throw new Error("human-test harness is already running");
+  PASIHumanTestProtocol.validateSuite(suite);
+  if (!PASIHumanTestProtocol.originAllowed(targetOrigin + "/", suite.allowed_origins)) {
+    throw new Error("target origin is outside suite allowlist");
+  }
+  const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+  if (!tabs[0]?.id) throw new Error("an active browser tab is required");
+  await ensurePermission(targetOrigin);
+
+  running = true;
+  const runId = "htr-" + crypto.randomUUID();
+  const startedAt = now();
+  const steps = [];
+  try {
+    let tabId = tabs[0].id;
+    for (const step of suite.steps) {
+      const result = await runStep(tabId, step, suite.allowed_origins);
+      steps.push(result);
+      if (result.status === "FAIL") break;
+      const current = await chrome.tabs.get(tabId);
+      if (typeof current.id !== "number") throw new Error("test tab disappeared");
+      tabId = current.id;
+    }
+    const status = steps.every((step) => step.status === "PASS") ? "PASS" : "FAIL";
+    const finishedAt = now();
+    const evidence = {
+      schema_version: 1,
+      run_id: runId,
+      suite_id: suite.suite_id,
+      suite_version: suite.suite_version,
+      code_head: codeHead,
+      browser_name: "Chromium",
+      browser_version: navigator.userAgent,
+      target_origin: targetOrigin,
+      started_at: startedAt,
+      ended_at: finishedAt,
+      status,
+      steps,
+      negative_control: suite.negative_control === true,
+      policy_violations: [],
+      evidence_sha256: ""
+    };
+    const canonical = {...evidence, evidence_sha256: ""};
+    evidence.evidence_sha256 = await sha256Text(JSON.stringify(canonical, Object.keys(canonical).sort()));
+    try {
+      await backendRequest("/v1/human-tests/runs", "POST", evidence, backendToken);
+    } catch (error) {
+      evidence.policy_violations.push("evidence_ingest_failed:" + String(error?.message || error));
+    }
+    await chrome.storage.local.set({"pasi-human-test:last-run": evidence});
+    return evidence;
+  } finally {
+    running = false;
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type !== "pasi-human-test-run-suite") return undefined;
+  runSuite(message)
+    .then((result) => sendResponse({ok: true, result}))
+    .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
+  return true;
+});

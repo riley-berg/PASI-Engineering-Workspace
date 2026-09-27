@@ -590,7 +590,8 @@ class BridgeState:
             "phase", "reason", "recovery_reason", "recovery_action",
             "replacement_reason", "reload_count", "age_ms", "idle_ms",
             "recovery_started_at_ms", "recovery_finished_at_ms",
-            "recovery_duration_ms", "outcome", "observed_status", "error"
+            "recovery_duration_ms", "outcome", "observed_status", "error",
+            "operation_type", "source", "controller_error"
         )
         event = {key: data[key] for key in allowed if key in data}
         if isinstance(captured_at, str):
@@ -709,6 +710,8 @@ class BridgeState:
         data = observation.get("data")
         kind = data.get("kind") if isinstance(data, dict) else None
 
+        if schema_version == "pasi-native-chromium-v2" and kind == "chatgpt_controller_error":
+            return 210
         if schema_version == "pasi-native-chromium-v2" and kind == "chatgpt_runtime_error":
             # Runtime errors must remain the current browser observation until
             # the acceptance runner records them; otherwise the health heartbeat
@@ -745,10 +748,14 @@ class BridgeState:
                     self.state_manager.save_browser_health(observation)
                 elif kind == "chatgpt_state":
                     self.state_manager.save_browser_state(observation)
-            if isinstance(data, dict) and data.get("kind") == "chatgpt_recovery":
-                operation_id = data.get("operation_id")
+            if isinstance(data, dict) and data.get("kind") in {"chatgpt_recovery", "chatgpt_controller_error"}:
+                operation_id = data.get("operation_id") or data.get("active_operation_id")
                 if isinstance(operation_id, str):
-                    self.append_recovery_event(operation_id, data, observation.get("captured_at"))
+                    event_data = dict(data)
+                    if data.get("kind") == "chatgpt_controller_error":
+                        event_data["phase"] = "controller_error"
+                        event_data["controller_error"] = str(data.get("message") or data.get("error") or "controller error")
+                    self.append_recovery_event(operation_id, event_data, observation.get("captured_at"))
 
             current = self.state_manager.load_browser_results()
             incoming_priority = self._browser_observation_priority(observation)

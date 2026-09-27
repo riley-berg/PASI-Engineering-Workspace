@@ -2,7 +2,7 @@
   'use strict';
 
   /*
-   * P1-A core: progress-based recovery decision logic for automation/chromium/pasi-chatgpt/recovery.js.
+   * P1-A core: progress-based recovery decision logic for extensions/pasi-chatgpt/src/recovery.js.
    *
    * Pure, DOM-free decision logic + a small tracker + an optional MutationObserver hookup.
    *

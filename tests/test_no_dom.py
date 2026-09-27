@@ -30,3 +30,53 @@ def test_computer_use_package_imports_without_historical_modules():
 
     assert CapabilityGateway is not None
     assert LocalAccessBroker is not None
+
+
+
+def test_p0_4_runtime_import_surface_is_canonical():
+    from automation.computer_use import adapters, capability_gateway, chatgpt, completion, contracts, ide_state, local_access, obstacles, preapproval, workspace_search
+    from scripts import pasi_chat, pasi_chat_guard, pasi_engineering_executor, pasi_timeout_policy
+
+    assert adapters is not None
+    assert capability_gateway is not None
+    assert chatgpt is not None
+    assert completion is not None
+    assert contracts is not None
+    assert ide_state is not None
+    assert local_access is not None
+    assert obstacles is not None
+    assert preapproval is not None
+    assert workspace_search is not None
+    assert pasi_chat is not None
+    assert pasi_chat_guard is not None
+    assert pasi_engineering_executor is not None
+    assert pasi_timeout_policy.POLICY_PATH.name == "timeout-policy.json"
+
+
+def test_p0_4_runtime_uses_canonical_extension_and_evolving_prompt():
+    root = Path(__file__).resolve().parents[1]
+    executor_source = (root / "scripts" / "pasi_engineering_executor.py").read_text(encoding="utf-8")
+    guard_source = (root / "scripts" / "pasi_chat_guard.py").read_text(encoding="utf-8")
+    chat_source = (root / "scripts" / "pasi_chat.py").read_text(encoding="utf-8")
+    acceptance_source = (root / "scripts" / "pasi_168h_acceptance.py").read_text(encoding="utf-8")
+    timeout_source = (root / "scripts" / "pasi_timeout_policy.py").read_text(encoding="utf-8")
+
+    assert "extensions" in chat_source
+    assert "src" in chat_source
+    assert '"-m","scripts.pasi_chat"' in guard_source
+    assert "--extension-root" in guard_source
+    assert "PASI_TASK_PREVIOUS_CONTEXT" in executor_source
+    assert "PASI_TASK_PREVIOUS_CONTEXT" in acceptance_source
+    assert "extensions" in timeout_source
+    assert "automation/chromium/pasi-chatgpt" not in executor_source
+    assert "automation/chromium/pasi-chatgpt" not in guard_source
+    assert "automation/chromium/pasi-chatgpt" not in chat_source
+    assert "automation/chromium/pasi-chatgpt" not in timeout_source
+
+
+def test_p0_4_supervisor_is_restart_safe():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "scripts" / "run_p0_4_168h.sh").read_text(encoding="utf-8")
+    assert "PASI_168H_MAX_RESTARTS" in source
+    assert "preserving run state and restarting" in source
+    assert "pasi_168h_acceptance.py" in source

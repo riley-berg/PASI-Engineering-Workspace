@@ -91,4 +91,6 @@ class SQLiteSelectionStore:
             ).fetchone()
         if row is None:
             raise SelectionNotFound((roadmap_id, roadmap_revision))
-        return SelectionDecision(**json.loads(row["decision_json"]))
+        payload = json.loads(row["decision_json"])
+        payload["eligible_task_ids"] = tuple(payload["eligible_task_ids"])
+        return SelectionDecision(**payload)

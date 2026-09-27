@@ -72,23 +72,23 @@ def test_coding_tier_does_not_false_pass_when_model_is_unavailable(tmp_path: Pat
 
 
 def test_coding_tier_rejects_wrong_profile_capabilities(tmp_path: Path):
-    bad = ModelProfile(
-        name="bad",
-        provider="ollama",
-        model="qwen2.5-coder:7b",
-        required_capabilities=("chat",),
-        min_context_window_tokens=8192,
-        max_output_tokens=2048,
-        configuration_provenance=("test",),
+    root = tmp_path / "bad.json"
+    root.write_text(
+        __import__("json").dumps({
+            "version": 1,
+            "name": "bad",
+            "provider": "ollama",
+            "model": "qwen2.5-coder:7b",
+            "required_capabilities": ["chat"],
+            "min_context_window_tokens": 8192,
+            "max_output_tokens": 2048,
+            "configuration_provenance": ["test"],
+        }),
+        encoding="utf-8",
     )
-    try:
-        LocalCodingTier(registry(tmp_path)).load_profile(
-            tmp_path / "bad.json"
-        )
-    except FileNotFoundError:
-        pass
-    except Exception:
-        assert True
+    import pytest
+    with pytest.raises(Exception):
+        LocalCodingTier(registry(tmp_path)).load_profile(root)
 
 
 def test_coding_tier_schema_and_profile_files_exist():

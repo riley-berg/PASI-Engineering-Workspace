@@ -120,7 +120,13 @@ class HumanTestRun:
             )
             for item in raw_steps
         )
-        run = cls(
+        supplied = str(value.get("evidence_sha256", ""))
+        canonical_source = dict(value)
+        canonical_source.pop("evidence_sha256", None)
+        expected = canonical_sha256(canonical_source)
+        if supplied != expected:
+            raise ValueError("human-test evidence hash mismatch")
+        return cls(
             run_id=str(value["run_id"]),
             suite_id=str(value["suite_id"]),
             suite_version=int(value["suite_version"]),
@@ -134,13 +140,8 @@ class HumanTestRun:
             steps=steps,
             negative_control=bool(value.get("negative_control", False)),
             policy_violations=tuple(str(item) for item in value.get("policy_violations", [])),
-            evidence_sha256=str(value.get("evidence_sha256", "")),
+            evidence_sha256=supplied,
         )
-        payload = run.to_dict()
-        supplied = payload.pop("evidence_sha256")
-        if run.evidence_sha256 and run.evidence_sha256 != supplied:
-            raise ValueError("human-test evidence hash mismatch")
-        return run
 
 
 @dataclass(frozen=True)

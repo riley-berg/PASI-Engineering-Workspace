@@ -1,4 +1,5 @@
 from pathlib import Path
+import ast
 import json
 import subprocess
 
@@ -87,3 +88,98 @@ def test_p0_4_supervisor_is_restart_safe():
     assert "pasi_168h_acceptance.py" in source
     result = subprocess.run(["bash", "-n", str(root / "scripts" / "run_p0_4_168h.sh")], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def _python_module_exists(root: Path, module: str) -> bool:
+    parts = module.split(".")
+    base = root.joinpath(*parts)
+    return base.is_file() or (base / "__init__.py").is_file()
+
+
+def _resolve_import(root: Path, source: Path, module: str, level: int = 0) -> str:
+    if level == 0:
+        return module
+    rel = source.relative_to(root).with_suffix("")
+    package = list(rel.parts[:-1])
+    if level > len(package) + 1:
+        return ""
+    prefix = package[: len(package) - level + 1]
+    return ".".join([*prefix, *(module.split(".") if module else [])])
+
+
+def test_repository_wide_import_and_path_audit():
+    root = Path(__file__).resolve().parents[1]
+    forbidden = (
+        "automation/chromium/pasi-chatgpt",
+        "pasi_engineering_chat_guard.py",
+        "pasi-chatgpt-unpacked",
+        "PASI-Engineering-Workspace-m0-live",
+        "/home/riley/workspace/personal-ai-system/PASI-Engineering-Workspace",
+    )
+    text_suffixes = {".py", ".sh", ".yml", ".yaml", ".json", ".js", ".mjs", ".ts", ".tsx", ".md", ".toml"}
+    stale = []
+    for path in root.rglob("*"):
+        if not path.is_file() or ".git" in path.parts or path.suffix not in text_suffixes:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for token in forbidden:
+            if token in text:
+                stale.append(f"{path.relative_to(root)}: {token}")
+    assert not stale, "stale/non-canonical references:\\n" + "\\n".join(stale)
+
+    for path in root.rglob("*.py"):
+        if ".git" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports = [(alias.name, 0) for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                imports = [(_resolve_import(root, path, node.module or "", node.level), node.level)]
+            else:
+                continue
+            for module, level in imports:
+                if not module or not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
+                    continue
+                if isinstance(node, ast.ImportFrom):
+                    if _python_module_exists(root, module):
+                        continue
+                    base = module.rsplit(".", 1)[0] if "." in module else ""
+                    if not base or not _python_module_exists(root, base):
+                        raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
+                elif not _python_module_exists(root, module):
+                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
+
+
+def test_canonical_extension_references_resolve():
+    root = Path(__file__).resolve().parents[1]
+    extension = root / "extensions" / "pasi-chatgpt"
+    manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
+    refs = []
+    refs.append(manifest.get("background", {}).get("service_worker"))
+    refs.append(manifest.get("options_ui", {}).get("page"))
+    refs.append(manifest.get("action", {}).get("default_popup"))
+    for entry in manifest.get("content_scripts", []):
+        refs.extend(entry.get("js", [])); refs.extend(entry.get("css", []))
+    for entry in manifest.get("web_accessible_resources", []):
+        refs.extend(entry.get("resources", []))
+    missing = [ref for ref in refs if isinstance(ref, str) and not (extension / ref).is_file()]
+    assert not missing, "manifest references missing extension files: " + ", ".join(missing)
+
+
+def test_p0_4_worktree_and_runtime_paths_are_canonical():
+    root = Path(__file__).resolve().parents[1]
+    acceptance = (root / "scripts" / "pasi_168h_acceptance.py").read_text(encoding="utf-8")
+    executor = (root / "scripts" / "pasi_engineering_executor.py").read_text(encoding="utf-8")
+    launcher = (root / "scripts" / "run_p0_4_168h.sh").read_text(encoding="utf-8")
+    assert 'REPO = "th3-st0v3/PASI-Engineering-Workspace"' in acceptance
+    assert 'git", "worktree", "add", "-B", branch' in acceptance
+    assert '"origin/main"' in acceptance
+    assert "PASI_ACCEPTANCE_WORKTREE" in executor
+    assert 'root/"src"' in executor
+    assert 'test_env["PYTHONPATH"]' in executor
+    assert "PASI_ENGINEERING_EXTENSION_ROOT" in launcher
+    assert "extensions/pasi-chatgpt" in launcher

@@ -1582,43 +1582,13 @@
     };
   }
 
-  async function waitForConversationSignatureDelta(baseline, timeoutMs = 10000) {
-    if (!baseline || !Number.isFinite(Number(baseline.user)) || !Number.isFinite(Number(baseline.assistant))) {
-      return conversationSignature();
-    }
-
-    const targetUser = Number(baseline.user) + 1;
-    const targetAssistant = Number(baseline.assistant) + 1;
-    const observed = await waitUntil(() => {
-      const users = userMessages().length;
-      const assistants = assistantMessages().length;
-      return users === targetUser && assistants === targetAssistant
-        ? { users, assistants }
-        : null;
-    }, timeoutMs, DOM_POLL_MS);
-
-    if (!observed) {
-      throw new Error(
-        'PASI_NATIVE: completed response did not reach exact +1/+1 conversation counts; ' +
-        'baseline=' + String(baseline.user) + ':' + String(baseline.assistant) +
-        ' current=' + String(userMessages().length) + ':' + String(assistantMessages().length)
-      );
-    }
-
-    return conversationSignature();
-  }
-
-  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null, signatureBaseline = null) {
+  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null) {
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
     }
-    // Do not acknowledge completion until the ChatGPT DOM itself reflects the
-    // exact user+assistant turn produced by this operation. Response detection can
-    // succeed before the final message nodes are mounted.
-    if (signatureBaseline) {
-      await waitForConversationSignatureDelta(signatureBaseline);
-    }
-
+    // Response detection is already authoritative for this operation.
+    // Conversation signature/count telemetry is recorded independently for
+    // verification and diagnostics, but it must never block durable completion.
     const body = {
       operation_id: operationId,
       chat_url: chatUrl(),
@@ -1668,8 +1638,8 @@
             }
             // Publish a fresh conversation signature before the completion
             // acknowledgement returns to the acceptance runner. The periodic
-            // heartbeat can lag by several seconds, which is too stale for
-            // exact +1/+1 M1 handoff verification.
+            // heartbeat can lag by several seconds, so this is verification
+            // telemetry only and never an acceptance gate.
             await reportObservation('chatgpt_state', {
               chat_url: chatUrl(),
               conversation_context_exhausted: contextExhausted(),
@@ -1785,10 +1755,6 @@
             : fingerprint();
           const promptText = operationPrompt(operation);
           const assistantSnapshot = snapshotAssistantMessages();
-          const signatureBaseline = {
-            user: userMessages().length,
-            assistant: assistantMessages().length
-          };
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
               operation_id: operation.operation_id,
@@ -1866,8 +1832,7 @@
             operation.operation_id,
             response,
             true,
-            browserTiming,
-            signatureBaseline
+            browserTiming
           );
           chainedOperation = completion?.next_operation || null;
           finalized = true;

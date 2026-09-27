@@ -83,10 +83,10 @@ def test_selector_rejects_invalid_scores_and_tiebreaks_deterministically():
     decision = EvidenceAwareTaskSelector().select(
         roadmap,
         evidence={},
-        advisory_scores={"P2.1": 1.0, "P2.3": 1.0, "P2.2": float("nan")},
+        advisory_scores={"P2.1": float("nan"), "P2.3": 1.0, "P2.2": 100.0},
     )
-    assert decision.selected_task_id == "P2.1"
-    assert decision.excluded_reasons["P2.2"] == "invalid advisory score"
+    assert decision.selected_task_id == "P2.3"
+    assert decision.excluded_reasons["P2.1"] == "invalid advisory score"
 
 
 def test_selection_is_bound_to_roadmap_revision_and_persists(tmp_path):

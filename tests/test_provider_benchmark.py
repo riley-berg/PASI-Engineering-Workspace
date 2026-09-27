@@ -20,7 +20,7 @@ class FakeProvider:
         prompt = messages[0].content
         if self.mode == "provider_error":
             raise RuntimeError("provider exploded")
-        if self.mode == "partial" and "bounded coding" in prompt:
+        if self.mode == "partial" and "exact text: ready" in prompt:
             text = "not-json"
         else:
             text = '{"status":"ok","result":"ready"}'

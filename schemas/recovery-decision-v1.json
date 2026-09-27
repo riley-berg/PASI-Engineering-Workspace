@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/recovery-decision-v1.json",
+  "title": "PASI recovery decision v1",
+  "type": "object",
+  "required": ["classification","reason_code","action","max_attempts","requires_human","preserve_operation_identity"],
+  "properties": {
+    "classification": {"enum": ["retryable","recoverable","blocked","terminal","human_required"]},
+    "reason_code": {"type":"string","minLength":1},
+    "action": {"type":"string","minLength":1},
+    "max_attempts": {"type":"integer","minimum":0},
+    "requires_human": {"type":"boolean"},
+    "preserve_operation_identity": {"type":"boolean"}
+  },
+  "additionalProperties": false
+}

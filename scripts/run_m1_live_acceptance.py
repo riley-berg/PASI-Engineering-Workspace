@@ -435,10 +435,9 @@ def prepare_durable_chat(
 
     chat_url, counts = ensure_chat_ready(client)
 
-    # The browser's active conversation is authoritative. Persist it even when
-    # it differs from an older durable URL so subsequent runs reuse this chat.
-    if stored_url != chat_url:
-        persist_durable_chat_url(chat_url, reason="active_browser_chat")
+    # The browser's active conversation is authoritative. Persist it on every
+    # normal start so the durable state always matches the current chat.
+    persist_durable_chat_url(chat_url, reason="active_browser_chat")
 
     return chat_url, counts, False, "", stored_url, ""
 

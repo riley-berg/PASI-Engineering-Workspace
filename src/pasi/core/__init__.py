@@ -28,6 +28,7 @@ from .recovery import (
 )
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
+from .github_issue_intake import GitHubIssueTaskIntake, GitHubIssueTaskProposal, IssueIntakeError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .selection_store import SelectionNotFound, SQLiteSelectionStore
 from .task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot, SelectionDecision, SelectionError, StaleSelection
@@ -62,6 +63,9 @@ __all__ = [
     "OperationStateNotFound",
     "Planner",
     "PlannerDecision",
+    "GitHubIssueTaskIntake",
+    "GitHubIssueTaskProposal",
+    "IssueIntakeError",
     "RecoveryClassification",
     "RecoveryDecision",
     "RecoveryInput",

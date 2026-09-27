@@ -1743,14 +1743,26 @@
         controllerClaimedAt = 0;
       });
     }, 3000);
+    let persistedRecoveryState = null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+      if (stored?.operation_id === operation.operation_id && typeof stored === 'object') {
+        persistedRecoveryState = stored;
+      }
+    } catch (_) {}
+
     activeRecoveryState = {
+      ...(persistedRecoveryState || {}),
       operation_id: operation.operation_id,
       operation_type: operation.operation_type,
-      started_at: new Date().toISOString(),
-      chat_url: chatUrl(),
+      started_at: persistedRecoveryState?.started_at || new Date().toISOString(),
+      chat_url: persistedRecoveryState?.chat_url || chatUrl(),
       reasoning_mode: reasoningMode,
       github_attached: githubAttached,
-      github_repository: githubRepository
+      github_repository: githubRepository,
+      logical_user_messages_added: Number.isInteger(persistedRecoveryState?.logical_user_messages_added)
+        ? persistedRecoveryState.logical_user_messages_added
+        : 0
     };
     localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
     let finalized = false;
@@ -1805,7 +1817,25 @@
             fastPath: fastHandoff,
             readyBox: box
           });
-          const browserTiming = { ...(submission.timing || {}) };
+          const submissionUserMessagesAdded = Number.isInteger(submission.timing?.user_messages_added)
+            ? submission.timing.user_messages_added
+            : 0;
+          const previousLogicalUserMessagesAdded = Number.isInteger(activeRecoveryState?.logical_user_messages_added)
+            ? activeRecoveryState.logical_user_messages_added
+            : 0;
+          const logicalUserMessagesAdded =
+            previousLogicalUserMessagesAdded + submissionUserMessagesAdded;
+          if (logicalUserMessagesAdded > 100) {
+            throw new Error('PASI_NATIVE: logical user-message submission count exceeded bounded recovery telemetry');
+          }
+          if (activeRecoveryState && activeRecoveryState.operation_id === operation.operation_id) {
+            activeRecoveryState.logical_user_messages_added = logicalUserMessagesAdded;
+            localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
+          }
+          const browserTiming = {
+            ...(submission.timing || {}),
+            user_messages_added: logicalUserMessagesAdded
+          };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
           if (
             Number.isFinite(previousCompletionAckAtMs) &&

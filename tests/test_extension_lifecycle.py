@@ -41,6 +41,8 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("countNewUserMessages(userMessages(), snapshot, expected)", self.content)
         self.assertIn("matchesPrompt", self.content)
         self.assertIn("currentMatched - baselineMatched", self.content)
+        self.assertIn("logical_user_messages_added", self.content)
+        self.assertIn("previousLogicalUserMessagesAdded + submissionUserMessagesAdded", self.content)
         self.assertIn("ChatGPT can replace the DOM nodes for existing messages", self.content)
         self.assertIn("userTextSignature", self.content)
         self.assertIn("userTextReady", self.content)

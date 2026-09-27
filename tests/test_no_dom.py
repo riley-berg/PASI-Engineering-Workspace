@@ -121,6 +121,9 @@ def test_repository_wide_import_and_path_audit():
     for path in root.rglob("*"):
         if not path.is_file() or ".git" in path.parts or path.suffix not in text_suffixes:
             continue
+        # Negative tests intentionally name retired paths to prove they stay absent.
+        if path.name in {"test_no_dom.py", "test_engineering_executor.py"}:
+            continue
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:

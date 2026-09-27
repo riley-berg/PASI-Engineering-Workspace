@@ -1257,42 +1257,34 @@ def main() -> int:
                 )
 
             recovery_record: dict[str, Any] | None = None
-            if planned_recovery:
-                recovery_record = validate_recovery(
-                    final,
-                    operation_id=operation_id,
-                )
-                recovery_record["recovery_id"] = (
-                    f"{run_id}-recovery-{len(evidence['recoveries']) + 1:02d}"
-                )
-                recovery_record["planned"] = True
-                recovery_record["scheduled_offset_seconds"] = (
-                    round(elapsed_before_queue)
-                )
+            recovery_events = final.get("recovery_events")
+            has_recovery_events = isinstance(recovery_events, list) and bool(recovery_events)
 
-                if abs(
-                    recovery_record["scheduled_offset_seconds"]
-                    - PLANNED_RECOVERY_OFFSETS[
-                        len(
-                            [
-                                item
-                                for item in evidence["recoveries"]
-                                if item.get("planned") is True
-                            ]
-                        )
-                    ]
-                ) > RECOVERY_TOLERANCE_SECONDS:
-                    raise LongRunError(
-                        f"planned recovery timing drifted beyond "
-                        f"{RECOVERY_TOLERANCE_SECONDS}s"
+            if planned_recovery or has_recovery_events:
+                recovery_record = validate_recovery(final, operation_id=operation_id)
+                recovery_number = len(evidence["recoveries"]) + 1
+                recovery_record["recovery_id"] = f"{run_id}-recovery-{recovery_number:02d}"
+                recovery_record["planned"] = planned_recovery
+                recovery_record["scheduled_offset_seconds"] = round(elapsed_before_queue)
+
+                if planned_recovery:
+                    planned_seen = len(
+                        [item for item in evidence["recoveries"] if item.get("planned") is True]
                     )
+                    expected_offset = PLANNED_RECOVERY_OFFSETS[planned_seen]
+                    if abs(
+                        recovery_record["scheduled_offset_seconds"] - expected_offset
+                    ) > RECOVERY_TOLERANCE_SECONDS:
+                        raise LongRunError(
+                            "planned recovery timing drifted beyond "
+                            f"{RECOVERY_TOLERANCE_SECONDS}s"
+                        )
 
-                events = final.get("recovery_events")
                 detected_at = None
                 resumed_at = None
                 completed_at = final.get("updated_at")
-                if isinstance(events, list):
-                    for event in events:
+                if isinstance(recovery_events, list):
+                    for event in recovery_events:
                         if not isinstance(event, dict):
                             continue
                         phase = event.get("phase")
@@ -1325,12 +1317,16 @@ def main() -> int:
                 recovery_record["recovery_latency_seconds"] = recovery_latency
                 if recovery_latency > MAX_RECOVERY_LATENCY_SECONDS:
                     raise LongRunError(
-                        f"planned recovery exceeded {MAX_RECOVERY_LATENCY_SECONDS}s"
+                        f"recovery exceeded {MAX_RECOVERY_LATENCY_SECONDS}s"
                     )
 
                 evidence["recoveries"].append(recovery_record)
-                evidence["summary"]["successful_planned_recoveries"] += 1
-
+                if planned_recovery:
+                    evidence["summary"]["successful_planned_recoveries"] += 1
+                else:
+                    evidence["summary"]["unplanned_recoveries"] += 1
+                    if evidence["summary"]["unplanned_recoveries"] > MAX_UNPLANNED_RECOVERIES:
+                        raise LongRunError("unplanned recovery count exceeded acceptance limit")
             state = browser_state(client)
             signature = state.get("conversation_signature")
             if not isinstance(signature, str):
@@ -1407,12 +1403,7 @@ def main() -> int:
                 for item in evidence["health"]["samples"]
             )
 
-        evidence["summary"]["unplanned_recoveries"] = max(
-            0,
-            len(evidence["recoveries"])
-            - evidence["summary"]["successful_planned_recoveries"],
-        )
-
+        evidence["summary"]["unplanned_recoveries"] = len(\n            [item for item in evidence["recoveries"] if item.get("planned") is False]\n        )\n
         validate_finished_evidence(
             evidence,
             started=started_dt,

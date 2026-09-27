@@ -83,6 +83,7 @@ class ChatOperation:
     chain_id: str | None = None
     sequence_index: int | None = None
     predecessor_operation_id: str | None = None
+    predecessor_completed_at_ms: int | float | None = None
     prompt_fingerprint: str | None = None
 
     status: str = "queued"

@@ -5,7 +5,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from pasi.core.event_store import SQLiteEventStore
-from pasi.core.failure_registry import SQLiteFailureRegistry
+from pasi.core.failure_registry import SQLiteFailureRegistry, signature_key
 from pasi.core.ledger_store import SQLiteOperationLedger
 from pasi.core.operation_state import OperationState
 from pasi.core.operation_store import SQLiteOperationStateStore
@@ -170,7 +170,11 @@ def test_fe_p1_console_endpoints_return_durable_control_plane_data(tmp_path):
         evidence_ref="evidence://op-failure-1",
         seen_at="2026-01-01T00:00:00+00:00",
     )
-    assert failure.signature_id == "e8b26d7015b9db88a16564cced5b3e5f4f2b2c6a1b4c6d29b7c7f239b891f5d4"
+    assert failure.signature_id == signature_key(
+        subsystem="controller",
+        failure_code="connection_lost",
+        failure_family="connection",
+    )
 
     service = RuntimeAPIService(
         projection=RuntimeProjectionService(

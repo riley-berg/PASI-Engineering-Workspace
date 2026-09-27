@@ -1784,7 +1784,9 @@
               browserTiming.injected_at_ms - previousCompletionAckAtMs
             );
           }
-          const previousResponseCompletedAtMs = Number(operation.__pasi_response_completed_at_ms);
+          const previousResponseCompletedAtMs = Number(
+            operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms
+          );
           if (
             Number.isFinite(previousResponseCompletedAtMs) &&
             typeof browserTiming.injected_at_ms === 'number' &&

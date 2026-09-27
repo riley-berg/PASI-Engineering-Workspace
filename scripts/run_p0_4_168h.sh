@@ -13,6 +13,7 @@ test "$(basename "$REPO_ROOT")" = "PASI-Engineering-Workspace" || {
 export PASI_PUSH=1
 export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-python scripts/pasi_engineering_executor.py}"
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"
+export PASI_ENGINEERING_EXTENSION_ROOT="${PASI_ENGINEERING_EXTENSION_ROOT:-$REPO_ROOT/extensions/pasi-chatgpt}"
 
 WORKTREE="${PASI_168H_WORKTREE:-$HOME/.pasi-worktrees/pasi-engineering-workspace-168h}"
 BRANCH="${PASI_168H_BRANCH:-pasi/p0-4-168h-run-$(date +%Y%m%d-%H%M%S)}"

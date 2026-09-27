@@ -1,154 +1,140 @@
-# Single PASI ChatGPT extension deployment
+# Single PASI runtime and extension deployment
 
-## Source of truth
+## One source tree
 
-The only extension source is:
+The runtime and browser extension now live in the same source tree:
 
-extensions/pasi-chatgpt/ in PASI-Engineering-Workspace.
+- Engineering Workspace: C:\PASI\PASI-Engineering-Workspace
+- WSL view of the same directory: /mnt/c/PASI/PASI-Engineering-Workspace
+- Opera GX unpacked extension: C:\PASI\pasi-chatgpt-unpacked
 
-The only unpacked extension loaded by Opera GX is:
-
-C:\PASI\pasi-chatgpt-unpacked
-
-Do not load or manually edit another PASI extension directory.
+The browser extension is never loaded from the old WSL checkout.
 
 ## Runtime topology
 
-The runtime is intentionally split across Windows and WSL, but it is one runtime:
-
 PASI-Engineering-Workspace
         |
-        | build + deploy
+        +--> pasi_bridge/                 <-- bridge implementation
+        |
+        +--> extensions/pasi-chatgpt/     <-- extension source
+        |       |
+        |       +--> .bridge-token        <-- generated, ignored
+        |
+        +--> .runtime/bridge-token        <-- same generated token
+        |
+        +--> scripts/run_bridge.sh
+        |
+        +--> scripts/deploy_extension.ps1
+        |
         v
 C:\PASI\pasi-chatgpt-unpacked
         |
-        | Opera GX / ChatGPT
-        | HTTP -> 127.0.0.1:8765
         v
-WSL PASI bridge
+Opera GX -> ChatGPT
+        |
+        | HTTP + Authorization
+        v
+127.0.0.1:8765
         |
         v
-durable PASI operation state / acceptance runtime
+WSL: python3 -m pasi_bridge
 
-The browser extension already uses the canonical bridge URL http://127.0.0.1:8765.
-There must be exactly one live bridge on that port.
+The bridge implementation is no longer sourced from ~/workspace/personal-ai-system.
 
-## One-time Windows setup
+## Build and deploy from Windows
 
-Install Node.js for Windows so npm.cmd and node.exe are available.
+Use the Engineering Workspace checkout:
 
-Then clone/checkout the Engineering Workspace at a Windows path, for example:
+    Set-Location C:\PASI\PASI-Engineering-Workspace
+    npm.cmd run deploy:extension
 
-powershell
-Set-Location C:\PASI
-git clone https://github.com/th3-st0v3/PASI-Engineering-Workspace.git PASI-Engineering-Workspace
-Set-Location C:\PASI\PASI-Engineering-Workspace
-git checkout pasi/single-extension-deployment-20260926
+This performs dependency setup, builds the userscript compiler, provisions the repository-local bridge token, compiles the bridge Python source, validates the MV3 extension, and mirrors extensions\pasi-chatgpt\ to C:\PASI\pasi-chatgpt-unpacked.
 
-The same directory is visible from WSL as:
+The deployment metadata records the exact Engineering Workspace commit.
 
-/mnt/c/PASI/PASI-Engineering-Workspace
+A repeat deployment after dependencies are installed can use:
 
-Do not keep a second Engineering Workspace checkout in WSL.
+    powershell -ExecutionPolicy Bypass -File .\scripts\deploy_extension.ps1 -SkipInstall
 
-## Build and deploy
+## Run the bridge from WSL
 
-From PowerShell in the Windows checkout:
+WSL must use the same checkout that Windows just deployed:
 
-powershell
-Set-Location C:\PASI\PASI-Engineering-Workspace
-powershell -ExecutionPolicy Bypass -File .\scripts\deploy_extension.ps1
+    cd /mnt/c/PASI/PASI-Engineering-Workspace
+    bash scripts/run_bridge.sh
 
-This:
+That launcher:
+1. creates or reuses .runtime/bridge-token;
+2. synchronizes the same token to extensions/pasi-chatgpt/.bridge-token;
+3. runs python3 -m pasi_bridge.
 
-1. installs dependencies with npm.cmd ci when a lockfile is present;
-2. rebuilds the bundled browser TypeScript compiler;
-3. validates Manifest V3;
-4. verifies the canonical bridge endpoint is present;
-5. mirrors extensions\pasi-chatgpt exactly into C:\PASI\pasi-chatgpt-unpacked;
-6. writes source-commit metadata into the deployed directory.
+The bridge listens only on 127.0.0.1:8765.
 
-A normal repeat deployment can skip dependency installation:
+Do not start another bridge from ~/workspace/personal-ai-system.
 
-powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\deploy_extension.ps1 -SkipInstall
+## Verify the bridge
 
-## Start the WSL bridge
+From WSL:
 
-Until the bridge implementation is consolidated into this repository, start the already-proven bridge runtime from the existing PASI runtime checkout:
+    cd /mnt/c/PASI/PASI-Engineering-Workspace
+    python3 scripts/verify_bridge.py
 
-bash
-cd ~/workspace/personal-ai-system
-source .venv/bin/activate
-env -u PYTHONPATH python -m automation.orchestrator.bridge
+This verifies:
+- the repository-local runtime token exists;
+- the extension token and runtime token are identical;
+- the source extension is Manifest V3;
+- the bridge is reachable and healthy;
+- the reported source commit is the current Engineering Workspace commit.
 
-Keep exactly one bridge process running on 127.0.0.1:8765.
-
-The next consolidation step is to transfer the bridge implementation into Engineering Workspace and make this the only supported bridge launch location. The browser-facing contract should remain 127.0.0.1:8765 so the extension deployment does not need another round of rewiring.
-
-## Verify Windows can reach the WSL bridge
+## Verify the deployed Opera extension
 
 From PowerShell:
 
-powershell
-Test-NetConnection 127.0.0.1 -Port 8765
-Invoke-RestMethod http://127.0.0.1:8765/health
+    Set-Location C:\PASI\PASI-Engineering-Workspace
+    powershell -ExecutionPolicy Bypass -File .\scripts\verify_extension_deployment.ps1
 
-The TCP test must report TcpTestSucceeded : True.
+This additionally verifies that:
+- C:\PASI\pasi-chatgpt-unpacked exists;
+- the deployed commit equals the current Engineering Workspace commit;
+- runtime/source/deployed bridge tokens all match;
+- native controller assets are present;
+- 127.0.0.1:8765/health is reachable with the shared token.
 
-If WSL is running but Windows cannot reach the port, verify WSL localhost forwarding/networking before changing the extension URL. Do not replace 127.0.0.1:8765 with a changing WSL IP as a permanent solution.
+## Load the single extension in Opera GX
 
-## Load the deployed extension in Opera GX
+Open opera://extensions
 
-In Opera GX:
+Enable Developer Mode and load only:
 
-1. open opera://extensions;
-2. enable Developer mode;
-3. use Load unpacked once and select:
-   C:\PASI\pasi-chatgpt-unpacked;
-4. after every deployment, click Reload for that extension.
+C:\PASI\pasi-chatgpt-unpacked
 
-Never load the WSL copy:
+After each deployment, click Reload on that extension.
 
+Do not load:
 /home/riley/workspace/personal-ai-system/automation/chromium/pasi-chatgpt
 
-That path is no longer a browser deployment target.
+That is no longer a browser deployment target.
 
-## Verify the exact runtime identity
+## Daily workflow
 
-From PowerShell:
+### Windows
 
-powershell
-Set-Location C:\PASI\PASI-Engineering-Workspace
-powershell -ExecutionPolicy Bypass -File .\scripts\verify_extension_deployment.ps1
+    Set-Location C:\PASI\PASI-Engineering-Workspace
+    git pull --ff-only origin pasi/single-extension-deployment-20260926
+    npm.cmd run deploy:extension
+    powershell -ExecutionPolicy Bypass -File .\scripts\verify_extension_deployment.ps1
 
-The reported deployed source_commit must match the Engineering Workspace commit being tested.
+### WSL
 
-The bridge health check must succeed before running M0/M1.
+    cd /mnt/c/PASI/PASI-Engineering-Workspace
+    bash scripts/run_bridge.sh
 
-## WSL and Opera must use the same checkout/runtime contract
+### Opera GX
 
-WSL must not maintain a second copy of the browser extension.
+Reload the single unpacked extension.
 
-Use the Windows checkout from WSL when inspecting/building the Engineering Workspace:
+This gives Windows build/deploy, WSL bridge execution, and Opera GX browser automation one Engineering Workspace source tree.
 
-bash
-cd /mnt/c/PASI/PASI-Engineering-Workspace
-git rev-parse HEAD
+## Acceptance gate
 
-The browser extension is built/deployed from that same checkout and loaded from:
-
-C:\PASI\pasi-chatgpt-unpacked
-
-The bridge is the only component that remains a long-running WSL process during this phase.
-
-## Acceptance gate before long runs
-
-Do not start the 168-hour benchmark until:
-
-- the bridge responds on 127.0.0.1:8765;
-- Opera GX has only the deployed extension loaded;
-- the deployed commit matches the Engineering Workspace commit;
-- M0 is live-passed;
-- required automated tests are green;
-- M1 uses completion-gated next-prompt generation rather than pre-seeding all 20 prompts.
+Do not start the 168-hour benchmark until the shared runtime is verified, the automated test suite is green, M0 is live-passed, and M1 uses completion-gated dynamic next-prompt generation rather than pre-seeding all twenty prompts.

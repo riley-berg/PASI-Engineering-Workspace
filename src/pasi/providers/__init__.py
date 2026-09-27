@@ -10,6 +10,10 @@ from .health import HealthClassification, ProviderHealthError, ProviderHealthMon
 
 __all__ = [
     "ChatMessage",
+    "BoundedFallbackOrchestrator",
+    "FallbackDecision",
+    "FallbackError",
+    "SQLiteFallbackStore",
     "CodingTierError",
     "CodingTierSmokeResult",
     "LocalCodingTier",

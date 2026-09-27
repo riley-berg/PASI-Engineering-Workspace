@@ -41,6 +41,16 @@ class SQLiteRoadmapStore:
                 """
             )
 
+    def list(self) -> tuple[Roadmap, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM roadmap ORDER BY roadmap_id"
+            ).fetchall()
+        return tuple(
+            Roadmap.from_mapping(json.loads(row["payload_json"]))
+            for row in rows
+        )
+
     def create(self, roadmap: Roadmap) -> Roadmap:
         with self._connect() as connection:
             try:

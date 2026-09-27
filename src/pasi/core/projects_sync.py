@@ -266,6 +266,39 @@ class SQLiteProjectSyncStore:
                 """
             )
 
+    def list_states(self) -> tuple[ProjectSyncState, ...]:
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                "SELECT project_ref, roadmap_id, local_revision, last_remote_revision, status, last_success_at, last_error, source FROM project_sync_state ORDER BY project_ref"
+            ).fetchall()
+        return tuple(ProjectSyncState(*row) for row in rows)
+
+    def list_items(self, project_ref: str) -> tuple[RemoteProjectItem, ...]:
+        with sqlite3.connect(self.path) as connection:
+            rows = connection.execute(
+                """
+                SELECT project_ref, content_id, item_id, content_type,
+                       title, updated_at, remote_revision, archived
+                FROM project_item
+                WHERE project_ref = ?
+                ORDER BY item_id
+                """,
+                (project_ref,),
+            ).fetchall()
+        return tuple(
+            RemoteProjectItem(
+                project_id=row[0],
+                content_id=row[1],
+                item_id=row[2],
+                content_type=row[3],
+                title=row[4],
+                updated_at=row[5],
+                remote_revision=row[6],
+                archived=bool(row[7]),
+            )
+            for row in rows
+        )
+
     def save_state(self, state: ProjectSyncState) -> None:
         with sqlite3.connect(self.path) as connection:
             connection.execute(

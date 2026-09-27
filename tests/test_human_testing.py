@@ -98,6 +98,9 @@ def test_self_improvement_requires_trust_and_exact_candidate_head():
             human_test_run_id="run-2",
             human_test_status=HumanTestStatus.PASS,
             human_test_code_head="2" * 40,
+            human_test_execution_source="mv3-human-test-extension",
+            human_test_suite_id="pasi-p0-qualification",
+            human_test_extension_version="0.1.0",
         ),
     )
     assert decision.status == "PASS"
@@ -110,6 +113,9 @@ def test_self_improvement_requires_trust_and_exact_candidate_head():
             human_test_run_id="run-2",
             human_test_status=HumanTestStatus.PASS,
             human_test_code_head="2" * 40,
+            human_test_execution_source="mv3-human-test-extension",
+            human_test_suite_id="pasi-p0-qualification",
+            human_test_extension_version="0.1.0",
         ),
     )
     assert mismatch.status == "BLOCKED"

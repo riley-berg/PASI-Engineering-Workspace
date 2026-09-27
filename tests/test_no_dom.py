@@ -22,7 +22,9 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
     readme = extension.joinpath("README.md").read_text(encoding="utf-8")
     assert "Tampermonkey" in readme
     assert "does not depend on Tampermonkey or Greasemonkey" in readme
-    assert "CONTROLLER_VERSION = '2.4.11'" in content.read_text(encoding="utf-8")
+    content_text = content.read_text(encoding="utf-8")
+    assert "CONTROLLER_VERSION = '2.4.11'" in content_text
+    assert "PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1'" in content_text
 
 
 def test_computer_use_package_imports_without_historical_modules():
@@ -69,6 +71,8 @@ def test_p0_4_runtime_uses_canonical_extension_and_evolving_prompt():
     assert "PASI_TASK_PREVIOUS_CONTEXT" in executor_source
     assert "PASI_TASK_PREVIOUS_CONTEXT" in acceptance_source
     assert "extensions" in timeout_source
+    assert "PASI_DEPLOYMENT_ID" in chat_source
+    assert "PASI_DEPLOYMENT_ID" in executor_source or "deployment_id" in executor_source
     assert "automation/chromium/pasi-chatgpt" not in executor_source
     assert "automation/chromium/pasi-chatgpt" not in guard_source
     assert "automation/chromium/pasi-chatgpt" not in chat_source

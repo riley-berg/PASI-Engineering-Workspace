@@ -22,6 +22,9 @@ def test_m2_harness_compiles_and_exposes_contract():
     module = load_harness()
     assert module.M2_CHECKPOINT_SCHEMA_VERSION == 1
     assert module.TERMINAL_STATUSES == {"completed", "failed", "cancelled"}
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert 'm1_checkpoint_schema_version' in source
+    assert 'm1_live_acceptance_checkpoint_schema_version' not in source
 
 
 def test_m2_terminal_contract_accepts_one_same_operation_recovery():

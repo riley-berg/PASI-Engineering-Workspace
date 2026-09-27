@@ -654,6 +654,45 @@
     } catch (_) {}
   }
 
+  function installRuntimeErrorTelemetry() {
+    if (globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ === true) return;
+    globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ = true;
+
+    const reportRuntimeError = (source, message, detail = {}) => {
+      const text = String(message || '').slice(0, 2000);
+      const stack = String(detail.stack || '').slice(0, 4000);
+      const sourceUrl = String(detail.sourceUrl || location.href || '').slice(0, 2000);
+      void reportObservation('chatgpt_runtime_error', {
+        chat_url: chatUrl(),
+        active_operation_id: activeOperationId,
+        source,
+        message: text,
+        stack,
+        source_url: sourceUrl,
+        line: Number.isFinite(Number(detail.line)) ? Number(detail.line) : null,
+        column: Number.isFinite(Number(detail.column)) ? Number(detail.column) : null,
+        recovery_defaults_match: /\\bRECOVERY_DEFAULTS\\b/.test(text + '\\n' + stack + '\\n' + sourceUrl),
+        native_controller: true
+      });
+    };
+
+    window.addEventListener('error', (event) => {
+      reportRuntimeError('window_error', event?.message || event?.error?.message, {
+        stack: event?.error?.stack,
+        sourceUrl: event?.filename,
+        line: event?.lineno,
+        column: event?.colno
+      });
+    }, true);
+
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      reportRuntimeError('unhandled_rejection', reason?.message || String(reason || 'Unhandled promise rejection'), {
+        stack: reason?.stack
+      });
+    }, true);
+  }
+
   function reportHealth() {
     if (healthReportInFlight) return healthReportInFlight;
     healthReportInFlight = (async () => {
@@ -1933,6 +1972,8 @@
   document.addEventListener('visibilitychange', () => {
     if (!extensionContextInvalidated) void reportHealth();
   });
+
+  installRuntimeErrorTelemetry();
 
   if (globalThis.PASI_NATIVE_TEST_HOOKS === true) {
     globalThis.PASI_NATIVE_TEST_API = Object.freeze({

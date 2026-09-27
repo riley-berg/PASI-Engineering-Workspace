@@ -146,6 +146,39 @@ async function runStep(tabId, step, allowedOrigins, targetOrigin) {
           throw new Error("json_path value did not match expected value");
         }
       }
+    } else if (step.action === "runtime_control") {
+      if (!runtimeControlToken) throw new Error("runtime control token is required");
+      const operationId = String(step.operation_id || "");
+      if (!operationId) throw new Error("runtime_control requires operation_id");
+      const operation = await backendRequest(
+        "/v1/runtime/operations/" + encodeURIComponent(operationId),
+        "GET"
+      );
+      const expectedRevision = Number(operation?.operation?.state_revision);
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+        throw new Error("runtime operation revision is unavailable");
+      }
+      const response = await fetch(resolveTarget("/v1/runtime/controls", targetOrigin), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + runtimeControlToken,
+          "Idempotency-Key": "htr-" + crypto.randomUUID()
+        },
+        body: JSON.stringify({
+          operation_id: operationId,
+          action: step.control_action,
+          expected_revision: expectedRevision,
+          reason: "human-test-extension",
+        }),
+        credentials: "omit",
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error("runtime control HTTP " + response.status);
+      }
+      observed = payload;
     } else {
       const response = await runContentStep(tabId, step);
       if (!response?.ok) throw new Error(response?.error || "content step failed");
@@ -174,7 +207,7 @@ async function runStep(tabId, step, allowedOrigins, targetOrigin) {
   }
 }
 
-async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
+async function runSuite({suite, targetOrigin, codeHead, backendToken, runtimeControlToken}) {
   if (running) throw new Error("human-test harness is already running");
   PASIHumanTestProtocol.validateSuite(suite);
   if (!PASIHumanTestProtocol.originAllowed(targetOrigin + "/", suite.allowed_origins)) {

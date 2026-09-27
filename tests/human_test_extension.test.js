@@ -10,6 +10,8 @@ const service = fs.readFileSync(path.join(ext, "src", "service-worker.js"), "utf
 const runner = fs.readFileSync(path.join(ext, "runner.js"), "utf8");
 const protocol = fs.readFileSync(path.join(ext, "protocol.js"), "utf8");
 const suite = JSON.parse(fs.readFileSync(path.join(ext, "suites", "p0-smoke-v1.json"), "utf8"));
+const controlSuite = JSON.parse(fs.readFileSync(path.join(ext, "suites", "p0-runtime-controls-v1.json"), "utf8"));
+const negativeSuite = JSON.parse(fs.readFileSync(path.join(ext, "suites", "p0-negative-control-v1.json"), "utf8"));
 
 test("human-test extension is MV3 and defaults to least privilege", () => {
   assert.equal(manifest.manifest_version, 3);
@@ -23,7 +25,7 @@ test("test protocol is typed and excludes arbitrary script steps", () => {
   for (const action of [
     "navigate","click","fill","assert_visible","assert_text",
     "wait_for_text","assert_url_contains","wait_ms","reload",
-    "screenshot","api_get_json"
+    "screenshot","api_get_json","runtime_control"
   ]) assert.ok(protocol.includes(JSON.stringify(action)) || protocol.includes(action));
   assert.equal(service.includes("executeScript({target"), true);
   assert.equal(service.includes('func:'), false);
@@ -44,4 +46,12 @@ test("packaged P0 smoke suite requires real runtime health and visible UI", () =
   assert.equal(suite.suite_id, "pasi-p0-runtime-smoke");
   assert.ok(suite.steps.some((step) => step.action === "api_get_json"));
   assert.ok(suite.steps.some((step) => step.action === "assert_visible"));
+});
+
+
+test("qualification includes a runtime-control suite and a real negative control", () => {
+  assert.equal(controlSuite.suite_id, "pasi-p0-runtime-controls");
+  assert.ok(controlSuite.steps.some((step) => step.action === "runtime_control"));
+  assert.equal(negativeSuite.negative_control, true);
+  assert.equal(negativeSuite.expected_failure_step_id, "intentional-failure");
 });

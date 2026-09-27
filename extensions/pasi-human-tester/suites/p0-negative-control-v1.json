@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "suite_id": "pasi-p0-negative-control",
+  "suite_version": 1,
+  "allowed_origins": ["http://127.0.0.1:*", "http://localhost:*"],
+  "negative_control": true,
+  "expected_failure_step_id": "intentional-failure",
+  "steps": [
+    {
+      "id": "open-app",
+      "action": "navigate",
+      "url": "/",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "intentional-failure",
+      "action": "assert_text",
+      "selector": "body",
+      "text": "PASI_TEST_EXPECTED_FAILURE_SENTINEL_9f3f4d2c",
+      "contains": true,
+      "timeout_ms": 5000
+    }
+  ]
+}

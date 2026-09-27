@@ -20,5 +20,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Human-test extension safety tests
+        run: node --test tests/human_test_extension.test.js tests/native_extension_runtime.test.js
       - name: Frontend tests
         run: node --test web/app.test.js

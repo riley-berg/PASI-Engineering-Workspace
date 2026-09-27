@@ -5,9 +5,15 @@ from .ollama import OllamaProvider
 from .protocol import ChatMessage, ModelProvider, ProviderResponse
 from .selection import DeterministicProviderSelector, ProviderRequirements, ProviderSelection, ProviderSelectionError, StaleProviderSelection
 from .selection_store import ProviderSelectionNotFound, SQLiteProviderSelectionStore
+from .health import HealthClassification, ProviderHealthError, ProviderHealthMonitor, ProviderHealthSnapshot, SQLiteProviderHealthStore
 
 __all__ = [
     "ChatMessage",
+    "HealthClassification",
+    "ProviderHealthError",
+    "ProviderHealthMonitor",
+    "ProviderHealthSnapshot",
+    "SQLiteProviderHealthStore",
     "DeterministicProviderSelector",
     "ProviderRequirements",
     "ProviderSelection",

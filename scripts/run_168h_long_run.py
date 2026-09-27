@@ -769,6 +769,7 @@ def validate_recovery(
     operation_state: dict[str, Any],
     *,
     operation_id: str,
+    controlled_probe: bool,
 ) -> dict[str, Any]:
     events = operation_state.get("recovery_events")
     if not isinstance(events, list):
@@ -790,9 +791,10 @@ def validate_recovery(
     required = {
         "connection_lost",
         "ready_for_retry",
-        "controlled_probe_resume",
         "retry_resumed",
     }
+    if controlled_probe:
+        required.add("controlled_probe_resume")
     missing = sorted(required.difference(phases))
     if missing:
         raise LongRunError(
@@ -843,6 +845,7 @@ def validate_recovery(
         "retry_count_delta": 1,
         "logical_execution_count": 1,
         "terminal_chat_errors": 0,
+        "controlled_probe": controlled_probe,
         "phases": phases,
         "event_count": len(events),
     }

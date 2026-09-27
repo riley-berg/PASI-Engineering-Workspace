@@ -41,6 +41,16 @@ try {
         throw "userscript compiler build failed with exit code $LASTEXITCODE"
     }
 
+    & python scripts\provision_bridge_token.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "bridge token provisioning failed with exit code $LASTEXITCODE"
+    }
+
+    & python -m compileall -q pasi_bridge scripts\provision_bridge_token.py scripts\verify_bridge.py scripts\run_bridge.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "bridge Python compilation check failed with exit code $LASTEXITCODE"
+    }
+
     $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
     if ([string]::IsNullOrWhiteSpace([string]$manifest.name)) {
         throw "manifest.json has no extension name"

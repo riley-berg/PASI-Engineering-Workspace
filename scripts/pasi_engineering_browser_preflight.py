@@ -51,15 +51,26 @@ def healthy() -> bool:
         return False
 
 
-def authorized(bridge_token: str) -> bool:
+EXPECTED_BRIDGE_SERVICE = "pasi-engineering-workspace-chatgpt-bridge"
+
+
+def bridge_status(bridge_token: str) -> dict | None:
     try:
-        return isinstance(get("/status", bridge_token), dict)
-    except HTTPError as exc:
-        if exc.code == 401:
-            return False
-        return False
+        payload = get("/status", bridge_token)
+        return payload if isinstance(payload, dict) else None
+    except HTTPError:
+        return None
     except Exception:
-        return False
+        return None
+
+
+def authorized(bridge_token: str) -> bool:
+    return bridge_status(bridge_token) is not None
+
+
+def is_engineering_workspace_bridge(bridge_token: str) -> bool:
+    payload = bridge_status(bridge_token)
+    return bool(payload and payload.get("service") == EXPECTED_BRIDGE_SERVICE)
 
 
 def version(root: Path) -> str | None:
@@ -113,22 +124,29 @@ def main() -> None:
     ).expanduser().resolve()
     runtime.mkdir(parents=True, exist_ok=True)
 
-    if healthy() and not authorized(bridge_token):
-        raise SystemExit(
-            "127.0.0.1:8765 is already serving a PASI bridge that rejects the "
-            "Engineering Workspace bridge token. Stop the stale bridge process "
-            "(do not rotate credentials behind a live bridge), then rerun this "
-            "preflight."
-        )
+    if healthy():
+        if not authorized(bridge_token):
+            raise SystemExit(
+                "127.0.0.1:8765 is already serving a PASI bridge that rejects the "
+                "Engineering Workspace bridge token. Stop the stale bridge process "
+                "(do not rotate credentials behind a live bridge), then rerun this "
+                "preflight."
+            )
+        if not is_engineering_workspace_bridge(bridge_token):
+            raise SystemExit(
+                "127.0.0.1:8765 is already serving a non-Engineering-Workspace "
+                "PASI bridge. Stop the stale legacy bridge process, then rerun "
+                "this preflight."
+            )
 
-    if not authorized(bridge_token):
+    if not is_engineering_workspace_bridge(bridge_token):
         start_bridge(runtime, bridge_token)
 
     deadline = time.monotonic() + 20
-    while time.monotonic() < deadline and not authorized(bridge_token):
+    while time.monotonic() < deadline and not is_engineering_workspace_bridge(bridge_token):
         time.sleep(0.5)
 
-    if not authorized(bridge_token):
+    if not is_engineering_workspace_bridge(bridge_token):
         raise SystemExit(
             f"Engineering Workspace PASI bridge did not become authorized; inspect "
             f"{runtime / 'bridge.log'}"

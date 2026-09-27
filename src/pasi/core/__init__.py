@@ -1,4 +1,6 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
+from .memory import MemoryError, MemoryRecord, MemoryStatus
+from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
 from .event_store import DuplicateEvent, EventNotFound, SQLiteEventStore
 from .events import DurableEvent, InvalidEvent
 from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature_key
@@ -36,6 +38,11 @@ __all__ = [
     "BoundedRepairController",
     "DeterministicRecoveryClassifier",
     "ChildTaskGenerationError",
+    "DuplicateMemory",
+    "MemoryError",
+    "MemoryNotFound",
+    "MemoryRecord",
+    "MemoryStatus",
     "DuplicateEvent",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",
@@ -69,6 +76,7 @@ __all__ = [
     "RoadmapPhase",
     "SQLiteEventStore",
     "SQLiteRoadmapStore",
+    "SQLiteMemoryStore",
     "SQLiteSelectionStore",
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",

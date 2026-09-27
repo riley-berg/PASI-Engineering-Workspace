@@ -6,8 +6,8 @@ import subprocess
 REPO="th3-st0v3/PASI-Engineering-Workspace";BEGIN="PASI_RESULT_PATCH_BEGIN";END="PASI_RESULT_PATCH_END"
 MARKERS={k:re.compile(p,re.MULTILINE|re.IGNORECASE if k=="allow_delete" else re.MULTILINE) for k,p in {
 "status":r"^PASI_RESULT_STATUS:\s*(.+)$","summary":r"^PASI_RESULT_SUMMARY:\s*(.+)$","requirements":r"^PASI_RESULT_REQUIREMENTS:\s*(.+)$","limitations":r"^PASI_RESULT_LIMITATIONS:\s*(.+)$","research":r"^PASI_RESULT_RESEARCH:\s*(.+)$","ux":r"^PASI_RESULT_UX:\s*(.+)$","backend":r"^PASI_RESULT_BACKEND:\s*(.+)$","evidence":r"^PASI_RESULT_EVIDENCE:\s*(.+)$","repository_progress":r"^PASI_RESULT_REPOSITORY_PROGRESS:\s*(.+)$","allow_delete":r"^PASI_RESULT_ALLOW_DELETE:\s*(true|false)$"}.items()}
-def run(cmd,cwd,timeout,input_text=None):
-    try:p=subprocess.run(cmd,cwd=cwd,input=input_text,capture_output=True,text=True,timeout=timeout,check=False)
+def run(cmd,cwd,timeout,input_text=None,env=None):
+    try:p=subprocess.run(cmd,cwd=cwd,input=input_text,capture_output=True,text=True,timeout=timeout,check=False,env=env)
     except (OSError,subprocess.TimeoutExpired) as e:return 124,str(e)
     return p.returncode,((p.stdout or "")+(p.stderr or "")).strip()[-30000:]
 def parse(text):
@@ -96,7 +96,14 @@ def main():
         if code:print(msg,file=sys.stderr);return 1
     code,msg=run(["git","diff","--check"],root,60)
     if code:return 1
-    code,msg=run([sys.executable,"-m","pytest","-q"],root,900)
+    # The acceptance worktree is the task source of truth. Keep pytest from
+    # importing an editable install that points at another checkout.
+    test_env=os.environ.copy()
+    worktree_src=root/"src"
+    inherited=test_env.get("PYTHONPATH","")
+    inherited_parts=[p for p in inherited.split(os.pathsep) if p and Path(p).resolve()!=worktree_src.resolve()]
+    test_env["PYTHONPATH"]=os.pathsep.join([str(worktree_src),*inherited_parts])
+    code,msg=run([sys.executable,"-m","pytest","-q"],root,900,env=test_env)
     if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1
     code,msg=run(["node","--test","web/app.test.js"],root,300)
     if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1

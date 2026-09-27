@@ -25,11 +25,11 @@ Computer capabilities remain separate from planning and provider selection.
 
 The 168-hour acceptance runtime is contained in this repository. The older personal-ai-system repository is historical implementation source only; this repository does not import or execute it at runtime.
 
-The native ChatGPT runtime lives under automation/chromium/pasi-chatgpt, with the localhost bridge and provider-neutral ChatGPT adapter under automation/. The single-task acceptance executor is scripts/pasi_engineering_executor.py.
+The native PASI ChatGPT Handoff extension lives under extensions/pasi-chatgpt, with the localhost bridge and provider-neutral ChatGPT adapter under automation/. The single-task acceptance executor is scripts/pasi_engineering_executor.py.
 
 Browser preflight:
 
-    python scripts/pasi_engineering_browser_preflight.py --extension-root "$PWD/automation/chromium/pasi-chatgpt"
+    python scripts/pasi_engineering_browser_preflight.py --extension-root "$PWD/extensions/pasi-chatgpt"
 
 Executor command:
 

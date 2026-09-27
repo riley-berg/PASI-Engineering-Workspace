@@ -218,6 +218,146 @@
       </div>
     </section>
 
+
+    <section class="card planner-workspace">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Planner / Roadmap</p>
+          <h2>Authoritative engineering work</h2>
+          <p class="muted">Roadmap state, dependencies, evidence requirements, planning signals, and provenance.</p>
+        </div>
+        <div class="planner-head-actions">
+          <label class="token-label">
+            Roadmap
+            <select id="planner-roadmap"></select>
+          </label>
+          <button id="planner-refresh" class="button secondary" type="button">Refresh planner</button>
+        </div>
+      </div>
+
+      <div id="planner-summary" class="details"></div>
+
+      <div class="planner-columns">
+        <article class="planner-pane">
+          <div class="subhead">Phases</div>
+          <div id="planner-phases" class="phase-list"></div>
+          <div class="subhead">Tasks</div>
+          <div class="filter-grid planner-filters">
+            <label>Status
+              <select id="planner-status-filter">
+                <option value="">all</option>
+                <option value="planned">planned</option>
+                <option value="active">active</option>
+                <option value="blocked">blocked</option>
+                <option value="completed">completed</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
+            <label>Search
+              <input id="planner-task-filter" autocomplete="off" placeholder="FE-P2.1 or roadmap">
+            </label>
+          </div>
+          <div id="planner-task-list" class="task-list"></div>
+        </article>
+
+        <article class="planner-pane">
+          <div class="subhead">Selected task</div>
+          <div id="planner-task-detail" class="planner-detail empty">Select a task.</div>
+
+          <div class="subhead">Lifecycle control</div>
+          <form id="planner-transition-form" class="filter-grid">
+            <label>Object type
+              <select id="planner-transition-type">
+                <option value="task">task</option>
+                <option value="phase">phase</option>
+              </select>
+            </label>
+            <label>Status
+              <select id="planner-transition-status">
+                <option value="planned">planned</option>
+                <option value="active">active</option>
+                <option value="paused">paused</option>
+                <option value="completed">completed</option>
+                <option value="blocked">blocked</option>
+                <option value="archived">archived</option>
+              </select>
+            </label>
+            <label>Evidence refs
+              <input id="planner-evidence-refs" autocomplete="off" placeholder="evidence://…">
+            </label>
+            <button class="button primary" type="submit">Apply revision-safe change</button>
+          </form>
+          <p id="planner-transition-result" class="control-result" aria-live="polite">No roadmap change submitted.</p>
+
+          <div class="subhead">Selection / scheduling</div>
+          <div id="planner-selection" class="mini-panel"></div>
+          <div id="planner-schedule" class="mini-panel"></div>
+
+          <div class="subhead">Context preview</div>
+          <form id="planner-context-form" class="filter-grid">
+            <label>Scope<input id="planner-context-scope" value="task:FE-P2.1"></label>
+            <label>Query<input id="planner-context-query" placeholder="dependency provenance"></label>
+            <button class="button secondary" type="submit">Compile context</button>
+          </form>
+          <div id="planner-context" class="context-preview empty">No context compiled.</div>
+        </article>
+      </div>
+
+      <div class="planner-columns">
+        <article class="planner-pane">
+          <div class="subhead">Project memory</div>
+          <form id="planner-memory-form" class="filter-grid">
+            <label>Scope<input id="planner-memory-scope" value="project:pasi"></label>
+            <label>Kind<input id="planner-memory-kind" autocomplete="off"></label>
+            <button class="button secondary" type="submit">Load memory</button>
+          </form>
+          <div id="planner-memory" class="memory-list"><div class="empty">No memory loaded.</div></div>
+
+          <div class="subhead">Compaction plans</div>
+          <div id="planner-compaction" class="memory-list"><div class="empty">No compaction plan loaded.</div></div>
+        </article>
+
+        <article class="planner-pane">
+          <div class="subhead">GitHub issue intake preview</div>
+          <form id="planner-intake-form" class="intake-form">
+            <div class="form-grid-two">
+              <label>Issue number<input id="intake-number" type="number" min="1" required></label>
+              <label>Phase ID<input id="intake-phase" value="FE-P2" required></label>
+              <label>Issue title<input id="intake-title" required></label>
+              <label>Issue URL<input id="intake-url" placeholder="https://github.com/…" required></label>
+            </div>
+            <label>Issue body<textarea id="intake-body" rows="8" required placeholder="# Acceptance&#10;- …&#10;# Evidence&#10;- …"></textarea></label>
+            <div class="control-row">
+              <button class="button secondary" type="submit">Validate intake</button>
+              <button id="intake-apply" class="button primary" type="button" disabled>Apply validated task</button>
+            </div>
+          </form>
+          <div id="planner-intake-result" class="intake-result empty">No issue proposal validated.</div>
+        </article>
+      </div>
+
+      <div class="planner-columns">
+        <article class="planner-pane">
+          <div class="subhead">Scoped workspace search</div>
+          <form id="planner-search-form" class="filter-grid">
+            <label>Scope<input id="planner-search-scope" value="project:pasi"></label>
+            <label>Query<input id="planner-search-query" required placeholder="roadmap dependency"></label>
+            <button class="button secondary" type="submit">Search</button>
+          </form>
+          <div id="planner-search-results" class="search-list"><div class="empty">No search run.</div></div>
+        </article>
+
+        <article class="planner-pane">
+          <div class="subhead">GitHub Projects / workspace state</div>
+          <form id="planner-projects-form" class="filter-grid">
+            <label>Project ref<input id="planner-project-ref" placeholder="project number"></label>
+            <button class="button secondary" type="submit">Load sync state</button>
+          </form>
+          <div id="planner-projects" class="mini-panel">No project sync state loaded.</div>
+        </article>
+      </div>
+    </section>
+
     <section class="card">
       <div class="card-head">
         <div>

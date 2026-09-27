@@ -193,6 +193,11 @@ def build_runtime_evidence(
                 or (connection_error_event or {}).get("recovery_reason")
                 or "connection_recovery"
             ),
+            "source": str(
+                (connection_error_event or {}).get("recovery_source")
+                or (retry_event or {}).get("recovery_source")
+                or "browser_recovery"
+            ),
         },
     }
 

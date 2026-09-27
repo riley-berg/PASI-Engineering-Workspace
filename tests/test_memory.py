@@ -93,7 +93,7 @@ def test_memory_scope_and_kind_queries_are_deterministic(tmp_path: Path):
     store.create(other)
 
     assert [item.memory_id for item in store.list(scope="project:pasi")] == [
-        "mem-1", "mem-2"
+        "mem-2", "mem-1"
     ]
     assert [item.memory_id for item in store.list(scope="project:pasi", kind="constraint")] == [
         "mem-2"

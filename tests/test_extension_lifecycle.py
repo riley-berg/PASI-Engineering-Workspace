@@ -39,6 +39,8 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("operation.predecessor_completed_at_ms", self.content)
         self.assertIn("text_counts", self.content)
         self.assertIn("ChatGPT can replace the DOM nodes for existing messages", self.content)
+        self.assertIn("userTextSignature", self.content)
+        self.assertIn("userTextReady", self.content)
         self.assertNotIn("waitForConversationSignatureDelta", self.content)
         self.assertNotIn("exact +1/+1 conversation counts", self.content)
         self.assertIn("Conversation signature/count telemetry is recorded independently", self.content)

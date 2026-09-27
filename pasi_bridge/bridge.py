@@ -426,6 +426,33 @@ class BridgeState:
                     if predecessor.get("sequence_index") != normalized_sequence_index - 1:
                         raise ValueError("predecessor operation must be the immediately previous sequence index")
 
+            predecessor_completed_at_ms: int | float | None = None
+            if normalized_predecessor is not None:
+                predecessor_item = next(
+                    (
+                        item
+                        for item in queue
+                        if item.get("operation_id") == normalized_predecessor
+                    ),
+                    None,
+                )
+                predecessor_timing = (
+                    predecessor_item.get("timing")
+                    if isinstance(predecessor_item, dict)
+                    else None
+                )
+                raw_completed_at = (
+                    predecessor_timing.get("completed_at_ms")
+                    if isinstance(predecessor_timing, dict)
+                    else None
+                )
+                if (
+                    not isinstance(raw_completed_at, bool)
+                    and isinstance(raw_completed_at, (int, float))
+                    and raw_completed_at >= 0
+                ):
+                    predecessor_completed_at_ms = raw_completed_at
+
             operation = ChatOperation(
                 operation_id=self._new_operation_id(),
                 operation_type=operation_type,
@@ -436,6 +463,7 @@ class BridgeState:
                 chain_id=normalized_chain_id,
                 sequence_index=normalized_sequence_index,
                 predecessor_operation_id=normalized_predecessor,
+                predecessor_completed_at_ms=predecessor_completed_at_ms,
                 prompt_fingerprint=prompt_fingerprint,
                 status="queued",
             )
@@ -447,6 +475,7 @@ class BridgeState:
             item["chain_id"] = normalized_chain_id
             item["sequence_index"] = normalized_sequence_index
             item["predecessor_operation_id"] = normalized_predecessor
+            item["predecessor_completed_at_ms"] = predecessor_completed_at_ms
             item["expires_at"] = now + QUEUE_TTL_SECONDS
             item["updated_at"] = now
             queue.append(item)

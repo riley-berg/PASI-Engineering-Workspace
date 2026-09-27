@@ -26,11 +26,23 @@ def _iso(start: datetime, seconds: int) -> str:
 
 def _build_evidence():
     verifier = load_verifier()
+    verifier.POLICY = copy.deepcopy(verifier.POLICY)
+    verifier.POLICY.update(
+        {
+            "target_duration_seconds": 600,
+            "health_sample_interval_seconds": 60,
+            "expected_logical_operations": 3,
+            "planned_recovery_count": 1,
+            "recovery_schedule_seconds": [120],
+            "recovery_schedule_tolerance_seconds": 30,
+            "max_recovery_latency_seconds": 120,
+        }
+    )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     end = start + timedelta(seconds=604800)
 
     operations = []
-    for index in range(1, 169):
+    for index in range(1, verifier.POLICY["expected_logical_operations"] + 1):
         operations.append(
             {
                 "operation_id": f"op-{index}",
@@ -79,7 +91,7 @@ def _build_evidence():
         )
 
     health = []
-    for offset in range(0, 604801, 300):
+    for offset in range(0, verifier.POLICY["target_duration_seconds"] + 1, 60):
         health.append(
             {
                 "timestamp": _iso(start, offset),
@@ -92,7 +104,7 @@ def _build_evidence():
         )
 
     resource_samples = []
-    for offset in range(0, 604801, 60):
+    for offset in range(0, verifier.POLICY["target_duration_seconds"] + 1, 60):
         resource_samples.append(
             {
                 "timestamp": _iso(start, offset),
@@ -110,7 +122,7 @@ def _build_evidence():
         "run_id": "run-1",
         "started_at": start.isoformat(),
         "ended_at": end.isoformat(),
-        "duration_seconds": 604800,
+        "duration_seconds": verifier.POLICY["target_duration_seconds"],
         "git_commit": "0" * 40,
         "bridge_version": "bridge",
         "controller_version": "controller",
@@ -151,14 +163,14 @@ def _build_evidence():
             "wrong_conversation_events": 0,
         },
         "summary": {
-            "logical_operations_completed": 168,
+            "logical_operations_completed": verifier.POLICY["expected_logical_operations"],
             "duplicate_logical_operations": 0,
             "skipped_operations": 0,
             "terminal_chat_errors": 0,
             "premature_claims": 0,
             "premature_injections": 0,
-            "planned_recoveries": 6,
-            "successful_planned_recoveries": 6,
+            "planned_recoveries": verifier.POLICY["planned_recovery_count"],
+            "successful_planned_recoveries": verifier.POLICY["planned_recovery_count"],
             "unplanned_recoveries": 0,
         },
         "integrity": {"canonical_sha256": ""},
@@ -255,7 +267,8 @@ def test_stale_heartbeat_fails():
 def test_resource_leak_fails():
     verifier = load_verifier()
     evidence = _build_evidence()
-    evidence["resources"]["samples"][-1]["rss_bytes"] = 250_000_000
+    for sample in evidence["resources"]["samples"]:
+        sample["rss_bytes"] = 250_000_000
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:

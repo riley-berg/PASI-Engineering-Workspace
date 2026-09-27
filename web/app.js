@@ -51,6 +51,82 @@ export function buildViewModel(projection) {
   };
 }
 
+export function normalizeRecoveryDecision(vm) {
+  const candidates = vm.recoveryEvents
+    .map((event) => event.payload || {})
+    .filter((payload) =>
+      typeof payload.classification === "string" ||
+      typeof payload.reason_code === "string" ||
+      typeof payload.action === "string"
+    );
+  const latest = candidates.length ? candidates[candidates.length - 1] : null;
+  if (!latest) {
+    return {
+      available: false,
+      classification: "not reported",
+      condition: "",
+      action: "",
+      max_attempts: null,
+      attempts: null,
+      preserve_operation_identity: null,
+      evidence_preserved: null,
+      planner_handoff: "",
+    };
+  }
+  return {
+    available: true,
+    classification: latest.classification || "not reported",
+    condition: latest.reason_code || latest.failure_code || "",
+    action: latest.action || "",
+    max_attempts: Number.isFinite(Number(latest.max_attempts)) ? Number(latest.max_attempts) : null,
+    attempts: Number.isFinite(Number(latest.attempts ?? latest.retry_count))
+      ? Number(latest.attempts ?? latest.retry_count)
+      : null,
+    preserve_operation_identity:
+      typeof latest.preserve_operation_identity === "boolean"
+        ? latest.preserve_operation_identity
+        : null,
+    evidence_preserved: Array.isArray(latest.evidence_refs)
+      ? latest.evidence_refs.length > 0
+      : null,
+    planner_handoff: typeof latest.planner_handoff === "string"
+      ? latest.planner_handoff
+      : "",
+  };
+}
+
+export function normalizeLedger(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.map((entry) => ({
+    operation_id: entry.operation_id || "",
+    task_id: entry.task_id || "",
+    run_id: entry.run_id || "",
+    provider: entry.provider || "",
+    branch: entry.branch || "",
+    pr_number: entry.pr_number ?? null,
+    outcome: entry.outcome || "",
+    parent_operation_id: entry.parent_operation_id || "",
+    created_at: entry.created_at || "",
+  }));
+}
+
+export function normalizeFailures(signatures) {
+  if (!Array.isArray(signatures)) return [];
+  return signatures.map((signature) => ({
+    signature_id: signature.signature_id || "",
+    subsystem: signature.subsystem || "",
+    failure_code: signature.failure_code || "",
+    failure_family: signature.failure_family || "",
+    occurrence_count: Number(signature.occurrence_count || 0),
+    latest_operation_id: signature.latest_operation_id || "",
+    evidence_ref: signature.evidence_ref || "",
+    affected_operations: Array.isArray(signature.affected_operations)
+      ? signature.affected_operations
+      : [],
+    current_code_head: signature.current_code_head || "",
+  }));
+}
+
 function qs(selector) {
   return document.querySelector(selector);
 }

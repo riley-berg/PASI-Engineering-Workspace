@@ -1372,7 +1372,19 @@
       const composerEmptied = !box || !composerContainsPrompt(box, expected);
       if ((attempt > 1 && composerEmptied) || generating() || newMessageState()) {
         via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
-        return { via: via || 'sent_unverified', attempt, verified: via === 'verified' };
+        const finalVia = via || 'sent_unverified';
+        return {
+          via: finalVia,
+          attempt,
+          verified: via === 'verified',
+          timing: {
+            injected_at_ms: null,
+            ack_at_ms: Date.now(),
+            user_messages_added: countNewUserMessages(userMessages(), snapshot),
+            ack_verified: via === 'verified',
+            submission_via: finalVia
+          }
+        };
       }
 
       let readyBox = box;

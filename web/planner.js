@@ -38,6 +38,6 @@ function bindPlanner(){qs("#planner-roadmap").addEventListener("change",()=>{pla
 
 const plannerState={roadmap:null,selectedType:"task",selectedId:"",detail:null,intake:null};
 
-export async function initPlanner(){bindPlanner();await refreshPlanner();return {refresh:refreshPlanner};}
+export async function initPlanner(){bindPlanner();const globalRefresh=qs("#refresh");if(globalRefresh)globalRefresh.addEventListener("click",()=>refreshPlanner());await refreshPlanner();return {refresh:refreshPlanner};}
 
 if(typeof document!=="undefined") initPlanner();

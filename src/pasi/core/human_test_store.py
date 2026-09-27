@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -126,9 +129,11 @@ class HumanTestStore:
         self,
         *,
         policy: HumanTestTrustPolicy | None = None,
+        issuer_secret: str | None = None,
     ) -> HumanTestTrustCertificate:
         runs = list(self.list_runs(limit=10_000))
-        certificate = HumanTestTrustEvaluator().evaluate(runs, policy=policy)
+        secret = issuer_secret if issuer_secret is not None else os.environ.get("PASI_HUMAN_TEST_TRUST_SECRET", "")
+        certificate = HumanTestTrustEvaluator().evaluate(runs, policy=policy, issuer_secret=secret)
         with self._connect() as connection:
             connection.execute(
                 """
@@ -158,8 +163,34 @@ class HumanTestStore:
             return None
         payload = json.loads(row["certificate_json"])
         policy = HumanTestTrustPolicy(**payload["policy"])
+        status = TrustStatus(payload["status"])
+        certificate_sha = str(payload["certificate_sha256"])
+        unsigned = dict(payload)
+        signature = str(unsigned.pop("issuer_signature", ""))
+        unsigned.pop("certificate_sha256", None)
+        expected_sha = hashlib.sha256(
+            json.dumps(
+                unsigned,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        if expected_sha != certificate_sha:
+            raise ValueError("human-test trust certificate hash mismatch")
+        if status is TrustStatus.TRUSTED:
+            secret = os.environ.get("PASI_HUMAN_TEST_TRUST_SECRET", "")
+            if not secret:
+                raise ValueError("trust issuer secret is not configured")
+            expected_signature = hmac.new(
+                secret.encode("utf-8"),
+                certificate_sha.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(signature, expected_signature):
+                raise ValueError("human-test trust certificate signature mismatch")
         return HumanTestTrustCertificate(
-            status=TrustStatus(payload["status"]),
+            status=status,
             issued_at=payload["issued_at"],
             policy=policy,
             successful_runs=payload["successful_runs"],
@@ -169,4 +200,5 @@ class HumanTestStore:
             trailing_successes=payload["trailing_successes"],
             source_run_ids=tuple(payload["source_run_ids"]),
             certificate_sha256=payload["certificate_sha256"],
+            issuer_signature=str(payload.get("issuer_signature", "")),
         )

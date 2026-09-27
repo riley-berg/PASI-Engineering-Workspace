@@ -515,6 +515,7 @@ def main() -> int:
         raise M1LiveError("Thinking was not verified as enabled before queuing the M1 chain")
 
     baseline_signature = baseline_counts
+    baseline_conversation_counts = signature_counts(baseline_signature)
     chain_id = f"m1-{uuid.uuid4().hex}"
     previous_operation_id: str | None = None
 
@@ -810,8 +811,8 @@ def main() -> int:
         "thinking_enabled_before_chain": thinking_health.get("thinking_enabled") is True,
         "baseline_conversation_signature": baseline_signature,
         "baseline_conversation_counts": (
-            {"user": signature_counts(baseline_signature)[0], "assistant": signature_counts(baseline_signature)[1]}
-            if signature_counts(baseline_signature) is not None
+            {"user": baseline_conversation_counts[0], "assistant": baseline_conversation_counts[1]}
+            if baseline_conversation_counts is not None
             else None
         ),
         "chain_id": chain_id,

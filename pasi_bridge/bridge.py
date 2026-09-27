@@ -1883,6 +1883,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             response_text = existing_operation.get("response_text")
             response_text_available = True
 
+        chained_operation: dict[str, Any] | None = None
         try:
             operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
                 operation_id=operation_id,
@@ -2004,7 +2005,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
     def log_message(
         self,
-        format_string: str,
+        format: str,
         *args: Any,
     ) -> None:
         """Keep successful request traffic out of the long-lived bridge log."""

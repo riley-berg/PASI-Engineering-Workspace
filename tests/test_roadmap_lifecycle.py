@@ -140,3 +140,36 @@ def test_roadmap_persists_across_restart_and_rejects_stale_writes(tmp_path):
         restarted.save(active, expected_revision=0)
 
     assert restarted.get("pasi-main").canonical_sha256 == active.canonical_sha256
+
+
+def test_roadmap_v3_payload_loads_and_upgrades_to_v4():
+    legacy = {
+        "roadmap_id": "legacy",
+        "version": 3,
+        "revision": 0,
+        "phases": [
+            {
+                "id": "P2",
+                "title": "Planner",
+                "depends_on": [],
+                "status": "active",
+                "revision": 0,
+            }
+        ],
+        "tasks": [
+            {
+                "id": "P2.1",
+                "title": "Existing",
+                "phase_id": "P2",
+                "depends_on": [],
+                "acceptance_requirements": ["accept"],
+                "evidence_requirements": ["evidence"],
+                "parent_task_id": "",
+                "status": "planned",
+                "revision": 0,
+            }
+        ],
+    }
+    loaded = Roadmap.from_mapping(legacy)
+    assert loaded.version == 4
+    assert loaded.task("P2.1").source_issue_number is None

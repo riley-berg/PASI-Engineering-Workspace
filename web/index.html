@@ -122,6 +122,11 @@
         </div>
         <span id="event-count" class="muted">0 events</span>
       </div>
+      <form id="timeline-filter-form" class="filter-grid">
+        <label>Source<input id="timeline-source" autocomplete="off" placeholder="runner"></label>
+        <label>Event type<input id="timeline-type" autocomplete="off" placeholder="operation.completed"></label>
+        <span></span><button class="button secondary" type="submit">Filter events</button>
+      </form>
       <ol id="timeline" class="timeline">
         <li class="empty">Select an operation to view its durable event history.</li>
       </ol>
@@ -197,6 +202,19 @@
       </div>
       <div id="failure-list" class="signature-list">
         <div class="empty">No failure signatures reported.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Notifications</p>
+          <h2>Runtime notifications</h2>
+        </div>
+        <span id="notification-count" class="muted">0 unread</span>
+      </div>
+      <div id="notification-list" class="notification-list">
+        <div class="empty">No unread runtime notifications.</div>
       </div>
     </section>
 

@@ -1,4 +1,5 @@
-importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/userscript_backup.js", "src/background-userscripts.js", "src/background-api.js");
+try { importScripts("vendor/typescript.js"); } catch (_) {}
+importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js");
 
 (() => {
   "use strict";
@@ -65,7 +66,7 @@ importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscri
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (String(message?.type || "").startsWith("pasi.userscript.") && message?.type !== "pasi.userscript.rpc") {
-      globalThis.PASIUserScriptManager.handle(message)
+      globalThis.PASIUserScriptManager.handle(message, sender)
         .then(sendResponse)
         .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
       return true;

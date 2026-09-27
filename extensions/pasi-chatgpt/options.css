@@ -28,3 +28,6 @@ button { cursor: pointer; }
 @media (prefers-color-scheme: dark) {
   .warning { color: #fbbf24; }
 }
+
+.conflict{border:1px solid color-mix(in srgb,CanvasText 16%,transparent);border-radius:12px;padding:14px;margin:12px 0}.conflict-item{border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);padding:12px 0}.conflict-item:first-child{border-top:0}.diff{font:11px ui-monospace,monospace;max-height:260px;overflow:auto;white-space:pre-wrap}.diff-add{background:#dcfce7}.diff-remove{background:#fee2e2}.conflict-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
+.cloudbar{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:10px;margin:12px 0}.cloudbar input{min-width:150px}

@@ -46,6 +46,7 @@
     SCRIPT_UNREGISTER: "pasi.api.script.unregister",
     SCRIPT_EXECUTE: "pasi.api.script.execute",
     SCRIPT_LIST: "pasi.api.script.list",
+    USERSCRIPT_INSTALL: "pasi.userscript.install",
     USERSCRIPT_REGISTER: "pasi.userscript.register",
     USERSCRIPT_UNREGISTER: "pasi.userscript.unregister",
     USERSCRIPT_LIST: "pasi.userscript.list",
@@ -56,6 +57,25 @@
     USERSCRIPT_BACKUP: "pasi.userscript.backup",
     USERSCRIPT_RESTORE: "pasi.userscript.restore",
     USERSCRIPT_SYNC: "pasi.userscript.sync",
+    USERSCRIPT_NETWORK_ADD: "pasi.userscript.network.add",
+    USERSCRIPT_NETWORK_REMOVE: "pasi.userscript.network.remove",
+    USERSCRIPT_NETWORK_LIST: "pasi.userscript.network.list",
+    USERSCRIPT_HOSTS: "pasi.userscript.hosts",
+    USERSCRIPT_ACTIVE_TAB: "pasi.userscript.active_tab",
+    USERSCRIPT_MENU_LIST: "pasi.userscript.menu.list",
+    USERSCRIPT_MENU_INVOKE: "pasi.userscript.menu.invoke",
+    USERSCRIPT_SOURCE_GET: "pasi.userscript.source.get",
+    USERSCRIPT_SOURCE_SAVE: "pasi.userscript.source.save",
+    USERSCRIPT_VCS_CONFIG: "pasi.userscript.vcs.config",
+    USERSCRIPT_VCS_FETCH: "pasi.userscript.vcs.fetch",
+    USERSCRIPT_VCS_PULL: "pasi.userscript.vcs.pull",
+    USERSCRIPT_VCS_PUSH: "pasi.userscript.vcs.push",
+    USERSCRIPT_SYNC_STATUS: "pasi.userscript.sync.status",
+    USERSCRIPT_SYNC_RESOLVE: "pasi.userscript.sync.resolve",
+    USERSCRIPT_CLOUD_CONFIG: "pasi.userscript.cloud.config",
+    USERSCRIPT_CLOUD_STATUS: "pasi.userscript.cloud.status",
+    USERSCRIPT_CLOUD_PUSH: "pasi.userscript.cloud.push",
+    USERSCRIPT_CLOUD_PULL: "pasi.userscript.cloud.pull",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 
@@ -89,6 +109,7 @@
     userScriptIdChars: 100,
     userScriptNameChars: 160,
     userScriptConnectChars: 120,
+    userScriptRuleIdChars: 80,
   });
 
   const SAFE_HTTP_HEADERS = Object.freeze([

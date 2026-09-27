@@ -63,6 +63,7 @@ _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "GitHub app was not found in the ChatGPT menu.",
     "PASI browser page reloaded during operation",
     "PASI_NATIVE: browser page reloaded during operation",
+    "PASI_NATIVE: controlled/observed connection loss interrupted generation",
     "PASI: browser page reloaded during operation",
     "PASI_NATIVE: bridge completion failed",
     "CHAT_EXHAUSTED:",

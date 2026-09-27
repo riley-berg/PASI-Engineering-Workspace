@@ -61,6 +61,11 @@ def main() -> int:
 
     if payload.get("status") != "ok":
         raise SystemExit(f"unexpected bridge health response: {payload!r}")
+    if payload.get("m1_checkpoint_schema_version") != 1:
+        raise SystemExit(
+            "running bridge is stale: expected M1 checkpoint schema 1; "
+            "restart it from this checkout with scripts/run_bridge.sh"
+        )
 
     print("PASI bridge verification PASSED")
     print(f"  source commit : {expected_sha}")

@@ -20,6 +20,8 @@ def test_m1_harness_compiles_and_exposes_bridge_sequence_helpers():
     assert module.DEFAULT_COUNT == 20
     assert module.signature_counts("12:34:abc") == (12, 34)
     assert module.signature_counts("not-a-signature") is None
+    telemetry = module.conversation_telemetry("3:4:before", "5:7:after")
+    assert telemetry["delta"] == {"user": 2, "assistant": 3}
 
 
 def test_prompt_fingerprint_normalizes_whitespace_but_detects_content_changes():
@@ -45,6 +47,11 @@ def test_m1_harness_records_required_failure_categories():
         '"response_completed_to_prompt_injected_ms"',
         '"user_messages_added"',
         '"ack_verified"',
+        '"chain_id"',
+        '"sequence_index"',
+        '"predecessor_operation_id"',
+        '"conversation_signature_is_verification_only"',
+        '"prompt_fingerprints"',
     ]:
         assert token in source
 
@@ -96,7 +103,7 @@ def test_prepare_durable_chat_uses_active_browser_chat_over_stale_persisted_url(
 
     assert result == (
         active_url,
-        (3, 4),
+        "3:4:active",
         False,
         "",
         stale_url,
@@ -139,7 +146,7 @@ def test_prepare_durable_chat_creates_new_chat_only_for_explicit_limit_signal(
         module,
         "create_fresh_chat_after_limit",
         lambda _client, **kwargs: (
-            calls.update(kwargs) or (fresh_url, (0, 0), "op-new-chat")
+            calls.update(kwargs) or (fresh_url, "0:0:fresh", "op-new-chat")
         ),
     )
 
@@ -151,10 +158,18 @@ def test_prepare_durable_chat_creates_new_chat_only_for_explicit_limit_signal(
 
     assert result == (
         fresh_url,
-        (0, 0),
+        "0:0:fresh",
         True,
         "usage_limit",
         "https://chatgpt.com/c/stale",
         "op-new-chat",
     )
     assert calls["reason"] == "usage_limit"
+
+
+def test_m1_harness_does_not_gate_progression_on_exact_conversation_count_delta():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "wait_for_signature_delta" not in source
+    assert "expected_next=(" not in source
+    assert "conversation_signature_is_verification_only" in source
+    assert "conversation_verification" in source

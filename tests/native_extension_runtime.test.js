@@ -71,6 +71,13 @@ test("usage or context exhaustion creates a bounded fresh-chat recovery path", (
   assert.ok(recovery.includes("MAX_CONTEXT_RECOVERIES"));
 });
 
+test("live acceptance captures runtime errors including RECOVERY_DEFAULTS", () => {
+  assert.ok(content.includes("chatgpt_runtime_error"));
+  assert.ok(content.includes("recovery_defaults_match"));
+  assert.ok(content.includes("unhandledrejection"));
+  assert.ok(content.includes("__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__"));
+});
+
 test("native controller uses bounded timeouts and progress-based recovery", () => {
   assert.ok(timeoutConfig.includes("heartbeatMs: 15 * 1000"));
   assert.ok(timeoutConfig.includes("staleMs: 45 * 1000"));

@@ -1432,6 +1432,30 @@ def test_missing_operation_returns_none(tmp_path: Path) -> None:
     assert bridge.get_operation("op-does-not-exist") is None
 
 
+def test_m0_recovery_probe_is_persisted_only_for_p0_1_prompt(tmp_path: Path) -> None:
+    bridge = make_bridge(tmp_path)
+    operation = bridge.queue_operation(
+        "prompt",
+        "[PASI TASK P0.1]\nrun live acceptance",
+        m0_recovery_probe=True,
+    )
+    assert operation.to_dict()["m0_recovery_probe"] is True
+
+    with pytest.raises(ValueError):
+        bridge.queue_operation(
+            "prompt",
+            "[PASI TASK P0.2]\nnot allowed",
+            m0_recovery_probe=True,
+        )
+
+    with pytest.raises(ValueError):
+        bridge.queue_operation(
+            "new_chat",
+            "",
+            m0_recovery_probe=True,
+        )
+
+
 def test_new_chat_operation_can_have_empty_prompt(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
     operation = bridge.queue_operation("new_chat", "")

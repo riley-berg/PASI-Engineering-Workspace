@@ -87,3 +87,34 @@ def test_p0_4_supervisor_is_restart_safe():
     assert "pasi_168h_acceptance.py" in source
     result = subprocess.run(["bash", "-n", str(root / "scripts" / "run_p0_4_168h.sh")], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_canonical_extension_references_resolve():
+    root = Path(__file__).resolve().parents[1]
+    extension = root / "extensions" / "pasi-chatgpt"
+    manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
+    refs = []
+    refs.append(manifest.get("background", {}).get("service_worker"))
+    refs.append(manifest.get("options_ui", {}).get("page"))
+    refs.append(manifest.get("action", {}).get("default_popup"))
+    for entry in manifest.get("content_scripts", []):
+        refs.extend(entry.get("js", [])); refs.extend(entry.get("css", []))
+    for entry in manifest.get("web_accessible_resources", []):
+        refs.extend(entry.get("resources", []))
+    missing = [ref for ref in refs if isinstance(ref, str) and not (extension / ref).is_file()]
+    assert not missing, "manifest references missing extension files: " + ", ".join(missing)
+
+
+def test_p0_4_worktree_and_runtime_paths_are_canonical():
+    root = Path(__file__).resolve().parents[1]
+    acceptance = (root / "scripts" / "pasi_168h_acceptance.py").read_text(encoding="utf-8")
+    executor = (root / "scripts" / "pasi_engineering_executor.py").read_text(encoding="utf-8")
+    launcher = (root / "scripts" / "run_p0_4_168h.sh").read_text(encoding="utf-8")
+    assert 'REPO = "th3-st0v3/PASI-Engineering-Workspace"' in acceptance
+    assert '"worktree", "add", "-B", branch' in acceptance
+    assert '"origin/main"' in acceptance
+    assert "PASI_ACCEPTANCE_WORKTREE" in executor
+    assert 'root/"src"' in executor
+    assert 'test_env["PYTHONPATH"]' in executor
+    assert "PASI_ENGINEERING_EXTENSION_ROOT" in launcher
+    assert "extensions/pasi-chatgpt" in launcher

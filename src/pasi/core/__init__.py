@@ -1,6 +1,7 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
+from .cross_run_learning import CrossRunLearning, LearningPromotionError, LearningProposal
 from .event_store import DuplicateEvent, EventNotFound, SQLiteEventStore
 from .events import DurableEvent, InvalidEvent
 from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature_key
@@ -43,6 +44,9 @@ __all__ = [
     "MemoryNotFound",
     "MemoryRecord",
     "MemoryStatus",
+    "CrossRunLearning",
+    "LearningPromotionError",
+    "LearningProposal",
     "DuplicateEvent",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",

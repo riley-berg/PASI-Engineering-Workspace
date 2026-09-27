@@ -35,6 +35,7 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("operation.operation_id,", self.content)
         self.assertIn("response,", self.content)
         self.assertIn("browserTiming,", self.content)
+        self.assertIn("operation.predecessor_completed_at_ms", self.content)
         self.assertNotIn("waitForConversationSignatureDelta", self.content)
         self.assertNotIn("exact +1/+1 conversation counts", self.content)
         self.assertIn("conversation signature/count telemetry is recorded independently", self.content)

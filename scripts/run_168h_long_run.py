@@ -36,6 +36,7 @@ M2_RECOVERY_SCHEMA_VERSION = 1
 RUNTIME_TOKEN = ROOT / ".runtime" / "bridge-token"
 ACCEPTANCE_DIR = ROOT / ".runtime" / "acceptance"
 PARTIAL_EVIDENCE = ACCEPTANCE_DIR / "long-run-168h.partial.json"
+PERSIST_LOCK = threading.Lock()
 FINAL_EVIDENCE = ACCEPTANCE_DIR / "long-run-168h.json"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
@@ -680,9 +681,17 @@ class TelemetrySampler:
             if now >= next_health:
                 self.capture_health()
                 next_health = now + HEALTH_INTERVAL_SECONDS
+            captured = False
+            if now >= next_health:
+                self.capture_health()
+                next_health = now + HEALTH_INTERVAL_SECONDS
+                captured = True
             if now >= next_resource:
                 self.capture_resource()
                 next_resource = now + RESOURCE_INTERVAL_SECONDS
+                captured = True
+            if captured:
+                persist_partial(self.evidence)
             self.stop_event.wait(1.0)
 
     def capture_health(self) -> None:
@@ -930,7 +939,8 @@ def summarize_resources(
 
 
 def persist_partial(evidence: dict[str, Any]) -> None:
-    write_json_atomic(PARTIAL_EVIDENCE, evidence)
+    with PERSIST_LOCK:
+        write_json_atomic(PARTIAL_EVIDENCE, evidence)
 
 
 def persist_final(evidence: dict[str, Any], status: str, failures: list[str]) -> None:

@@ -18,5 +18,7 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
     assert data["manifest_version"] == 3
     assert data["name"] == "PASI ChatGPT Handoff"
     assert data["background"]["service_worker"] == "src/background.js"
-    assert "Tampermonkey" not in extension.joinpath("README.md").read_text(encoding="utf-8")
+    readme = extension.joinpath("README.md").read_text(encoding="utf-8")
+    assert "Tampermonkey" in readme
+    assert "does not depend on Tampermonkey or Greasemonkey" in readme
     assert "CONTROLLER_VERSION = '2.4.11'" in content.read_text(encoding="utf-8")

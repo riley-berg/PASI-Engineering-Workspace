@@ -27,7 +27,7 @@ def test_compaction_unions_provenance_and_archives_duplicates(tmp_path: Path):
         make_record("mem-a", "Same fact.", ("event://a",), 0.8)
     )
     store.create(
-        make_record("mem-b", " same   fact ", ("event://b",), 0.9)
+        make_record("mem-b", " same   fact. ", ("event://b",), 0.9)
     )
     store.create(
         make_record("mem-c", "Same fact.", ("event://c",), 0.7)

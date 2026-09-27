@@ -5,6 +5,7 @@
   globalThis.__PASI_NATIVE_CONTROLLER_STARTED__ = true;
 
   const CONTROLLER_VERSION = '2.4.11';
+  const PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1';
   const TIMEOUT_POLICY = globalThis.PASI_TIMEOUT_POLICY?.get?.() || {};
   const POLL_MS = TIMEOUT_POLICY.pollMs || 2000;
   const HEALTH_MS = TIMEOUT_POLICY.heartbeatMs || 15000;
@@ -685,7 +686,7 @@
         body: { observation: {
           schema_version: 'pasi-native-chromium-v2',
           captured_at: new Date().toISOString(),
-          data: { kind, controller_version: CONTROLLER_VERSION, ...data }
+          data: { kind, controller_version: CONTROLLER_VERSION, deployment_id: PASI_DEPLOYMENT_ID, ...data }
         } }
       });
     } catch (_) {}

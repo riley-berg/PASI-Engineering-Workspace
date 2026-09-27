@@ -29,7 +29,7 @@ Write-Output ([string]$wslShaOutput).Trim()
 }
 
 $drive = $Matches.drive.ToLowerInvariant()
-$relative = $Matches.path -replace '\\', '/'
+$relative = $Matches.path.Replace([char]92, [char]47)
 $wslRoot = "/mnt/$drive/$relative"
 $wslShaOutput = & wsl.exe -e git -C "$wslRoot" rev-parse HEAD 2>$null
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslShaOutput)) {

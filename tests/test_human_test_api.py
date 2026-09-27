@@ -78,11 +78,13 @@ def test_human_test_run_ingest_requires_separate_authorization_and_persists(tmp_
     service, store = make_service(tmp_path)
     run = HumanTestRun(
         run_id="htr-1",
-        suite_id="suite",
+        suite_id="pasi-p0-smoke",
         suite_version=1,
         code_head="1" * 40,
         browser_name="Chromium",
         browser_version="136",
+        extension_version="0.1.0",
+        execution_source="mv3-human-test-extension",
         target_origin="http://127.0.0.1:3000",
         started_at="2026-09-27T00:00:00+00:00",
         ended_at="2026-09-27T00:00:01+00:00",

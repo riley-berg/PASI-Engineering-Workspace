@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -176,6 +177,7 @@ class HumanTestTrustCertificate:
     trailing_successes: int
     source_run_ids: tuple[str, ...]
     certificate_sha256: str
+    issuer_signature: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -199,6 +201,7 @@ class HumanTestTrustCertificate:
         return {
             **payload,
             "certificate_sha256": canonical_sha256(payload),
+            "issuer_signature": self.issuer_signature,
         }
 
 
@@ -208,6 +211,7 @@ class HumanTestTrustEvaluator:
         runs: list[HumanTestRun],
         *,
         policy: HumanTestTrustPolicy | None = None,
+        issuer_secret: str = "",
     ) -> HumanTestTrustCertificate:
         trust_policy = policy or HumanTestTrustPolicy()
         ordered = sorted(runs, key=lambda item: (item.ended_at, item.run_id))
@@ -251,6 +255,13 @@ class HumanTestTrustEvaluator:
             "trailing_successes": trailing_successes,
             "source_run_ids": list(source_ids),
         }
+        if trusted and not issuer_secret:
+            raise ValueError("issuer_secret is required to issue trusted certificate")
+        signature_payload = canonical_sha256(draft).encode("utf-8")
+        issuer_signature = (
+            hmac.new(issuer_secret.encode("utf-8"), signature_payload, hashlib.sha256).hexdigest()
+            if trusted else ""
+        )
         return HumanTestTrustCertificate(
             status=TrustStatus.TRUSTED if trusted else TrustStatus.PENDING,
             issued_at=draft["issued_at"],
@@ -262,6 +273,7 @@ class HumanTestTrustEvaluator:
             trailing_successes=trailing_successes,
             source_run_ids=source_ids,
             certificate_sha256=canonical_sha256(draft),
+            issuer_signature=issuer_signature,
         )
 
 

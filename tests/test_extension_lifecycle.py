@@ -50,6 +50,13 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("response_text_available", self.content)
         self.assertIn("/chat/finished", self.content)
 
+    def test_m2_controlled_recovery_probe_is_same_operation_and_fast_resume(self) -> None:
+        self.assertIn("m2_recovery_probe", self.content)
+        self.assertIn("m2_controlled_live_probe", self.content)
+        self.assertIn("controlledLiveProbe", self.recovery)
+        self.assertIn("same_operation_resumed", self.recovery)
+        self.assertIn("checkpoint_preserved", self.recovery)
+
     def test_connection_and_context_recovery_are_bounded(self) -> None:
         self.assertIn("/chat/failed", self.content)
         self.assertIn("recovery_context", self.content)

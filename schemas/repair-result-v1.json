@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/repair-result-v1.json",
+  "title": "PASI bounded repair result v1",
+  "type": "object",
+  "required": ["classification","attempts","terminal","exhausted"],
+  "properties": {
+    "classification": {"enum": ["retryable","recoverable","blocked","terminal","human_required"]},
+    "attempts": {
+      "type":"array",
+      "items":{
+        "type":"object",
+        "required":["attempt","action","succeeded"],
+        "properties":{
+          "attempt":{"type":"integer","minimum":1},
+          "action":{"type":"string","minLength":1},
+          "succeeded":{"type":"boolean"}
+        },
+        "additionalProperties":false
+      }
+    },
+    "terminal":{"type":"boolean"},
+    "exhausted":{"type":"boolean"}
+  },
+  "additionalProperties": false
+}

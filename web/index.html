@@ -122,9 +122,100 @@
         </div>
         <span id="event-count" class="muted">0 events</span>
       </div>
+      <form id="timeline-filter-form" class="filter-grid">
+        <label>Source<input id="timeline-source" autocomplete="off" placeholder="runner"></label>
+        <label>Event type<input id="timeline-type" autocomplete="off" placeholder="operation.completed"></label>
+        <span></span><button class="button secondary" type="submit">Filter events</button>
+      </form>
       <ol id="timeline" class="timeline">
         <li class="empty">Select an operation to view its durable event history.</li>
       </ol>
+    </section>
+
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Recovery console</p>
+            <h2>Decision state</h2>
+          </div>
+          <span id="recovery-classification" class="pill neutral">not reported</span>
+        </div>
+        <dl class="details">
+          <div><dt>Condition</dt><dd id="recovery-condition">—</dd></div>
+          <div><dt>Action</dt><dd id="recovery-action">—</dd></div>
+          <div><dt>Budget</dt><dd id="recovery-budget">—</dd></div>
+          <div><dt>Attempts</dt><dd id="recovery-attempts">—</dd></div>
+          <div><dt>Operation identity</dt><dd id="recovery-identity">—</dd></div>
+          <div><dt>Evidence preserved</dt><dd id="recovery-evidence">—</dd></div>
+        </dl>
+        <p id="recovery-handoff" class="control-result" aria-live="polite">No recovery decision reported.</p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Migration</p>
+            <h2>Runtime-state compatibility</h2>
+          </div>
+          <span id="migration-pill" class="pill neutral">unknown</span>
+        </div>
+        <dl class="details">
+          <div><dt>Component</dt><dd id="migration-component">—</dd></div>
+          <div><dt>Stored version</dt><dd id="migration-stored">—</dd></div>
+          <div><dt>Current version</dt><dd id="migration-current">—</dd></div>
+          <div><dt>Migration required</dt><dd id="migration-required">—</dd></div>
+          <div><dt>Migration safe</dt><dd id="migration-safe">—</dd></div>
+          <div><dt>Updated</dt><dd id="migration-updated">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Operation ledger</p>
+          <h2>What happened to operations?</h2>
+        </div>
+        <span id="ledger-count" class="muted">0 entries</span>
+      </div>
+      <form id="ledger-form" class="filter-grid">
+        <label>Task ID<input id="ledger-task" autocomplete="off"></label>
+        <label>Run ID<input id="ledger-run" autocomplete="off"></label>
+        <label>Provider<input id="ledger-provider" autocomplete="off"></label>
+        <label>Outcome<input id="ledger-outcome" autocomplete="off"></label>
+        <button class="button secondary" type="submit">Apply filters</button>
+      </form>
+      <div id="ledger-table" class="table-wrap">
+        <div class="empty">No ledger data loaded.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Failure signatures</p>
+          <h2>Recurring failures</h2>
+        </div>
+        <span id="failure-count" class="muted">0 signatures</span>
+      </div>
+      <div id="failure-list" class="signature-list">
+        <div class="empty">No failure signatures reported.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Notifications</p>
+          <h2>Runtime notifications</h2>
+        </div>
+        <span id="notification-count" class="muted">0 unread</span>
+      </div>
+      <div id="notification-list" class="notification-list">
+        <div class="empty">No unread runtime notifications.</div>
+      </div>
     </section>
 
     <section class="card">

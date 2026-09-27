@@ -106,7 +106,7 @@ class DeterministicRecoveryClassifier:
                 RecoveryClassification.TERMINAL,
                 "provider_retry_budget_exhausted",
                 "stop_and_preserve_evidence",
-                self.MAX_PROVIDER_RETRIES,
+                0,
             )
 
         return RecoveryDecision(

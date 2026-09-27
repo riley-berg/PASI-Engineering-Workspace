@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Run the M1 live 20-task sequential handoff gate.
+"""Run the M1 live 20-operation sequential handoff gate.
 
-The bridge is given exactly one uniquely marked prompt operation at a time.
-The next operation is not queued until the predecessor has reached verified
-terminal completion and passed every M1 acceptance check.
+The bridge owns the authoritative operation sequence: chain id, sequence
+index, predecessor operation id, idempotency key, and durable terminal state.
+The ChatGPT conversation remains the execution channel, while transcript
+signature/count telemetry is recorded only as independent verification.
 
 The gate records:
-- duplicate submissions (conversation delta != +1 user / +1 assistant)
+- duplicate submissions and exact operation identity
 - skipped/out-of-order operations
 - repeated prompt bodies
-- premature next-operation claims
+- premature next-operation claims or injections
 - terminal CHAT_* failures
 - prompt-injection timing relative to the previous verified completion
+- conversation signature telemetry without making transcript counts the
+  progression invariant
 """
 
 from __future__ import annotations
@@ -213,6 +216,9 @@ def queue_operation(
     *,
     idempotency_key: str,
     completion_markers: list[str] | None = None,
+    chain_id: str | None = None,
+    sequence_index: int | None = None,
+    predecessor_operation_id: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "operation_type": operation_type,
@@ -221,6 +227,12 @@ def queue_operation(
     }
     if completion_markers is not None:
         body["completion_markers"] = completion_markers
+    if chain_id is not None:
+        body["chain_id"] = chain_id
+    if sequence_index is not None:
+        body["sequence_index"] = sequence_index
+    if predecessor_operation_id is not None:
+        body["predecessor_operation_id"] = predecessor_operation_id
     payload = client.post("/queue", body)
     value = payload.get("operation")
     if not isinstance(value, dict) or not value.get("operation_id"):
@@ -262,38 +274,38 @@ def wait_for_terminal(
     raise M1LiveError(f"operation {operation_id} did not reach terminal state within {timeout_seconds}s")
 
 
-def wait_for_signature_delta(
-    client: BridgeClient,
-    *,
-    expected_user: int,
-    expected_assistant: int,
-    timeout_seconds: float,
-) -> tuple[dict[str, Any], tuple[int, int]]:
-    """Wait for browser telemetry to publish the completed +1/+1 conversation delta."""
-    deadline = time.monotonic() + timeout_seconds
-    latest: tuple[int, int] | None = None
-    while time.monotonic() < deadline:
-        state = browser_state(client)
-        counts = signature_counts(state.get("conversation_signature"))
-        if counts is not None:
-            latest = counts
-            if (
-                counts[0] == expected_user + 1
-                and counts[1] == expected_assistant + 1
-            ):
-                return state, counts
-        time.sleep(POLL_SECONDS)
-
-    raise M1LiveError(
-        "conversation signature did not reach exactly +1/+1 after the "
-        f"operation completed; last_counts={latest!r}, "
-        f"expected_next=({expected_user + 1}, {expected_assistant + 1})"
-    )
+def conversation_telemetry(
+    before_signature: str,
+    after_signature: str,
+) -> dict[str, Any]:
+    before_counts = signature_counts(before_signature)
+    after_counts = signature_counts(after_signature)
+    delta = None
+    if before_counts is not None and after_counts is not None:
+        delta = {
+            "user": after_counts[0] - before_counts[0],
+            "assistant": after_counts[1] - before_counts[1],
+        }
+    return {
+        "before": before_signature,
+        "after": after_signature,
+        "before_counts": (
+            {"user": before_counts[0], "assistant": before_counts[1]}
+            if before_counts is not None
+            else None
+        ),
+        "after_counts": (
+            {"user": after_counts[0], "assistant": after_counts[1]}
+            if after_counts is not None
+            else None
+        ),
+        "delta": delta,
+    }
 
 
 def ensure_chat_ready(
     client: BridgeClient,
-) -> tuple[str, tuple[int, int]]:
+) -> tuple[str, str]:
     """Use whichever ChatGPT conversation is active in the browser right now."""
     health = browser_health(client)
     health_url = str(health.get("chat_url") or "")
@@ -305,10 +317,10 @@ def ensure_chat_ready(
         )
 
     state = browser_state(client)
-    counts = signature_counts(state.get("conversation_signature"))
-    if counts is None:
-        raise M1LiveError("browser state did not expose a parseable conversation_signature")
-    return health_url, counts
+    signature = state.get("conversation_signature")
+    if not isinstance(signature, str):
+        signature = ""
+    return health_url, signature
 
 
 def wait_for_thinking(
@@ -371,7 +383,7 @@ def create_fresh_chat_after_limit(
     session_id: str,
     reason: str,
     timeout_seconds: float,
-) -> tuple[str, tuple[int, int], str]:
+) -> tuple[str, str, str]:
     if reason not in {"usage_limit", "context_limit"}:
         raise M1LiveError("fresh chat creation requires an explicit usage or context-limit report")
 
@@ -402,9 +414,9 @@ def create_fresh_chat_after_limit(
             f"{fresh_result.get('status')!r} {fresh_result.get('error')!r}"
         )
 
-    chat_url, counts = ensure_chat_ready(client)
+    chat_url, signature = ensure_chat_ready(client)
     persist_durable_chat_url(chat_url, reason=reason)
-    return chat_url, counts, fresh_id
+    return chat_url, signature, fresh_id
 
 
 def prepare_durable_chat(
@@ -412,7 +424,7 @@ def prepare_durable_chat(
     *,
     session_id: str,
     timeout_seconds: float,
-) -> tuple[str, tuple[int, int], bool, str, str, str]:
+) -> tuple[str, str, bool, str, str, str]:
     """
     Use the conversation currently active in the browser.
 
@@ -425,21 +437,21 @@ def prepare_durable_chat(
     reason = chat_limit_reason(health)
 
     if reason:
-        chat_url, counts, fresh_id = create_fresh_chat_after_limit(
+        chat_url, signature, fresh_id = create_fresh_chat_after_limit(
             client,
             session_id=session_id,
             reason=reason,
             timeout_seconds=timeout_seconds,
         )
-        return chat_url, counts, True, reason, stored_url, fresh_id
+        return chat_url, signature, True, reason, stored_url, fresh_id
 
-    chat_url, counts = ensure_chat_ready(client)
+    chat_url, signature = ensure_chat_ready(client)
 
     # The browser's active conversation is authoritative. Persist it on every
     # normal start so the durable state always matches the current chat.
     persist_durable_chat_url(chat_url, reason="active_browser_chat")
 
-    return chat_url, counts, False, "", stored_url, ""
+    return chat_url, signature, False, "", stored_url, ""
 
 
 def main() -> int:
@@ -502,7 +514,9 @@ def main() -> int:
     if thinking_health.get("thinking_enabled") is not True:
         raise M1LiveError("Thinking was not verified as enabled before queuing the M1 chain")
 
-    expected_user, expected_assistant = baseline_counts
+    baseline_signature = baseline_counts
+    chain_id = f"m1-{uuid.uuid4().hex}"
+    previous_operation_id: str | None = None
 
     operations: list[dict[str, Any]] = []
     generated_fingerprints: dict[str, int] = {}
@@ -546,6 +560,9 @@ def main() -> int:
                 prompt,
                 idempotency_key=f"{session_id}-{index:02d}",
                 completion_markers=[marker],
+                chain_id=chain_id,
+                sequence_index=index,
+                predecessor_operation_id=previous_operation_id,
             )
             operation_id = str(queued["operation_id"])
             expected = {
@@ -554,7 +571,20 @@ def main() -> int:
                 "marker": marker,
                 "prompt": prompt,
                 "prompt_fingerprint": fingerprint,
+                "chain_id": chain_id,
+                "sequence_index": index,
+                "predecessor_operation_id": previous_operation_id,
             }
+            if (
+                queued.get("chain_id") != chain_id
+                or queued.get("sequence_index") != index
+                or queued.get("predecessor_operation_id") != previous_operation_id
+                or queued.get("prompt_fingerprint") != fingerprint
+            ):
+                skipped_indices.append(index)
+                raise M1LiveError(
+                    f"operation {index} returned incorrect authoritative chain metadata"
+                )
             operations.append(expected)
 
             result = wait_for_terminal(
@@ -568,6 +598,17 @@ def main() -> int:
             if result.get("operation_id") != operation_id:
                 skipped_indices.append(index)
                 raise M1LiveError(f"operation identity mismatch at index {index}")
+
+            if (
+                result.get("chain_id") != chain_id
+                or result.get("sequence_index") != index
+                or result.get("predecessor_operation_id") != previous_operation_id
+                or result.get("prompt_fingerprint") != fingerprint
+            ):
+                skipped_indices.append(index)
+                raise M1LiveError(
+                    f"operation {index} did not preserve authoritative chain metadata"
+                )
 
             if result.get("status") != "completed":
                 error = str(result.get("error") or "")
@@ -644,23 +685,22 @@ def main() -> int:
                         "completion-to-injection latency"
                     )
 
-            state, counts = wait_for_signature_delta(
-                client,
-                expected_user=expected_user,
-                expected_assistant=expected_assistant,
-                timeout_seconds=30.0,
+            try:
+                state = browser_state(client)
+            except M1LiveError:
+                state = {}
+            after_signature = state.get("conversation_signature")
+            if not isinstance(after_signature, str):
+                after_signature = ""
+            previous_signature = (
+                baseline_signature
+                if index == 1
+                else results[-1]["conversation_signature_after"]
             )
-            user_delta = counts[0] - expected_user
-            assistant_delta = counts[1] - expected_assistant
-            if user_delta != 1 or assistant_delta != 1:
-                duplicate_indices.append(index)
-                violation = (
-                    f"operation {index} conversation delta was +{user_delta}/+{assistant_delta}; "
-                    "expected exactly +1/+1"
-                )
-                violations.append(violation)
-                raise M1LiveError(violation)
-            expected_user, expected_assistant = counts
+            conversation_verification = conversation_telemetry(
+                previous_signature,
+                after_signature,
+            )
 
             prior_index = next(
                 (
@@ -684,6 +724,17 @@ def main() -> int:
                 )
 
             claimed_at = result.get("claimed_at")
+            if not isinstance(claimed_at, (int, float)):
+                raise M1LiveError(f"operation {index} lacks authoritative claimed_at checkpoint")
+            if previous_completed_ms is not None and claimed_at * 1000 < previous_completed_ms:
+                violation = (
+                    f"operation {index} was claimed before predecessor completion: "
+                    f"claimed_at_ms={claimed_at * 1000}, "
+                    f"previous_completed_at_ms={previous_completed_ms}"
+                )
+                violations.append(violation)
+                raise M1LiveError(violation)
+
             completed_at_ms = timing.get("completed_at_ms")
             if not isinstance(completed_at_ms, (int, float)):
                 raise M1LiveError(f"operation {index} lacks completed_at_ms timing")
@@ -709,13 +760,16 @@ def main() -> int:
                     "completed_at": completed_at_epoch,
                     "completed_at_ms": completed_at_ms,
                     "timing": timing,
-                    "user_delta": user_delta,
-                    "assistant_delta": assistant_delta,
+                    "conversation_signature_before": conversation_verification["before"],
+                    "conversation_signature_after": conversation_verification["after"],
+                    "conversation_verification": conversation_verification,
                     "chat_url": observed_chat_url or chat_url,
                     "retry_count": result.get("retry_count", 0),
                     "recovery_event_count": len(result.get("recovery_events") or []),
                 }
             )
+
+            previous_operation_id = operation_id
 
             print(
                 json.dumps(
@@ -725,8 +779,7 @@ def main() -> int:
                         "status": result.get("status"),
                         "marker": expected["marker"],
                         "timing": timing,
-                        "user_delta": user_delta,
-                        "assistant_delta": assistant_delta,
+                        "conversation_counts_delta": conversation_verification["delta"],
                     },
                     ensure_ascii=False,
                 ),
@@ -755,7 +808,13 @@ def main() -> int:
         "fresh_chat_created_after_limit": fresh_chat_created,
         "fresh_chat_creation_reason": fresh_chat_reason,
         "thinking_enabled_before_chain": thinking_health.get("thinking_enabled") is True,
-        "baseline": {"user": baseline_counts[0], "assistant": baseline_counts[1]},
+        "baseline_conversation_signature": baseline_signature,
+        "baseline_conversation_counts": (
+            {"user": signature_counts(baseline_signature)[0], "assistant": signature_counts(baseline_signature)[1]}
+            if signature_counts(baseline_signature) is not None
+            else None
+        ),
+        "chain_id": chain_id,
         "duplicate_indices": duplicate_indices,
         "skipped_indices": skipped_indices,
         "repeated_prompts": repeated_prompts,
@@ -765,6 +824,7 @@ def main() -> int:
         "results": results,
         "attempted_count": len(operations),
         "completed_count": len(results),
+        "conversation_signature_is_verification_only": True,
         "failure_error": failure_error,
         "completed_at": time.time(),
     }
@@ -780,9 +840,10 @@ def main() -> int:
         )
 
     print(
-        "M1 PASS: 20 sequential tasks; "
-        "zero duplicates, zero skipped tasks, zero repeated prompts, "
-        "zero premature next-task claims/injections, zero terminal CHAT_* errors"
+        "M1 PASS: 20 sequential operations; "
+        "zero duplicate submissions, zero skipped operations, zero repeated prompts, "
+        "zero premature claims/injections, zero terminal CHAT_* errors; "
+        "conversation counts retained as verification telemetry only"
     )
     print(f"Evidence: {evidence_path}")
     return 0

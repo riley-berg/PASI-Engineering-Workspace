@@ -83,7 +83,9 @@ def post_queue(
 
 
 def test_bridge_module_resolves_from_repository() -> None:
-    assert Path(bridge_module.__file__).resolve() == (Path(bridge_module.__file__)).resolve()
+    module_path = Path(bridge_module.__file__).resolve()
+    assert module_path.name == "bridge.py"
+    assert module_path.parent.name == "pasi_bridge"
 
 
 def test_http_rejects_missing_bridge_token(tmp_path: Path) -> None:

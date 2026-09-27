@@ -37,14 +37,24 @@ def expected_version(root:Path)->str|None:
     m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",text)
     return m.group(1).strip() if m else None
 
+def expected_deployment_id(root:Path)->str|None:
+    source=controller_source(root)
+    if source is None:
+        return None
+    try: text=source.read_text(encoding="utf-8")
+    except OSError: return None
+    m=re.search(r"\bPASI_DEPLOYMENT_ID\s*=\s*['\"]([^'\"]+)['\"]",text)
+    return m.group(1).strip() if m else None
+
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->None:
-    deadline=time.monotonic()+timeout; expected=expected_version(ext)
+    deadline=time.monotonic()+timeout; expected=expected_version(ext); expected_deployment=expected_deployment_id(ext)
     while time.monotonic()<deadline:
         try: obs=adapter.read_browser_observation()
         except Exception: obs=None
         data=obs.get("data") if isinstance(obs,Mapping) else None
         if isinstance(data,Mapping) and data.get("kind") in {"chatgpt_health","chatgpt_state"}:
             if expected and data.get("controller_version")!=expected: time.sleep(.5); continue
+            if expected_deployment and data.get("deployment_id")!=expected_deployment: time.sleep(.5); continue
             captured=data.get("captured_at") or (obs.get("captured_at") if isinstance(obs,Mapping) else None)
             if isinstance(captured,str):
                 try:

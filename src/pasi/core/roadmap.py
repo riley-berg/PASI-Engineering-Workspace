@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
-ROADMAP_SCHEMA_VERSION = 3
-SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3})
+ROADMAP_SCHEMA_VERSION = 4
+SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3, 4})
 
 
 class RoadmapError(ValueError):
@@ -92,6 +92,9 @@ class RoadmapTask:
     acceptance_requirements: tuple[str, ...] = ()
     evidence_requirements: tuple[str, ...] = ()
     parent_task_id: str = ""
+    source_issue_number: int | None = None
+    source_url: str = ""
+    source_title: str = ""
     status: TaskStatus = TaskStatus.PLANNED
     revision: int = 0
 
@@ -107,6 +110,15 @@ class RoadmapTask:
             raise RoadmapError(f"task {self.id} requires evidence_requirements")
         if self.parent_task_id and self.parent_task_id == self.id:
             raise RoadmapError("task cannot be its own parent")
+        if self.source_issue_number is not None:
+            if not isinstance(self.source_issue_number, int) or self.source_issue_number <= 0:
+                raise RoadmapError("source_issue_number must be a positive integer or null")
+            if not self.source_url.strip() or not self.source_title.strip():
+                raise RoadmapError(
+                    f"task {self.id} source metadata requires source_url and source_title"
+                )
+        if self.source_url and not self.source_title:
+            raise RoadmapError("source_title is required when source_url is present")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +129,9 @@ class RoadmapTask:
             "acceptance_requirements": list(self.acceptance_requirements),
             "evidence_requirements": list(self.evidence_requirements),
             "parent_task_id": self.parent_task_id,
+            "source_issue_number": self.source_issue_number,
+            "source_url": self.source_url,
+            "source_title": self.source_title,
             "status": self.status.value,
             "revision": self.revision,
         }
@@ -191,7 +206,7 @@ class Roadmap:
         _nonempty(self.roadmap_id, name="roadmap id")
         if self.version not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
             raise RoadmapError(f"unsupported roadmap schema version: {self.version}")
-        if self.version == 2:
+        if self.version in {2, 3}:
             object.__setattr__(self, "version", ROADMAP_SCHEMA_VERSION)
         if self.revision < 0:
             raise RoadmapError("roadmap revision must be non-negative")
@@ -340,6 +355,34 @@ class Roadmap:
             tasks=self.tasks + tuple(children),
         )
 
+    def add_tasks(self, tasks: tuple[RoadmapTask, ...]) -> "Roadmap":
+        if not tasks:
+            raise RoadmapError("at least one task is required")
+        existing_ids = {task.id for task in self.tasks}
+        new_ids = {task.id for task in tasks}
+        if len(new_ids) != len(tasks) or existing_ids & new_ids:
+            raise RoadmapError("task ids must be unique and new")
+        phase_ids = {phase.id for phase in self.phases}
+        valid_ids = existing_ids | new_ids
+        for task in tasks:
+            if task.phase_id not in phase_ids:
+                raise RoadmapError(f"task {task.id} references missing phase {task.phase_id}")
+            if task.parent_task_id:
+                raise RoadmapError("issue intake cannot create child tasks with parent_task_id")
+            if not set(task.depends_on).issubset(valid_ids):
+                missing = sorted(set(task.depends_on) - valid_ids)
+                raise RoadmapError(
+                    f"task {task.id} references unavailable dependencies: {missing}"
+                )
+        candidate = Roadmap(
+            roadmap_id=self.roadmap_id,
+            version=ROADMAP_SCHEMA_VERSION,
+            revision=self.revision + 1,
+            phases=self.phases,
+            tasks=self.tasks + tuple(tasks),
+        )
+        return candidate
+
     def blocked_tasks(self) -> tuple[RoadmapTask, ...]:
         completed = {
             task.id for task in self.tasks
@@ -435,6 +478,10 @@ class Roadmap:
             depends_on=task.depends_on,
             acceptance_requirements=task.acceptance_requirements,
             evidence_requirements=task.evidence_requirements,
+            parent_task_id=task.parent_task_id,
+            source_issue_number=task.source_issue_number,
+            source_url=task.source_url,
+            source_title=task.source_title,
             status=status,
             revision=task.revision + 1,
         )

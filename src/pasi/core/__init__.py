@@ -23,6 +23,8 @@ from .computer_control import ComputerActionResult, ComputerControlError, Comput
 from .resource_observer import HostResourceObserver, ResourceObservationError, ResourceSnapshot, SQLiteResourceObservationStore
 from .terminal import TerminalCapabilityError, TerminalCommand, TerminalResult, SQLiteTerminalEvidenceStore, TypedTerminalExecutor
 from .github_issue_intake import GitHubIssueTaskIntake, GitHubIssueTaskProposal, IssueIntakeError
+from .human_testing import CodeChangeCandidate, HumanTestRun, HumanTestStepResult, HumanTestTrustCertificate, HumanTestTrustEvaluator, HumanTestTrustPolicy, SelfImprovementDecision, SelfImprovementGate, TrustStatus
+from .human_test_store import DuplicateHumanTestRun, HumanTestRunNotFound, HumanTestStore
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
 from .memory_compaction import CompactionError, CompactionGroup, MemoryCompactor
@@ -31,8 +33,6 @@ from .events import DurableEvent, InvalidEvent
 from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature_key
 from .ledger import InvalidLedgerEntry, OperationLedgerEntry
 from .ledger_store import DuplicateLedgerEntry, LedgerEntryNotFound, LineageConflict, SQLiteOperationLedger
-from .human_testing import CodeChangeCandidate, HumanTestRun, HumanTestStepResult, HumanTestTrustCertificate, HumanTestTrustEvaluator, HumanTestTrustPolicy, SelfImprovementDecision, SelfImprovementGate, TrustStatus
-from .human_test_store import DuplicateHumanTestRun, HumanTestRunNotFound, HumanTestStore
 from .migrations import MigrationError, migrate_operation_state_database
 from .operation_state import (
     InvalidOperationState,
@@ -137,6 +137,7 @@ __all__ = [
     "ContextCompilationError",
     "ContextCompiler",
     "ContextSource",
+    "CodeChangeCandidate",
     "CrossRunLearning",
     "LearningPromotionError",
     "LearningProposal",
@@ -145,6 +146,13 @@ __all__ = [
     "FileWriteResult",
     "GitHubIssueTaskIntake",
     "HostRecoveryController",
+    "HumanTestRun",
+    "HumanTestRunNotFound",
+    "HumanTestStepResult",
+    "HumanTestStore",
+    "HumanTestTrustCertificate",
+    "HumanTestTrustEvaluator",
+    "HumanTestTrustPolicy",
     "HostResourceObserver",
     "GitHubIssueTaskProposal",
     "IssueIntakeError",
@@ -160,7 +168,6 @@ __all__ = [
     "CompactionError",
     "CompactionGroup",
     "MemoryCompactor",
-    "CodeChangeCandidate",
     "DuplicateEvent",
     "DuplicateHumanTestRun",
     "DuplicateLedgerEntry",
@@ -172,13 +179,6 @@ __all__ = [
     "InvalidLedgerEntry",
     "InvalidOperationState",
     "InvalidOperationTransition",
-    "HumanTestRun",
-    "HumanTestRunNotFound",
-    "HumanTestStepResult",
-    "HumanTestStore",
-    "HumanTestTrustCertificate",
-    "HumanTestTrustEvaluator",
-    "HumanTestTrustPolicy",
     "LineageConflict",
     "LedgerEntryNotFound",
     "MigrationError",

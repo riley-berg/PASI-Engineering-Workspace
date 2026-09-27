@@ -684,10 +684,21 @@ def main() -> int:
                     "response_completed_to_prompt_injected_ms"
                 )
                 if not isinstance(response_completed_to_injection, (int, float)):
-                    raise M1LiveError(
-                        f"operation {index} lacks "
-                        "response_completed_to_prompt_injected_ms"
+                    response_completed_to_injection = (
+                        float(injected_at_ms) - float(previous_completed_ms)
                     )
+                    if response_completed_to_injection < 0:
+                        raise M1LiveError(
+                            f"operation {index} reported a negative "
+                            "derived completion-to-injection latency"
+                        )
+                    timing = {
+                        **timing,
+                        "response_completed_to_prompt_injected_ms": response_completed_to_injection,
+                        "response_completed_to_prompt_injected_ms_source": (
+                            "authoritative_predecessor_completed_at_ms"
+                        ),
+                    }
                 if response_completed_to_injection < 0:
                     raise M1LiveError(
                         f"operation {index} reported a negative "

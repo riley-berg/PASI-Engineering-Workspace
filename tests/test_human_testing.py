@@ -10,7 +10,7 @@ from pasi.core.human_testing import (
     SelfImprovementGate,
     TrustStatus,
 )
-from pasi.core.human_test_store import HumanTestStore
+from pasi.core.human_test_store import DuplicateHumanTestRun, HumanTestStore
 
 
 def run(
@@ -151,3 +151,11 @@ def test_human_test_evidence_tampering_is_rejected():
     import pytest
     with pytest.raises(ValueError, match="evidence hash mismatch"):
         HumanTestRun.from_mapping(original)
+
+
+def test_human_test_run_ids_are_append_only(tmp_path):
+    store = HumanTestStore(tmp_path / "human-tests.db")
+    evidence = run(123)
+    store.record_run(evidence)
+    with pytest.raises(DuplicateHumanTestRun):
+        store.record_run(evidence)

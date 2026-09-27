@@ -18,6 +18,7 @@ from pasi.core.runtime_controls import (
 from pasi.core.runtime_events import RuntimeEventFeed
 from pasi.core.runtime_health import HealthError, RuntimeHealthStore
 from pasi.core.failure_registry import SQLiteFailureRegistry
+from pasi.core.notifications import NotificationError, SQLiteNotificationStore
 from pasi.core.runtime_projection import RuntimeProjectionService
 
 
@@ -32,12 +33,16 @@ class RuntimeAPIService:
         health_store: RuntimeHealthStore,
         controls: RuntimeControlService,
         failure_registry: SQLiteFailureRegistry | None = None,
+        notification_store: SQLiteNotificationStore | None = None,
+        notification_scope: str = "runtime",
     ) -> None:
         self.projection = projection
         self.event_feed = event_feed
         self.health_store = health_store
         self.controls = controls
         self.failure_registry = failure_registry
+        self.notification_store = notification_store
+        self.notification_scope = notification_scope
 
     def request(
         self,
@@ -141,6 +146,41 @@ class RuntimeAPIService:
 
         if method == "GET" and parsed.path == "/v1/runtime/migrations":
             return HTTPStatus.OK, self.projection.operation_store.migration_status()
+
+        if method == "GET" and parsed.path == "/v1/runtime/notifications":
+            if self.notification_store is None:
+                return HTTPStatus.NOT_IMPLEMENTED, {"error": "notification store unavailable"}
+            query = parse_qs(parsed.query)
+            include_ack = query.get("include_acknowledged", ["false"])[0].lower() == "true"
+            notifications = self.notification_store.list(
+                scope=query.get("scope", [self.notification_scope])[0],
+                include_acknowledged=include_ack,
+            )
+            return HTTPStatus.OK, {
+                "notifications": [item.to_dict() for item in notifications],
+                "count": len(notifications),
+            }
+
+        if method == "POST" and parsed.path.startswith("/v1/runtime/notifications/") and parsed.path.endswith("/ack"):
+            if self.notification_store is None:
+                return HTTPStatus.NOT_IMPLEMENTED, {"error": "notification store unavailable"}
+            auth = headers.get("Authorization", "")
+            if not auth.startswith("Bearer "):
+                return HTTPStatus.UNAUTHORIZED, {"error": "missing bearer authorization"}
+            try:
+                self.controls.authorize(auth[7:])
+                notification_id = parsed.path.split("/")[-2]
+                payload = body or {}
+                expected_revision = int(payload.get("expected_revision", -1))
+                result = self.notification_store.acknowledge(
+                    notification_id,
+                    expected_revision=expected_revision,
+                )
+            except AuthorizationError as exc:
+                return HTTPStatus.UNAUTHORIZED, {"error": str(exc)}
+            except (NotificationError, KeyError, ValueError) as exc:
+                return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
+            return HTTPStatus.OK, result.to_dict()
 
         if method == "POST" and parsed.path == "/v1/runtime/controls":
             payload = body or {}

@@ -27,6 +27,8 @@ from .recovery import (
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
+from .schedule_store import ScheduleNotFound, SQLiteScheduleStore
+from .scheduling import CostAwareScheduler, ResourceEstimate, ScheduleDecision, ScheduleError, SchedulerCapacity, ScheduledTask, StaleSchedule
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
@@ -61,9 +63,13 @@ __all__ = [
     "DuplicateRoadmap",
     "Roadmap",
     "RoadmapNotFound",
+    "ScheduleDecision",
+    "ScheduleError",
+    "ScheduleNotFound",
     "RoadmapPhase",
     "SQLiteEventStore",
     "SQLiteRoadmapStore",
+    "SQLiteScheduleStore",
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",

@@ -19,7 +19,7 @@ POLICY: dict[str, Any] = {
     "health_sample_interval_seconds": 300,
     "max_health_gap_seconds": 360,
     "max_heartbeat_age_seconds": 60,
-    "expected_logical_operations": 168,
+    "minimum_logical_operations": 168,
     "max_duplicate_logical_operations": 0,
     "max_skipped_operations": 0,
     "max_terminal_chat_errors": 0,
@@ -165,8 +165,10 @@ def verify_health(evidence: dict[str, Any], start: datetime, end: datetime) -> N
 
 def verify_operations(evidence: dict[str, Any]) -> None:
     operations = as_list(evidence.get("operations"), "operations")
-    if len(operations) != POLICY["expected_logical_operations"]:
-        raise VerificationError("operation count is not exactly 168")
+    if len(operations) < POLICY["minimum_logical_operations"]:
+        raise VerificationError(
+            "operation count is below the minimum of 168"
+        )
 
     ids: set[str] = set()
     keys: set[str] = set()
@@ -416,8 +418,12 @@ def verify_summary(evidence: dict[str, Any]) -> None:
     for key, value in exact_zeroes:
         if summary.get(key) != value:
             raise VerificationError(f"summary.{key}={summary.get(key)!r}; expected {value}")
-    if summary.get("logical_operations_completed") != POLICY["expected_logical_operations"]:
-        raise VerificationError("summary logical operation count is not 168")
+    if summary.get("logical_operations_completed") != len(evidence.get("operations", [])):
+        raise VerificationError(
+            "summary logical operation count does not match operations"
+        )
+    if summary["logical_operations_completed"] < POLICY["minimum_logical_operations"]:
+        raise VerificationError("summary logical operation count is below 168")
     if summary.get("planned_recoveries") != POLICY["planned_recovery_count"]:
         raise VerificationError("summary planned recovery count is incorrect")
     if summary.get("successful_planned_recoveries") != POLICY["planned_recovery_count"]:

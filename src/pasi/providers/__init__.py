@@ -9,6 +9,9 @@ from .health import HealthClassification, ProviderHealthError, ProviderHealthMon
 
 __all__ = [
     "ChatMessage",
+    "ModelProfile",
+    "ModelProfileError",
+    "ModelProfileManager",
     "HealthClassification",
     "ProviderHealthError",
     "ProviderHealthMonitor",

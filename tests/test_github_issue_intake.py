@@ -64,7 +64,7 @@ def test_github_issue_intake_applies_as_real_roadmap_task():
         {
             "number": 125,
             "title": "Task",
-            "body": "## Requirements\\n- functional proof",
+            "body": "\\n".join(["## Requirements", "- functional proof"]),
             "html_url": "https://github.com/example/issues/125",
         },
         phase_id="P2",

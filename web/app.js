@@ -127,6 +127,22 @@ export function normalizeFailures(signatures) {
   }));
 }
 
+export function normalizeNotifications(notifications) {
+  if (!Array.isArray(notifications)) return [];
+  return notifications.map((notification) => ({
+    notification_id: notification.notification_id || "",
+    scope: notification.scope || "",
+    source_event_id: notification.source_event_id || "",
+    severity: notification.severity || "info",
+    message: notification.message || "",
+    entity_type: notification.entity_type || "",
+    entity_id: notification.entity_id || "",
+    occurred_at: notification.occurred_at || "",
+    acknowledged: Boolean(notification.acknowledged),
+    revision: Number(notification.revision || 0),
+  }));
+}
+
 function qs(selector) {
   return document.querySelector(selector);
 }

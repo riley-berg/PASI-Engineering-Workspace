@@ -402,7 +402,7 @@ def prepare_durable_chat(
     *,
     session_id: str,
     timeout_seconds: float,
-) -> tuple[str, tuple[int, int], bool, str, str]:
+) -> tuple[str, tuple[int, int], bool, str, str, str]:
     """
     Reuse the stored automation chat unless ChatGPT explicitly reports a
     usage/context limit. A chat mismatch is a hard failure rather than a
@@ -419,13 +419,12 @@ def prepare_durable_chat(
             reason=reason,
             timeout_seconds=timeout_seconds,
         )
-        del fresh_id
-        return chat_url, counts, True, reason, stored_url
+        return chat_url, counts, True, reason, stored_url, fresh_id
 
     chat_url, counts = ensure_chat_ready(client, expected_chat_url=stored_url)
     if not stored_url:
         persist_durable_chat_url(chat_url, reason="initial_durable_chat")
-    return chat_url, counts, False, "", stored_url
+    return chat_url, counts, False, "", stored_url, ""
 
 
 def main() -> int:
@@ -461,6 +460,7 @@ def main() -> int:
         fresh_chat_created,
         fresh_chat_reason,
         durable_chat_url_before,
+        fresh_chat_operation_id,
     ) = prepare_durable_chat(
         client,
         session_id=session_id,
@@ -695,7 +695,7 @@ def main() -> int:
         "chat_url": chat_url,
         "durable_chat_url": chat_url,
         "durable_chat_url_before_test": durable_chat_url_before,
-        "fresh_chat_operation_id": "",
+        "fresh_chat_operation_id": fresh_chat_operation_id,
         "fresh_chat_created_after_limit": fresh_chat_created,
         "fresh_chat_creation_reason": fresh_chat_reason,
         "thinking_enabled_before_chain": thinking_health.get("thinking_enabled") is True,

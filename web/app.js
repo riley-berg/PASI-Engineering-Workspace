@@ -244,15 +244,26 @@ function renderAcceptance(vm) {
 function renderTimeline(vm) {
   const timeline = qs("#timeline");
   timeline.replaceChildren();
-  const events = vm.events;
+  const sourceFilter = qs("#timeline-source")?.value.trim().toLowerCase() || "";
+  const typeFilter = qs("#timeline-type")?.value.trim().toLowerCase() || "";
+  const events = vm.events.filter((event) => {
+    const source = String(event.source || "").toLowerCase();
+    const type = String(event.event_type || "").toLowerCase();
+    return (!sourceFilter || source.includes(sourceFilter)) &&
+      (!typeFilter || type.includes(typeFilter));
+  });
+
   setText("#event-count", `${events.length} event${events.length === 1 ? "" : "s"}`);
   if (!events.length) {
     const item = document.createElement("li");
     item.className = "empty";
-    item.textContent = "No durable events reported for this operation.";
+    item.textContent = vm.events.length
+      ? "No events match the current filters."
+      : "No durable events reported for this operation.";
     timeline.append(item);
     return;
   }
+
   for (const event of events) {
     const item = document.createElement("li");
     const meta = document.createElement("div");
@@ -262,16 +273,38 @@ function renderTimeline(vm) {
     const when = document.createElement("span");
     when.textContent = humanTime(event.occurred_at);
     meta.append(sequence, when);
+
     const title = document.createElement("div");
     title.className = "event-title";
     title.textContent = event.event_type || "runtime event";
+
     const body = document.createElement("div");
     body.className = "event-body";
+    const correlation = event.correlation_id
+      ? `correlation: ${event.correlation_id}`
+      : "";
     const payload = event.payload && typeof event.payload === "object"
       ? JSON.stringify(event.payload)
       : "";
-    body.textContent = payload;
+    body.textContent = [correlation, payload].filter(Boolean).join(" · ");
+
     item.append(meta, title, body);
+
+    if (Array.isArray(event.evidence_refs) && event.evidence_refs.length) {
+      const links = document.createElement("div");
+      links.className = "operation-links";
+      for (const ref of event.evidence_refs) {
+        const link = document.createElement("a");
+        link.className = "operation-link";
+        link.href = ref;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = "verification";
+        links.append(link);
+      }
+      item.append(links);
+    }
+
     timeline.append(item);
   }
 }
@@ -466,6 +499,96 @@ function renderFailures(signatures) {
       links.append(evidence);
     }
     card.append(head, meta, links);
+    root.append(card);
+  }
+}
+
+function renderNotifications(notifications) {
+  const list = normalizeNotifications(notifications);
+  setText("#notification-count", `${list.length} unread`);
+  const root = qs("#notification-list");
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No unread runtime notifications.";
+    root.append(empty);
+    return;
+  }
+
+  for (const notification of list) {
+    const card = document.createElement("article");
+    card.className = `notification-card ${notification.severity}`;
+
+    const head = document.createElement("div");
+    head.className = "notification-head";
+    const message = document.createElement("strong");
+    message.className = "notification-message";
+    message.textContent = notification.message;
+    const severity = document.createElement("span");
+    severity.className = `pill ${notification.severity === "critical" || notification.severity === "error" ? "danger" : notification.severity === "warning" ? "warning" : "neutral"}`;
+    severity.textContent = notification.severity;
+    head.append(message, severity);
+
+    const meta = document.createElement("div");
+    meta.className = "notification-meta";
+    for (const value of [
+      notification.scope,
+      notification.entity_type ? `${notification.entity_type}:${notification.entity_id}` : "",
+      humanTime(notification.occurred_at),
+    ]) {
+      if (!value) continue;
+      const span = document.createElement("span");
+      span.textContent = value;
+      meta.append(span);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "operation-links";
+    if (notification.entity_id) {
+      const link = document.createElement("a");
+      link.className = "operation-link";
+      const url = new URL(location.href);
+      if (notification.entity_type === "operation") {
+        url.searchParams.set("operation_id", notification.entity_id);
+      }
+      link.href = url.toString();
+      link.textContent = "open";
+      actions.append(link);
+    }
+
+    const acknowledge = document.createElement("button");
+    acknowledge.className = "button";
+    acknowledge.type = "button";
+    acknowledge.textContent = "Acknowledge";
+    acknowledge.addEventListener("click", async () => {
+      const token = qs("#token").value.trim();
+      if (!token) {
+        qs("#control-result").textContent = "A runtime token is required to acknowledge notifications.";
+        return;
+      }
+      acknowledge.disabled = true;
+      try {
+        const apiBase = document.documentElement.dataset.apiBase || DEFAULT_API_BASE;
+        await getJson(
+          `${apiBase}/v1/runtime/notifications/${encodeURIComponent(notification.notification_id)}/ack`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ expected_revision: notification.revision }),
+          },
+        );
+        await refresh();
+      } catch (error) {
+        qs("#control-result").textContent = error instanceof Error ? error.message : String(error);
+        acknowledge.disabled = false;
+      }
+    });
+    actions.append(acknowledge);
+    card.append(head, meta, actions);
     root.append(card);
   }
 }

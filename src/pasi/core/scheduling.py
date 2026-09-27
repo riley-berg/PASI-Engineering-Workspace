@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 from typing import Mapping, Sequence
 
 from pasi.core.roadmap import Roadmap
-from pasi.core.task_selection import SelectionDecision, StaleSelection
 
 
 class ScheduleError(ValueError):
@@ -85,14 +84,9 @@ class CostAwareScheduler:
         estimates: Mapping[str, ResourceEstimate],
         capacity: SchedulerCapacity,
         advisory_priorities: Mapping[str, float] | None = None,
-        selection: SelectionDecision | None = None,
     ) -> ScheduleDecision:
         priorities = dict(advisory_priorities or {})
         ready_ids = {task.id for task in roadmap.ready_tasks()}
-
-        if selection is not None:
-            selection.assert_fresh(roadmap)
-            ready_ids &= set(selection.eligible_task_ids)
 
         excluded: dict[str, str] = {}
         candidates: list[tuple[str, ResourceEstimate, float]] = []

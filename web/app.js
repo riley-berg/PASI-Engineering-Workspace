@@ -261,6 +261,32 @@ function renderTimeline(vm) {
 }
 
 function renderRecovery(vm) {
+  const decision = normalizeRecoveryDecision(vm);
+  const pill = qs("#recovery-classification");
+  pill.textContent = decision.classification;
+  pill.className = `pill ${decision.classification === "terminal" || decision.classification === "human_required" ? "danger" : decision.available ? "warning" : "neutral"}`;
+  setText("#recovery-condition", decision.condition);
+  setText("#recovery-action", decision.action);
+  setText("#recovery-budget", decision.max_attempts == null ? "" : decision.max_attempts);
+  setText("#recovery-attempts", decision.attempts == null ? "" : decision.attempts);
+  setText(
+    "#recovery-identity",
+    decision.preserve_operation_identity == null
+      ? ""
+      : decision.preserve_operation_identity ? "preserved" : "not preserved",
+  );
+  setText(
+    "#recovery-evidence",
+    decision.evidence_preserved == null
+      ? ""
+      : decision.evidence_preserved ? "preserved" : "not reported",
+  );
+  qs("#recovery-handoff").textContent = decision.planner_handoff || (
+    decision.available
+      ? "Authoritative recovery decision loaded from durable event state."
+      : "No persisted recovery decision metadata reported."
+  );
+
   const list = qs("#recovery-list");
   if (!list) return;
   list.replaceChildren();
@@ -271,6 +297,7 @@ function renderRecovery(vm) {
     list.append(item);
     return;
   }
+
   list.className = "list";
   for (const event of vm.recoveryEvents) {
     const item = document.createElement("li");

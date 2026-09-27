@@ -1,0 +1,8 @@
+{
+  "name":"pasi-runtime-dashboard",
+  "private":true,
+  "type":"module",
+  "scripts":{
+    "test":"node --test web/app.test.js"
+  }
+}

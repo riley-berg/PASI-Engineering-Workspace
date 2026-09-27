@@ -48,8 +48,7 @@ def test_github_issue_intake_rejects_missing_acceptance_and_duplicates():
             {
                 "number": 123,
                 "title": "Duplicate",
-                "body": "## Acceptance
-- done",
+                "body": "## Acceptance\\n- done",
                 "html_url": "https://github.com/example/issues/123",
             },
             phase_id="P2",

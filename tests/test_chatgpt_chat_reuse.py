@@ -61,6 +61,14 @@ if __name__ == "__main__":
         self.assertIn("await waitForConversationDomReady()", self.source)
         self.assertIn("lastStateReportAt = 0", self.source)
 
+    def test_completion_waits_for_exact_dom_turn_before_acknowledgement(self) -> None:
+        self.assertIn("async function waitForConversationSignatureDelta(", self.source)
+        self.assertIn("targetUser = Number(baseline.user) + 1", self.source)
+        self.assertIn("targetAssistant = Number(baseline.assistant) + 1", self.source)
+        self.assertIn("completed response did not reach exact +1/+1 conversation counts", self.source)
+        self.assertIn("signatureBaseline", self.source)
+        self.assertIn("await waitForConversationSignatureDelta(signatureBaseline)", self.source)
+
     def test_completion_publishes_fresh_conversation_signature_before_return(self) -> None:
         finish = self.source.split("async function finishOperation(", 1)[1].split(
             "async function failOperation", 1

@@ -17,6 +17,7 @@ document.getElementById("run").addEventListener("click", async () => {
     const origin = document.getElementById("origin").value.trim().replace(//$/, "");
     const codeHead = document.getElementById("code-head").value.trim();
     const token = document.getElementById("token").value;
+    const controlToken = document.getElementById("control-token").value;
     if (!origin) throw new Error("target origin is required");
     if (!/^[0-9a-f]{40}$/.test(codeHead)) throw new Error("code head must be a 40-character SHA");
     const suite = await loadSuite();
@@ -26,7 +27,8 @@ document.getElementById("run").addEventListener("click", async () => {
       suite,
       targetOrigin: origin,
       codeHead,
-      backendToken: token
+      backendToken: token,
+      runtimeControlToken: controlToken
     });
     result.textContent = JSON.stringify(response, null, 2);
   } catch (error) {

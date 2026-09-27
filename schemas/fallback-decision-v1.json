@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/fallback-decision-v1.json",
+  "title":"PASI fallback decision v1",
+  "type":"object",
+  "required":["operation_id","idempotency_key","attempt","provider","model","reason","registry_digest","health_classification","previous_provider","selected_at"],
+  "properties":{
+    "operation_id":{"type":"string","minLength":1},
+    "idempotency_key":{"type":"string","minLength":1},
+    "attempt":{"type":"integer","minimum":1,"maximum":10},
+    "provider":{"type":"string","minLength":1},
+    "model":{"type":"string","minLength":1},
+    "reason":{"type":"string","minLength":1},
+    "registry_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "health_classification":{"type":"string","minLength":1},
+    "previous_provider":{"type":"string"},
+    "selected_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

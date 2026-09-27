@@ -80,6 +80,7 @@ def _build_evidence():
                 "retry_count_delta": 1,
                 "logical_execution_count": 1,
                 "terminal_chat_errors": 0,
+                "controlled_probe": True,
                 "recovery_latency_seconds": 60,
                 "phases": [
                     "connection_lost",

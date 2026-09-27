@@ -149,6 +149,18 @@ class TestM0Acceptance(unittest.TestCase):
             self.assertEqual(persisted, destination)
             self.assertEqual(destination.read_text(encoding="utf-8"), "{\"status\": \"PASS\"}\n")
 
+    def test_m0_live_persists_evidence_before_advancing_progression(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "run_m0_live_acceptance.py"
+        )
+        source = script.read_text(encoding="utf-8")
+        self.assertLess(
+            source.index("persistent_evidence = persist_evidence"),
+            source.index("progression.save(progression_path)"),
+        )
+
     def test_live_acceptance_script_imports_from_repo_root(self) -> None:
         repo = Path(__file__).resolve().parents[1]
         result = subprocess.run(

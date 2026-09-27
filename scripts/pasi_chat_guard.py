@@ -16,11 +16,13 @@ def extract(text:str)->list[dict[str,Any]]:
         if len(out)>=3:break
     return out
 def main()->int:
-    p=argparse.ArgumentParser();p.add_argument("task");p.add_argument("--repo",type=Path,required=True);p.add_argument("--timeout",type=float,default=1800);a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument("task");p.add_argument("--repo",type=Path,required=True);p.add_argument("--timeout",type=float,default=1800);p.add_argument("--extension-root",type=Path,default=None);a=p.parse_args()
     root=a.repo.expanduser().resolve(); current=a.task.strip()
     for round_no in range(4):
         env=os.environ.copy()
-        cmd=[sys.executable,str(Path(__file__).with_name("pasi_chat.py")),current,"--repo",str(root),"--phase",env.get("PASI_TASK_PHASE",""),"--task-id",env.get("PASI_TASK_ID",""),"--issue",env.get("PASI_TASK_SOURCE_ISSUE",""),"--timeout",str(a.timeout)]
+        cmd=[sys.executable,"-m","scripts.pasi_chat",current,"--repo",str(root),"--phase",env.get("PASI_TASK_PHASE",""),"--task-id",env.get("PASI_TASK_ID",""),"--issue",env.get("PASI_TASK_SOURCE_ISSUE",""),"--timeout",str(a.timeout)]
+        ext = a.extension_root or Path(env.get("PASI_ENGINEERING_EXTENSION_ROOT",str(Path(__file__).resolve().parents[1]/"extensions"/"pasi-chatgpt")))
+        cmd.extend(["--extension-root",str(ext.expanduser().resolve())])
         pr=subprocess.run(cmd,cwd=Path(__file__).resolve().parents[1],capture_output=True,text=True,timeout=a.timeout+45,check=False)
         output=(pr.stdout or "")+(pr.stderr or ""); print(output,end="")
         requests=extract(output)

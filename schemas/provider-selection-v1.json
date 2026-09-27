@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/provider-selection-v1.json",
+  "title":"PASI provider selection v1",
+  "type":"object",
+  "required":["provider","model","registry_digest","eligible","excluded_reasons","preference_ranks","selected_at"],
+  "properties":{
+    "provider":{"type":"string","minLength":1},
+    "model":{"type":"string","minLength":1},
+    "registry_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "eligible":{"type":"array","items":{"type":"string","minLength":1}},
+    "excluded_reasons":{"type":"object","additionalProperties":{"type":"string"}},
+    "preference_ranks":{"type":"object","additionalProperties":{"type":"integer"}},
+    "selected_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

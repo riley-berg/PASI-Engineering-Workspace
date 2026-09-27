@@ -24,6 +24,19 @@ def _iso(start: datetime, seconds: int) -> str:
     return (start + timedelta(seconds=seconds)).isoformat()
 
 
+def _rehash(evidence):
+    copy_for_hash = json.loads(json.dumps(evidence))
+    copy_for_hash["integrity"]["canonical_sha256"] = ""
+    evidence["integrity"]["canonical_sha256"] = hashlib.sha256(
+        json.dumps(
+            copy_for_hash,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+
+
 def _build_evidence(verifier=None):
     verifier = verifier or load_verifier()
     verifier.POLICY = copy.deepcopy(verifier.POLICY)
@@ -202,13 +215,14 @@ def test_schema_is_valid_json():
 
 def test_clean_evidence_passes():
     verifier = load_verifier()
-    verifier.verify_evidence(_build_evidence())
+    verifier.verify_evidence(_build_evidence(verifier))
 
 
 def test_duplicate_operation_fails():
     verifier = load_verifier()
     evidence = _build_evidence(verifier)
     evidence["operations"][1]["operation_id"] = evidence["operations"][0]["operation_id"]
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -219,8 +233,9 @@ def test_duplicate_operation_fails():
 
 def test_skipped_sequence_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["operations"][1]["sequence_index"] = 3
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -231,8 +246,9 @@ def test_skipped_sequence_fails():
 
 def test_recovery_identity_change_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["recoveries"][0]["same_operation_resumed"] = False
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -243,8 +259,9 @@ def test_recovery_identity_change_fails():
 
 def test_second_recovery_retry_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["recoveries"][0]["retry_count_delta"] = 2
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -255,8 +272,9 @@ def test_second_recovery_retry_fails():
 
 def test_stale_heartbeat_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["health"]["samples"][0]["heartbeat_age_seconds"] = 61
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -267,9 +285,10 @@ def test_stale_heartbeat_fails():
 
 def test_resource_leak_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     for sample in evidence["resources"]["samples"]:
         sample["rss_bytes"] = 250_000_000
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:
@@ -280,8 +299,9 @@ def test_resource_leak_fails():
 
 def test_tampered_evidence_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["summary"]["terminal_chat_errors"] = 1
+    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError:

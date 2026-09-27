@@ -293,20 +293,15 @@ def wait_for_signature_delta(
 
 def ensure_chat_ready(
     client: BridgeClient,
-    *,
-    expected_chat_url: str = "",
 ) -> tuple[str, tuple[int, int]]:
+    """Use whichever ChatGPT conversation is active in the browser right now."""
     health = browser_health(client)
     health_url = str(health.get("chat_url") or "")
     if health.get("native_controller") is not True:
         raise M1LiveError("browser health does not identify the native controller")
     if not health_url.startswith("https://chatgpt.com/c/"):
-        raise M1LiveError(f"browser health does not expose a ChatGPT conversation URL: {health_url!r}")
-    if expected_chat_url and health_url != expected_chat_url:
         raise M1LiveError(
-            "browser is not on the durable PASI automation chat; "
-            f"expected {expected_chat_url!r}, observed {health_url!r}. "
-            "Switch back to the stored automation conversation instead of creating a new chat."
+            f"browser health does not expose a ChatGPT conversation URL: {health_url!r}"
         )
 
     state = browser_state(client)
@@ -419,9 +414,11 @@ def prepare_durable_chat(
     timeout_seconds: float,
 ) -> tuple[str, tuple[int, int], bool, str, str, str]:
     """
-    Reuse the stored automation chat unless ChatGPT explicitly reports a
-    usage/context limit. A chat mismatch is a hard failure rather than a
-    reason to create a replacement conversation.
+    Use the conversation currently active in the browser.
+
+    The previously persisted URL is evidence only; it never overrides the
+    active browser conversation. A new conversation is created only after
+    ChatGPT explicitly reports a usage/context limit.
     """
     stored_url = durable_chat_url()
     health = browser_health(client)
@@ -436,9 +433,13 @@ def prepare_durable_chat(
         )
         return chat_url, counts, True, reason, stored_url, fresh_id
 
-    chat_url, counts = ensure_chat_ready(client, expected_chat_url=stored_url)
-    if not stored_url:
-        persist_durable_chat_url(chat_url, reason="initial_durable_chat")
+    chat_url, counts = ensure_chat_ready(client)
+
+    # The browser's active conversation is authoritative. Persist it even when
+    # it differs from an older durable URL so subsequent runs reuse this chat.
+    if stored_url != chat_url:
+        persist_durable_chat_url(chat_url, reason="active_browser_chat")
+
     return chat_url, counts, False, "", stored_url, ""
 
 

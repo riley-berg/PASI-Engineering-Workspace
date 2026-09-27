@@ -1,5 +1,6 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
 from .cross_run_learning import CrossRunLearning, LearningPromotionError, LearningProposal
+from .github_issue_intake import GitHubIssueTaskIntake, GitHubIssueTaskProposal, IssueIntakeError
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
 from .memory_compaction import CompactionError, CompactionGroup, MemoryCompactor
@@ -47,6 +48,9 @@ __all__ = [
     "LearningPromotionError",
     "LearningProposal",
     "DuplicateMemory",
+    "GitHubIssueTaskIntake",
+    "GitHubIssueTaskProposal",
+    "IssueIntakeError",
     "MemoryError",
     "MemoryNotFound",
     "MemoryRecord",

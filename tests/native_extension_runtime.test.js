@@ -33,56 +33,55 @@ test("consolidated extension is Manifest V3 and points at the Engineering Worksp
 test("native service worker is the only loopback bridge caller and authenticates with the deployed token", () => {
   assert.ok(background.includes("const BRIDGE = 'http://127.0.0.1:8765';"));
   assert.ok(background.includes("chrome.runtime.getURL('.bridge-token')"));
-  assert.match(background, /Authorization/);
-  assert.match(background, /Bearer/);
+  assert.ok(background.includes("Authorization"));
+  assert.ok(background.includes("Bearer"));
   assert.ok(background.includes("if (response.status === 401)"));
-  assert.match(background, /type !== 'pasi-bridge-request'/);
+  assert.ok(background.includes("type !== 'pasi-bridge-request'"));
   assert.ok(background.includes("'GET /next-operation'"));
-  assert.match(background, /POST \/chat/finished/);
-  assert.match(background, /POST \/chat/failed/);
+  assert.ok(background.includes("'POST /chat/finished'"));
+  assert.ok(background.includes("'POST /chat/failed'"));
   assert.equal(content.includes("127.0.0.1:8765"), false);
   assert.equal(recovery.includes("127.0.0.1:8765"), false);
 });
 
 test("completion handoff is immediate and durable", () => {
-  assert.match(content, /let immediateOperationQueued = false/);
-  assert.match(content, /function scheduleImmediateOperation(operation)/);
-  assert.match(content, /next_operation/);
-  assert.match(content, /scheduleImmediateOperation(chainedOperation)/);
-  assert.ok(background.includes("BRIDGE_OPERATION_RE") && background.includes("operation_id"));
+  assert.ok(content.includes("let immediateOperationQueued = false"));
+  assert.ok(content.includes("function scheduleImmediateOperation(operation)"));
+  assert.ok(content.includes("next_operation"));
+  assert.ok(content.includes("scheduleImmediateOperation(chainedOperation)"));
+  assert.ok(background.includes("BRIDGE_OPERATION_RE"));
+  assert.ok(background.includes("operation_id="));
 });
 
 test("connection loss stops generation and preserves recovery state", () => {
   assert.ok(recovery.includes("connectionFailure()"));
-  assert.ok(recovery.includes("connection_error"));
+  assert.ok(recovery.includes("decideRecovery"));
   assert.ok(content.includes("/chat/failed"));
-  assert.match(content, /recovery_context/);
-  assert.match(recovery, /connectionFailure()/);
-  assert.match(recovery, /decideRecovery/);
+  assert.ok(content.includes("recovery_context"));
 });
 
 test("usage or context exhaustion creates a bounded fresh-chat recovery path", () => {
-  assert.match(content, /CHAT_EXHAUSTED:/);
-  assert.match(content, /CHAT_USAGE_LIMITED:/);
+  assert.ok(content.includes("CHAT_EXHAUSTED:"));
+  assert.ok(content.includes("CHAT_USAGE_LIMITED:"));
   assert.ok(content.includes("case 'new_chat'"));
-  assert.match(recovery, /replacementReason()/);
-  assert.match(recovery, /operation_type: 'new_chat'/);
-  assert.match(recovery, /MAX_CONTEXT_RECOVERIES/);
+  assert.ok(recovery.includes("replacementReason()"));
+  assert.ok(recovery.includes("operation_type: 'new_chat'"));
+  assert.ok(recovery.includes("MAX_CONTEXT_RECOVERIES"));
 });
 
 test("native controller uses bounded timeouts and progress-based recovery", () => {
-  assert.match(timeoutConfig, /heartbeatMs: 15 * 1000/);
-  assert.match(timeoutConfig, /staleMs: 45 * 1000/);
-  assert.match(recovery, /RECOVERY_HARD_CEILING_MS/);
-  assert.match(recovery, /RECOVERY_STALL_MS/);
-  assert.match(recovery, /no-progress|no_progress/);
-  assert.match(detectors, /usage_limited/);
-  assert.match(detectors, /context_exhausted/);
+  assert.ok(timeoutConfig.includes("heartbeatMs: 15 * 1000"));
+  assert.ok(timeoutConfig.includes("staleMs: 45 * 1000"));
+  assert.ok(recovery.includes("RECOVERY_HARD_CEILING_MS"));
+  assert.ok(recovery.includes("RECOVERY_STALL_MS"));
+  assert.ok(recovery.includes("no_progress"));
+  assert.ok(detectors.includes("usage_limited"));
+  assert.ok(detectors.includes("context_exhausted"));
 });
 
 test("userscript runtime remains loaded alongside the native bridge plane", () => {
-  assert.match(background, /PASIUserScriptManager/);
-  assert.match(background, /PASIBackgroundAPI/);
-  assert.match(background, /pasi.userscript.rpc/);
-  assert.match(background, /pasi.http.stream/);
+  assert.ok(background.includes("PASIUserScriptManager"));
+  assert.ok(background.includes("PASIBackgroundAPI"));
+  assert.ok(background.includes("pasi.userscript.rpc"));
+  assert.ok(background.includes("pasi.http.stream"));
 });

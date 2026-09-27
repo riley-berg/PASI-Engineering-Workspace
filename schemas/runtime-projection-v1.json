@@ -1,0 +1,26 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/runtime-projection-v1.json",
+  "title":"PASI runtime operation projection v1",
+  "type":"object",
+  "required":["operation","lineage","events","evidence_refs","runtime","health"],
+  "properties":{
+    "operation":{"type":"object"},
+    "lineage":{"type":"array","items":{"type":"object"}},
+    "events":{"type":"array","items":{"type":"object"}},
+    "evidence_refs":{"type":"array","items":{"type":"string"}},
+    "runtime":{
+      "type":"object",
+      "required":["code_head","runtime_version","controller_version","runner_version"],
+      "properties":{
+        "code_head":{"type":"string"},
+        "runtime_version":{"type":"string"},
+        "controller_version":{"type":"string"},
+        "runner_version":{"type":"string"}
+      },
+      "additionalProperties":false
+    },
+    "health":{"type":"object"}
+  },
+  "additionalProperties":false
+}

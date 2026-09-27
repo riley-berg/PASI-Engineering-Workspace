@@ -322,6 +322,11 @@ def main() -> int:
             idempotency_key=idempotency_key,
             marker=marker,
         )
+        if queued.get("completion_markers") != [marker]:
+            raise M2LiveError(
+                "M2 queued operation did not retain the exact completion marker: "
+                f"{queued.get('completion_markers')!r}"
+            )
         operation_id = str(queued["operation_id"])
         evidence["operation_id"] = operation_id
         evidence["queued_operation"] = queued

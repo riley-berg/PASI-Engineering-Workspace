@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from pasi.core.migrations import migrate_operation_state_database
 from pasi.core.operation_state import (
     InvalidOperationState,
     OperationRevisionConflict,
@@ -50,6 +51,7 @@ class SQLiteOperationStateStore:
                 )
                 """
             )
+            migrate_operation_state_database(connection)
 
     def create(self, state: OperationState) -> OperationState:
         with self._connect() as connection:

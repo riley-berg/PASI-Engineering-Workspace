@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/failure-signature-v1.json",
+  "title": "PASI failure signature v1",
+  "type": "object",
+  "required": ["signature_id","subsystem","failure_code","failure_family","first_seen_at","last_seen_at","occurrence_count","latest_operation_id","evidence_ref"],
+  "properties": {
+    "signature_id": {"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "subsystem": {"type":"string","minLength":1},
+    "failure_code": {"type":"string","minLength":1},
+    "failure_family": {"type":"string","minLength":1},
+    "first_seen_at": {"type":"string","format":"date-time"},
+    "last_seen_at": {"type":"string","format":"date-time"},
+    "occurrence_count": {"type":"integer","minimum":1},
+    "latest_operation_id": {"type":"string"},
+    "evidence_ref": {"type":"string"}
+  },
+  "additionalProperties": false
+}

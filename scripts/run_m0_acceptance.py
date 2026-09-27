@@ -116,18 +116,109 @@ def extract_block(text: str, start: str, end: str) -> str:
     return text[begin + len(start):finish].strip("\n ")
 
 
-def wait_for_real_operation(started_at: float) -> tuple[dict, dict | None]:
+def browser_health() -> tuple[dict, dict]:
+    observation = request("/browser/health").get("observation") or {}
+    data = observation.get("data") if isinstance(observation, dict) else {}
+    return (
+        observation if isinstance(observation, dict) else {},
+        data if isinstance(data, dict) else {},
+    )
+
+
+def fresh_chat_required(health_data: dict) -> bool:
+    # Never create a new conversation because a task completed, because the
+    # current chat already has messages, or because Thinking is currently off.
+    # A replacement is permitted only when ChatGPT explicitly reports a usage
+    # limit that makes the current automation chat unusable.
+    return health_data.get("provider_usage_limited") is True
+
+
+def build_runtime_evidence(
+    *,
+    health_data: dict,
+    operation: dict,
+    fresh_chat_created: bool,
+) -> dict:
+    events = operation.get("recovery_events")
+    events = list(events) if isinstance(events, list) else []
+    connection_error_event = next(
+        (
+            event
+            for event in events
+            if isinstance(event, dict)
+            and event.get("phase") == "reloading"
+            and event.get("recovery_reason") == "connection_error"
+        ),
+        None,
+    )
+    retry_event = next(
+        (
+            event
+            for event in reversed(events)
+            if isinstance(event, dict)
+            and event.get("phase") in {"ready_for_retry", "retry_resumed"}
+        ),
+        None,
+    )
+    operation_id = str(operation.get("operation_id") or "")
+    recovered_operation_id = str(
+        (retry_event or {}).get("operation_id") or operation_id
+    )
+    return {
+        "fresh_chat_created_after_usage": fresh_chat_created,
+        "fresh_chat_creation_reason": (
+            "usage_limit" if fresh_chat_created else ""
+        ),
+        "thinking_enabled": health_data.get("thinking_enabled") is True,
+        "connection_recovery": {
+            "connection_loss_detected": connection_error_event is not None,
+            "response_stopped_on_loss": connection_error_event is not None,
+            "checkpoint_preserved": connection_error_event is not None,
+            "resumed_after_reconnect": retry_event is not None,
+            "same_operation_resumed": (
+                retry_event is not None
+                and recovered_operation_id == operation_id
+            ),
+            "operation_id": recovered_operation_id,
+            "resume_phase": str(
+                (connection_error_event or {}).get("recovery_reason")
+                or "connection_recovery"
+            ),
+        },
+    }
+
+
+def wait_for_real_operation(
+    operation_id: str,
+    started_at: float,
+) -> tuple[dict, dict, dict | None]:
     deadline = time.monotonic() + TIMEOUT_SECONDS
     recovery_defaults_error: dict | None = None
     while time.monotonic() < deadline:
+        operation_payload = (
+            request(f"/operation?operation_id={operation_id}").get("operation")
+            or {}
+        )
+        if isinstance(operation_payload, dict):
+            error = str(operation_payload.get("error") or "")
+            status = str(operation_payload.get("status") or "")
+            if status in {"failed", "cancelled"} and error:
+                raise RuntimeError(f"PASI operation {status}: {error}")
+
         observation = request("/browser/observation").get("observation") or {}
         data = observation.get("data") if isinstance(observation, dict) else {}
         if isinstance(data, dict):
             captured = capture_time(observation.get("captured_at"))
-            if captured >= started_at and data.get("kind") == "chatgpt_runtime_error":
-                if data.get("recovery_defaults_match") is True:
-                    recovery_defaults_error = dict(observation)
-                    print("FAIL: RECOVERY_DEFAULTS runtime error observed during the live operation.", flush=True)
+            if (
+                captured >= started_at
+                and data.get("kind") == "chatgpt_runtime_error"
+                and data.get("recovery_defaults_match") is True
+            ):
+                recovery_defaults_error = dict(observation)
+                print(
+                    "FAIL: RECOVERY_DEFAULTS runtime error observed during the live operation.",
+                    flush=True,
+                )
 
         response = request("/browser/response").get("observation") or {}
         response_data = response.get("data") if isinstance(response, dict) else {}
@@ -137,8 +228,10 @@ def wait_for_real_operation(started_at: float) -> tuple[dict, dict | None]:
             and capture_time(response.get("captured_at")) >= started_at
             and isinstance(response_data.get("response_text"), str)
             and response_data.get("response_text", "").strip()
+            and str(response_data.get("active_operation_id") or "") == operation_id
         ):
-            return response, recovery_defaults_error
+            _, health_data = browser_health()
+            return response, health_data, recovery_defaults_error
 
         time.sleep(POLL_SECONDS)
 
@@ -188,23 +281,67 @@ def main() -> int:
 
         prompt = current_prompt()
         run_id = uuid.uuid4().hex
+        _, initial_health = browser_health()
+        create_fresh_chat = fresh_chat_required(initial_health)
+
         print("PASI M0 LIVE ACCEPTANCE")
-        print("Queueing a fresh chat, then exactly one P0.1 prompt operation.")
+        if create_fresh_chat:
+            print(
+                "ChatGPT reports a usage limit; creating one replacement chat before sending P0.1."
+            )
+            queue_operation(
+                "new_chat",
+                "",
+                f"m0-live:{run_id}:new-chat",
+            )
+        else:
+            print(
+                "Current ChatGPT conversation is usable; reusing it. "
+                "No new chat will be created."
+            )
+        print(
+            "The native controller will ensure Thinking is enabled; "
+            "if it is already enabled it will send the prompt without changing it."
+        )
         print("Waiting for the real authenticated ChatGPT operation to finish...")
-        queue_operation("new_chat", "", f"m0-live:{run_id}:new-chat")
-        queue_operation(
+
+        prompt_result = queue_operation(
             "prompt",
             prompt,
             f"m0-live:{run_id}:prompt",
             ["PASI_RESULT_STATUS: complete"],
         )
+        operation_id = str(
+            ((prompt_result.get("operation") or {}).get("operation_id") or "")
+        )
+        if not operation_id:
+            raise RuntimeError("prompt queue did not return an operation id")
 
-        response, runtime_error = wait_for_real_operation(started_at)
+        response, health_data, runtime_error = wait_for_real_operation(
+            operation_id,
+            started_at,
+        )
         result["response_captured_at"] = response.get("captured_at")
-        result["operation_id"] = (response.get("data") or {}).get("active_operation_id")
+        result["operation_id"] = operation_id
+        result["fresh_chat_created_after_usage"] = create_fresh_chat
+        result["thinking_enabled"] = health_data.get("thinking_enabled") is True
         if runtime_error is not None:
             result["recovery_defaults_error"] = True
             result["recovery_defaults_observation"] = runtime_error
+
+        operation = (
+            request(f"/operation?operation_id={operation_id}").get("operation")
+            or {}
+        )
+        runtime_evidence = build_runtime_evidence(
+            health_data=health_data,
+            operation=operation if isinstance(operation, dict) else {},
+            fresh_chat_created=create_fresh_chat,
+        )
+        if not runtime_evidence["thinking_enabled"]:
+            raise RuntimeError(
+                "Thinking was not verified as enabled for the accepted operation"
+            )
 
         data = response["data"]
         response_text = str(data.get("response_text") or "")
@@ -225,7 +362,7 @@ def main() -> int:
                     "summary": summary,
                     "evidence": evidence,
                     "patch": patch,
-                    "runtime_evidence": data.get("runtime_evidence") or {},
+                    "runtime_evidence": runtime_evidence,
                 },
                 indent=2,
             )
@@ -259,7 +396,11 @@ def main() -> int:
             "stderr": acceptance.stderr[-8000:],
         }
         if acceptance.returncode != 0:
-            raise RuntimeError("live M0 acceptance processor failed")
+            details = (acceptance.stdout + "\n" + acceptance.stderr).strip()
+            raise RuntimeError(
+                "live M0 acceptance processor failed"
+                + (f": {details[-4000:]}" if details else "")
+            )
 
         result["status"] = "PASS"
         print("PASS: real PASI operation completed and M0 acceptance passed.")

@@ -1403,7 +1403,7 @@ def main() -> int:
                 for item in evidence["health"]["samples"]
             )
 
-        evidence["summary"]["unplanned_recoveries"] = len(\n            [item for item in evidence["recoveries"] if item.get("planned") is False]\n        )\n
+        evidence["summary"]["unplanned_recoveries"] = len(\n    [item for item in evidence["recoveries"] if item.get("planned") is False]\n)\n
         validate_finished_evidence(
             evidence,
             started=started_dt,

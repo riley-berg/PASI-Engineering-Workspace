@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/operation-ledger-v1.json",
+  "title": "PASI operation lineage entry v1",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "task_id",
+    "run_id",
+    "parent_operation_id",
+    "provider",
+    "branch",
+    "pr_number",
+    "outcome",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "operation_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "task_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "run_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "parent_operation_id": {"type": "string", "maxLength": 256},
+    "provider": {"type": "string", "maxLength": 128},
+    "branch": {"type": "string", "maxLength": 256},
+    "pr_number": {"type": ["integer", "null"], "minimum": 1},
+    "outcome": {"type": "string", "maxLength": 128},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}

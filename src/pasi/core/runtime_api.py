@@ -17,6 +17,7 @@ from pasi.core.runtime_controls import (
 )
 from pasi.core.runtime_events import RuntimeEventFeed
 from pasi.core.runtime_health import HealthError, RuntimeHealthStore
+from pasi.core.failure_registry import SQLiteFailureRegistry
 from pasi.core.runtime_projection import RuntimeProjectionService
 
 
@@ -30,11 +31,13 @@ class RuntimeAPIService:
         event_feed: RuntimeEventFeed,
         health_store: RuntimeHealthStore,
         controls: RuntimeControlService,
+        failure_registry: SQLiteFailureRegistry | None = None,
     ) -> None:
         self.projection = projection
         self.event_feed = event_feed
         self.health_store = health_store
         self.controls = controls
+        self.failure_registry = failure_registry
 
     def request(
         self,
@@ -75,6 +78,69 @@ class RuntimeAPIService:
                 )
             except ValueError as exc:
                 return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
+
+        if method == "GET" and parsed.path == "/v1/runtime/ledger":
+            query = parse_qs(parsed.query)
+            try:
+                limit = int(query.get("limit", ["100"])[0])
+                pr_number = (
+                    int(query["pr_number"][0])
+                    if query.get("pr_number")
+                    else None
+                )
+            except ValueError:
+                return HTTPStatus.BAD_REQUEST, {"error": "invalid ledger filter"}
+
+            entries = self.projection.ledger.list(
+                task_id=query.get("task_id", [None])[0],
+                run_id=query.get("run_id", [None])[0],
+                provider=query.get("provider", [None])[0],
+                branch=query.get("branch", [None])[0],
+                pr_number=pr_number,
+                outcome=query.get("outcome", [None])[0],
+                limit=limit,
+            )
+            return HTTPStatus.OK, {
+                "entries": [entry.to_dict() for entry in entries],
+                "count": len(entries),
+            }
+
+        if method == "GET" and parsed.path == "/v1/runtime/failures":
+            if self.failure_registry is None:
+                return HTTPStatus.NOT_IMPLEMENTED, {"error": "failure registry unavailable"}
+            query = parse_qs(parsed.query)
+            signatures = self.failure_registry.list(
+                subsystem=query.get("subsystem", [None])[0]
+            )
+            result = []
+            for signature in signatures:
+                affected = self.projection.operation_store.list(
+                    failure_signature=signature.signature_id,
+                    limit=100,
+                )
+                evidence: list[str] = []
+                for state in affected:
+                    projection = self.projection.project_or_none(state.operation_id)
+                    if projection is None:
+                        continue
+                    for ref in projection["evidence_refs"]:
+                        if ref not in evidence:
+                            evidence.append(ref)
+                result.append({
+                    **signature.__dict__,
+                    "affected_operations": [
+                        state.operation_id for state in affected
+                    ],
+                    "evidence_refs": evidence,
+                    "current_code_head": self.projection.identity.code_head,
+                })
+            return HTTPStatus.OK, {
+                "signatures": result,
+                "count": len(result),
+            }
+
+        if method == "GET" and parsed.path == "/v1/runtime/migrations":
+            return HTTPStatus.OK, self.projection.operation_store.migration_status()
 
         if method == "POST" and parsed.path == "/v1/runtime/controls":
             payload = body or {}

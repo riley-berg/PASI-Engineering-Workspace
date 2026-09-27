@@ -1,0 +1,18 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/provider-health-v1.json",
+  "title":"PASI provider health snapshot v1",
+  "type":"object",
+  "required":["provider","timestamp","available","latency_ms","classification","consecutive_failures","error_category","error_message"],
+  "properties":{
+    "provider":{"type":"string","minLength":1},
+    "timestamp":{"type":"string","format":"date-time"},
+    "available":{"type":"boolean"},
+    "latency_ms":{"type":"number","minimum":0},
+    "classification":{"enum":["healthy","degraded","unavailable"]},
+    "consecutive_failures":{"type":"integer","minimum":0},
+    "error_category":{"type":"string"},
+    "error_message":{"type":"string"}
+  },
+  "additionalProperties":false
+}

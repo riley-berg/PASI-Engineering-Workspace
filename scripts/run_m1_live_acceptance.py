@@ -35,6 +35,10 @@ DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 DEFAULT_COUNT = 20
 POLL_SECONDS = 0.25
 MAX_RESPONSE_BYTES = 2_000_000
+ACCEPTANCE_DIR = Path(".runtime/acceptance")
+M0_EVIDENCE = ACCEPTANCE_DIR / "m0-live.json"
+M1_EVIDENCE = ACCEPTANCE_DIR / "m1-live.json"
+DURABLE_CHAT_STATE = ACCEPTANCE_DIR / "durable-automation-chat.json"
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 ACTIVE_STATUSES = {"claimed", "running", "generating"}
 
@@ -141,6 +145,58 @@ def browser_health(client: BridgeClient) -> dict[str, Any]:
     return observation_data(payload.get("observation"))
 
 
+def chat_limit_reason(health_data: dict[str, Any]) -> str:
+    if (
+        health_data.get("conversation_context_exhausted") is True
+        or health_data.get("chat_exhausted") is True
+    ):
+        return "context_limit"
+    if health_data.get("provider_usage_limited") is True:
+        return "usage_limit"
+    return ""
+
+
+def durable_chat_url() -> str:
+    """Return the persisted durable automation chat URL, newest evidence first."""
+    candidates = [
+        DURABLE_CHAT_STATE,
+        M1_EVIDENCE,
+        M0_EVIDENCE,
+    ]
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if path == M1_EVIDENCE and payload.get("status") != "PASS":
+            continue
+        for key in ("durable_chat_url", "chat_url"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.startswith("https://chatgpt.com/c/"):
+                return value
+    return ""
+
+
+def persist_durable_chat_url(chat_url: str, *, reason: str = "") -> None:
+    if not chat_url.startswith("https://chatgpt.com/c/"):
+        raise M1LiveError(f"cannot persist invalid durable ChatGPT URL: {chat_url!r}")
+    ACCEPTANCE_DIR.mkdir(parents=True, exist_ok=True)
+    DURABLE_CHAT_STATE.write_text(
+        json.dumps(
+            {
+                "chat_url": chat_url,
+                "updated_at": time.time(),
+                "creation_reason": reason,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def queue_operation(
     client: BridgeClient,
     operation_type: str,
@@ -220,19 +276,156 @@ def wait_for_next_claim(
     raise M1LiveError(f"next operation {operation_id} was not claimed within {timeout_seconds}s")
 
 
-def ensure_chat_ready(client: BridgeClient) -> tuple[str, tuple[int, int]]:
+def ensure_chat_ready(
+    client: BridgeClient,
+    *,
+    expected_chat_url: str = "",
+) -> tuple[str, tuple[int, int]]:
     health = browser_health(client)
     health_url = str(health.get("chat_url") or "")
     if health.get("native_controller") is not True:
         raise M1LiveError("browser health does not identify the native controller")
     if not health_url.startswith("https://chatgpt.com/c/"):
         raise M1LiveError(f"browser health does not expose a ChatGPT conversation URL: {health_url!r}")
+    if expected_chat_url and health_url != expected_chat_url:
+        raise M1LiveError(
+            "browser is not on the durable PASI automation chat; "
+            f"expected {expected_chat_url!r}, observed {health_url!r}. "
+            "Switch back to the stored automation conversation instead of creating a new chat."
+        )
 
     state = browser_state(client)
     counts = signature_counts(state.get("conversation_signature"))
     if counts is None:
         raise M1LiveError("browser state did not expose a parseable conversation_signature")
     return health_url, counts
+
+
+def wait_for_thinking(
+    client: BridgeClient,
+    *,
+    session_id: str,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    """Verify Thinking is enabled before the M1 chain can be queued."""
+    health = browser_health(client)
+    if health.get("thinking_enabled") is True:
+        return health
+
+    if chat_limit_reason(health):
+        raise M1LiveError(
+            "ChatGPT reported a usage/context limit while verifying Thinking; "
+            "a fresh chat is required before starting the 20-operation chain"
+        )
+
+    reasoning = queue_operation(
+        client,
+        "select_reasoning",
+        "",
+        idempotency_key=f"{session_id}-select-thinking",
+    )
+    reasoning_id = str(reasoning.get("operation", {}).get("operation_id") or "")
+    if not reasoning_id:
+        raise M1LiveError("Thinking-selection operation did not return an operation id")
+
+    result = wait_for_terminal(
+        client,
+        reasoning_id,
+        timeout_seconds=timeout_seconds,
+        later_operation_ids=[],
+        violation_log=[],
+    )
+    if result.get("status") != "completed":
+        raise M1LiveError(
+            "Thinking-selection operation did not complete: "
+            f"{result.get('status')!r} {result.get('error')!r}"
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        health = browser_health(client)
+        if health.get("thinking_enabled") is True:
+            return health
+        if chat_limit_reason(health):
+            raise M1LiveError(
+                "ChatGPT reported a usage/context limit while verifying Thinking"
+            )
+        time.sleep(POLL_SECONDS)
+
+    raise M1LiveError("Thinking was not verified as enabled before the M1 chain deadline")
+
+
+def create_fresh_chat_after_limit(
+    client: BridgeClient,
+    *,
+    session_id: str,
+    reason: str,
+    timeout_seconds: float,
+) -> tuple[str, tuple[int, int], str]:
+    if reason not in {"usage_limit", "context_limit"}:
+        raise M1LiveError("fresh chat creation requires an explicit usage or context-limit report")
+
+    print(
+        "ChatGPT explicitly reported "
+        f"{reason}; creating one replacement conversation before the M1 chain."
+    )
+    fresh = queue_operation(
+        client,
+        "new_chat",
+        "",
+        idempotency_key=f"{session_id}-new-chat-{reason}",
+    )
+    fresh_id = str(fresh.get("operation", {}).get("operation_id") or "")
+    if not fresh_id:
+        raise M1LiveError("fresh-chat operation did not return an operation id")
+
+    fresh_result = wait_for_terminal(
+        client,
+        fresh_id,
+        timeout_seconds=timeout_seconds,
+        later_operation_ids=[],
+        violation_log=[],
+    )
+    if fresh_result.get("status") != "completed":
+        raise M1LiveError(
+            "fresh-chat operation did not complete: "
+            f"{fresh_result.get('status')!r} {fresh_result.get('error')!r}"
+        )
+
+    chat_url, counts = ensure_chat_ready(client)
+    persist_durable_chat_url(chat_url, reason=reason)
+    return chat_url, counts, fresh_id
+
+
+def prepare_durable_chat(
+    client: BridgeClient,
+    *,
+    session_id: str,
+    timeout_seconds: float,
+) -> tuple[str, tuple[int, int], bool, str, str]:
+    """
+    Reuse the stored automation chat unless ChatGPT explicitly reports a
+    usage/context limit. A chat mismatch is a hard failure rather than a
+    reason to create a replacement conversation.
+    """
+    stored_url = durable_chat_url()
+    health = browser_health(client)
+    reason = chat_limit_reason(health)
+
+    if reason:
+        chat_url, counts, fresh_id = create_fresh_chat_after_limit(
+            client,
+            session_id=session_id,
+            reason=reason,
+            timeout_seconds=timeout_seconds,
+        )
+        del fresh_id
+        return chat_url, counts, True, reason, stored_url
+
+    chat_url, counts = ensure_chat_ready(client, expected_chat_url=stored_url)
+    if not stored_url:
+        persist_durable_chat_url(chat_url, reason="initial_durable_chat")
+    return chat_url, counts, False, "", stored_url
 
 
 def main() -> int:
@@ -262,25 +455,29 @@ def main() -> int:
     if bridge_health.get("status") not in {"ok", "healthy", None}:
         raise M1LiveError(f"bridge health is not healthy: {bridge_health!r}")
 
-    # Start from a dedicated fresh ChatGPT conversation.
-    fresh = queue_operation(
+    (
+        chat_url,
+        baseline_counts,
+        fresh_chat_created,
+        fresh_chat_reason,
+        durable_chat_url_before,
+    ) = prepare_durable_chat(
         client,
-        "new_chat",
-        "",
-        idempotency_key=f"{session_id}-new-chat",
-    )
-    fresh_id = str(fresh["operation_id"])
-    fresh_result = wait_for_terminal(
-        client,
-        fresh_id,
+        session_id=session_id,
         timeout_seconds=args.timeout,
-        later_operation_ids=[],
-        violation_log=[],
     )
-    if fresh_result.get("status") != "completed":
-        raise M1LiveError(f"fresh-chat operation did not complete: {fresh_result!r}")
 
-    chat_url, baseline_counts = ensure_chat_ready(client)
+    # Thinking must be verified before any of the 20 prompt operations are
+    # allowed onto the bridge queue. If it is off, the native controller can
+    # select Thinking through the typed select_reasoning operation.
+    thinking_health = wait_for_thinking(
+        client,
+        session_id=session_id,
+        timeout_seconds=args.timeout,
+    )
+    if thinking_health.get("thinking_enabled") is not True:
+        raise M1LiveError("Thinking was not verified as enabled before queuing the M1 chain")
+
     expected_user, expected_assistant = baseline_counts
 
     operations: list[dict[str, Any]] = []
@@ -496,7 +693,12 @@ def main() -> int:
         "count": DEFAULT_COUNT,
         "session_id": session_id,
         "chat_url": chat_url,
-        "fresh_chat_operation_id": fresh_id,
+        "durable_chat_url": chat_url,
+        "durable_chat_url_before_test": durable_chat_url_before,
+        "fresh_chat_operation_id": "",
+        "fresh_chat_created_after_limit": fresh_chat_created,
+        "fresh_chat_creation_reason": fresh_chat_reason,
+        "thinking_enabled_before_chain": thinking_health.get("thinking_enabled") is True,
         "baseline": {"user": baseline_counts[0], "assistant": baseline_counts[1]},
         "duplicate_indices": duplicate_indices,
         "skipped_indices": skipped_indices,

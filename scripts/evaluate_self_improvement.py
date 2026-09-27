@@ -36,6 +36,9 @@ def main() -> int:
             human_test_run_id=run.run_id,
             human_test_status=run.status,
             human_test_code_head=run.code_head,
+            human_test_execution_source=run.execution_source,
+            human_test_suite_id=run.suite_id,
+            human_test_extension_version=run.extension_version,
             policy_violations=run.policy_violations,
         ),
     )

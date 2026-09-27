@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/task-selection-v1.json",
+  "title":"PASI task selection decision v1",
+  "type":"object",
+  "required":["roadmap_id","roadmap_revision","selected_task_id","eligible_task_ids","excluded_reasons","advisory_scores","selected_at"],
+  "properties":{
+    "roadmap_id":{"type":"string","minLength":1},
+    "roadmap_revision":{"type":"integer","minimum":0},
+    "selected_task_id":{"type":["string","null"]},
+    "eligible_task_ids":{"type":"array","items":{"type":"string"}},
+    "excluded_reasons":{"type":"object","additionalProperties":{"type":"string"}},
+    "advisory_scores":{"type":"object","additionalProperties":{"type":"number"}},
+    "selected_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

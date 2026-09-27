@@ -129,13 +129,9 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
 
 def executor() -> list[str]:
     raw = os.environ.get("PASI_ENGINEERING_EXECUTOR_CMD", "").strip()
-    if not raw:
-        raise RuntimeError(
-            "PASI_ENGINEERING_EXECUTOR_CMD is required. Engineering Workspace has the "
-            "roadmap/control-plane core, but the live task executor/controller is not "
-            "embedded in this repository."
-        )
-    return shlex.split(raw)
+    if raw:
+        return shlex.split(raw)
+    return [sys.executable, str(Path(__file__).resolve().with_name("pasi_engineering_executor.py"))]
 
 
 def mark_checked(task: Task) -> None:

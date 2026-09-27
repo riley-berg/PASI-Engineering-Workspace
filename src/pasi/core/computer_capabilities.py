@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,7 +43,7 @@ class CapabilityDescriptor:
         for name, value in self.resource_limits.items():
             if not isinstance(name, str) or not name.strip():
                 raise CapabilityError("resource limit names must be non-empty strings")
-            if not isinstance(value, (int, float)) or value < 0:
+            if not isinstance(value, (int, float)) or not math.isfinite(float(value)) or value < 0:
                 raise CapabilityError("resource limits must be finite non-negative numbers")
         if self.side_effect != "read" and self.authorization == "none":
             raise CapabilityError("mutating capabilities require authorization")

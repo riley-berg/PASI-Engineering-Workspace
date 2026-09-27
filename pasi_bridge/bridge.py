@@ -775,7 +775,9 @@ class BridgeState:
             "replacement_reason", "reload_count", "age_ms", "idle_ms",
             "recovery_started_at_ms", "recovery_finished_at_ms",
             "recovery_duration_ms", "outcome", "observed_status", "error",
-            "operation_type", "source", "controller_error"
+            "operation_id", "operation_type", "source", "recovery_source", "controller_error",
+            "resumed_after_reconnect", "same_operation_resumed", "response_stopped_on_loss",
+            "checkpoint_preserved", "resume_phase"
         )
         event = {key: data[key] for key in allowed if key in data}
         if isinstance(captured_at, str):

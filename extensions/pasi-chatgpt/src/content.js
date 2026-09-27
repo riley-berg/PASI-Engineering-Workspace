@@ -1895,6 +1895,33 @@
     }
   }
 
+  async function waitForConversationDomReady() {
+    let previousUsers = -1;
+    let previousAssistants = -1;
+    let stableSamples = 0;
+
+    await waitUntil(() => {
+      if (!chatUrl()) return null;
+
+      const users = userMessages().length;
+      const assistants = assistantMessages().length;
+      if (users === previousUsers && assistants === previousAssistants) {
+        stableSamples += 1;
+      } else {
+        previousUsers = users;
+        previousAssistants = assistants;
+        stableSamples = 0;
+      }
+
+      // Require several consecutive identical DOM samples so an existing
+      // conversation is not reported as 0:0 while ChatGPT is still hydrating.
+      return composer() && stableSamples >= 3;
+    }, 10000, DOM_POLL_MS);
+
+    // Give late React/streamed message nodes one additional render turn.
+    await sleep(100);
+  }
+
   async function recoverInterruptedOperation() {
     try {
       const stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
@@ -2004,11 +2031,16 @@
   }
 
   async function start() {
-    // Start health reporting before any recovery or queue work. Freshness must
-    // not depend on the duration of interrupted-operation reconciliation.
     pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
-    void reportHealth();
+
+    // Wait for the active conversation DOM to settle before the first state
+    // snapshot. Otherwise an already-populated chat can transiently report
+    // 0:0 and become the M1 baseline.
+    await waitForConversationDomReady();
+    if (extensionContextInvalidated) return;
+    lastStateReportAt = 0;
+    await reportHealth();
     if (extensionContextInvalidated) return;
 
     await recoverInterruptedOperation();

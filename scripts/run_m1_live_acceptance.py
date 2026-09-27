@@ -38,6 +38,7 @@ DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 DEFAULT_COUNT = 20
 POLL_SECONDS = 0.25
 MAX_RESPONSE_BYTES = 2_000_000
+M1_CHECKPOINT_SCHEMA_VERSION = 1
 RUNTIME_TOKEN = ROOT / ".runtime" / "bridge-token"
 ACCEPTANCE_DIR = ROOT / ".runtime" / "acceptance"
 M0_EVIDENCE = ACCEPTANCE_DIR / "m0-live.json"
@@ -480,6 +481,13 @@ def main() -> int:
     bridge_health = client.get("/health")
     if bridge_health.get("status") not in {"ok", "healthy", None}:
         raise M1LiveError(f"bridge health is not healthy: {bridge_health!r}")
+    if bridge_health.get("m1_checkpoint_schema_version") != M1_CHECKPOINT_SCHEMA_VERSION:
+        raise M1LiveError(
+            "M1 requires the checkpoint-aware bridge runtime "
+            f"(schema {M1_CHECKPOINT_SCHEMA_VERSION}); "
+            "the running bridge is stale. Stop the existing PASI bridge and "
+            "restart it from this checkout with: bash scripts/run_bridge.sh"
+        )
 
     status = client.get("/status")
     queue_size = int(status.get("queue_size", 0) or 0)

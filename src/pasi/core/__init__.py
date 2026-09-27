@@ -1,4 +1,5 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
+from .context_compiler import CompiledContext, ContextCompilationError, ContextCompiler, ContextSource
 from .cross_run_learning import CrossRunLearning, LearningPromotionError, LearningProposal
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
@@ -43,6 +44,10 @@ __all__ = [
     "BoundedRepairController",
     "DeterministicRecoveryClassifier",
     "ChildTaskGenerationError",
+    "CompiledContext",
+    "ContextCompilationError",
+    "ContextCompiler",
+    "ContextSource",
     "CrossRunLearning",
     "LearningPromotionError",
     "LearningProposal",

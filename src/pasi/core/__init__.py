@@ -28,6 +28,7 @@ from .recovery import (
 )
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
+from .retrieval import ProvenanceAwareRetriever, RetrievedMemory, RetrievalError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .selection_store import SelectionNotFound, SQLiteSelectionStore
 from .task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot, SelectionDecision, SelectionError, StaleSelection
@@ -73,6 +74,9 @@ __all__ = [
     "ScheduleError",
     "ScheduleNotFound",
     "DuplicateRoadmap",
+    "ProvenanceAwareRetriever",
+    "RetrievedMemory",
+    "RetrievalError",
     "Roadmap",
     "RoadmapNotFound",
     "SelectionDecision",

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "name": "local-coding-tier",
+  "provider": "ollama",
+  "model": "qwen2.5-coder:7b",
+  "required_capabilities": ["chat", "code", "json"],
+  "min_context_window_tokens": 8192,
+  "max_output_tokens": 2048,
+  "configuration_provenance": [
+    "env:PASI_OLLAMA_URL",
+    "env:PASI_OLLAMA_MODEL",
+    "registry:provider-capability-v1"
+  ]
+}

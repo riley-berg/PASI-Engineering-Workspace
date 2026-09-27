@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run the M1 live 20-task sequential handoff gate.
 
-The bridge queue is seeded with exactly 20 uniquely marked prompt operations.
-The native ChatGPT controller must claim and inject them in order, and the
-bridge must only claim the next operation after the previous operation has
-reached verified terminal completion.
+The bridge is given exactly one uniquely marked prompt operation at a time.
+The next operation is not queued until the predecessor has reached verified
+terminal completion and passed every M1 acceptance check.
 
 The gate records:
 - duplicate submissions (conversation delta != +1 user / +1 assistant)
@@ -470,6 +469,15 @@ def main() -> int:
     if bridge_health.get("status") not in {"ok", "healthy", None}:
         raise M1LiveError(f"bridge health is not healthy: {bridge_health!r}")
 
+    status = client.get("/status")
+    queue_size = int(status.get("queue_size", 0) or 0)
+    if queue_size != 0:
+        raise M1LiveError(
+            "M1 requires an empty bridge queue before starting; "
+            f"found {queue_size} queued/active operation(s). "
+            "Clear the abandoned M1 chain before retrying."
+        )
+
     (
         chat_url,
         baseline_counts,
@@ -590,6 +598,10 @@ def main() -> int:
 
             if timing.get("user_messages_added") != 1:
                 duplicate_indices.append(index)
+                raise M1LiveError(
+                    f"operation {index} reported user_messages_added="
+                    f"{timing.get('user_messages_added')!r}; expected exactly 1"
+                )
 
             if timing.get("ack_verified") is not True:
                 raise M1LiveError(
@@ -665,6 +677,10 @@ def main() -> int:
                         "repeated_from_index": prior_index,
                         "fingerprint": fingerprint,
                     }
+                )
+                raise M1LiveError(
+                    f"operation {index} reused the prompt fingerprint from "
+                    f"operation {prior_index}"
                 )
 
             claimed_at = result.get("claimed_at")

@@ -39,6 +39,8 @@ class GitHubIssueTaskIntake:
         number = issue.get("number")
         title = issue.get("title")
         body = issue.get("body") or ""
+        if isinstance(body, str):
+            body = body.replace("\\n", "\n")
         source_url = issue.get("html_url") or issue.get("url") or ""
 
         if not isinstance(number, int) or number <= 0:

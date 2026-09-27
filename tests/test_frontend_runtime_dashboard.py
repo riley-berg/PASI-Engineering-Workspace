@@ -169,7 +169,11 @@ def test_fe_p1_console_endpoints_return_durable_control_plane_data(tmp_path):
             run_id="run-1",
             task_id="P1.7",
             provider="local",
-            failure_signature="sig-1",
+            failure_signature=signature_key(
+                subsystem="controller",
+                failure_code="connection_lost",
+                failure_family="connection",
+            ),
         )
     )
 

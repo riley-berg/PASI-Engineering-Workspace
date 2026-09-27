@@ -55,6 +55,12 @@ if __name__ == "__main__":
     unittest.main()
 
 
+    def test_start_waits_for_conversation_dom_to_settle_before_first_state_report(self) -> None:
+        self.assertIn("async function waitForConversationDomReady()", self.source)
+        self.assertIn("stableSamples >= 3", self.source)
+        self.assertIn("await waitForConversationDomReady()", self.source)
+        self.assertIn("lastStateReportAt = 0", self.source)
+
     def test_completion_publishes_fresh_conversation_signature_before_return(self) -> None:
         finish = self.source.split("async function finishOperation(", 1)[1].split(
             "async function failOperation", 1

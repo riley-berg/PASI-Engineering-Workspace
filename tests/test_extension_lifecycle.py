@@ -34,7 +34,8 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("finishOperation(operation.operation_id, response, true, browserTiming)", self.content)
         self.assertIn("next_operation", self.content)
         self.assertIn("scheduleImmediateOperation(chainedOperation)", self.content)
-        self.assertIn("complete_operation_and_claim_next", self.background)
+        self.assertIn("'POST /chat/finished'", self.background)
+        self.assertIn("next_operation", self.content)
 
     def test_prompt_submission_is_verified_before_completion(self) -> None:
         self.assertIn("submission.verified", self.content)
@@ -51,7 +52,7 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
 
     def test_security_and_auth_boundaries_do_not_auto_recover(self) -> None:
         self.assertIn("securityChallenge()", self.recovery)
-        self.assertIn("human_boundary", self.recovery)
+        self.assertIn("manual_intervention_required", self.recovery)
         self.assertIn("auth_required", self.content)
 
     def test_existing_tabs_are_reused_without_navigation(self) -> None:

@@ -198,7 +198,19 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
       if (typeof current.id !== "number") throw new Error("test tab disappeared");
       tabId = current.id;
     }
-    const status = steps.every((step) => step.status === "PASS") ? "PASS" : "FAIL";
+    let status = steps.every((step) => step.status === "PASS") ? "PASS" : "FAIL";
+    if (suite.negative_control === true) {
+      const expectedFailure = steps.find(
+        (step) => step.step_id === suite.expected_failure_step_id && step.status === "FAIL"
+      );
+      status = expectedFailure ? "PASS" : "FAIL";
+      if (expectedFailure) {
+        expectedFailure.observed = {
+          ...(expectedFailure.observed || {}),
+          expected_failure_detected: true
+        };
+      }
+    }
     const finishedAt = now();
     const evidence = {
       schema_version: 1,

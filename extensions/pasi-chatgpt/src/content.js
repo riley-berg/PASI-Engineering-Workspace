@@ -592,29 +592,33 @@
     // or recovery. Node identity alone therefore over-counts unchanged
     // messages, and counting every newly mounted message can also include
     // unrelated hydration/remount artifacts. For submission telemetry, count
-    // only the newly observed user message that matches this operation's
-    // exact prompt fingerprint.
+    // only the delta for user messages matching this operation's prompt.
     const baselineCounts = snapshot?.text_counts instanceof Map
       ? snapshot.text_counts
       : new Map();
-    const { head, tail } = promptFingerprints(expectedPrompt);
-    let added = 0;
+    const currentCounts = new Map();
     for (const node of nodes) {
       const text = normalize(messageText(node));
       if (!text) continue;
-      const baselineCount = baselineCounts.get(text) || 0;
-      const currentCount = nodes.reduce(
-        (count, candidate) => count + (normalize(messageText(candidate)) === text ? 1 : 0),
-        0
-      );
-      if (currentCount <= baselineCount) continue;
-      if ((head && text.includes(head)) || (tail && text.includes(tail))) {
-        added += 1;
-      }
+      currentCounts.set(text, (currentCounts.get(text) || 0) + 1);
     }
-    return Math.min(added, 1);
-  }
 
+    const { head, tail } = promptFingerprints(expectedPrompt);
+    const matchesPrompt = (text) =>
+      Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
+
+    let baselineMatched = 0;
+    for (const [text, count] of baselineCounts.entries()) {
+      if (matchesPrompt(text)) baselineMatched += count;
+    }
+
+    let currentMatched = 0;
+    for (const [text, count] of currentCounts.entries()) {
+      if (matchesPrompt(text)) currentMatched += count;
+    }
+
+    return Math.max(0, currentMatched - baselineMatched);
+  }
   function snapshotAssistantMessages() {
     const nodes = assistantMessages();
     return {

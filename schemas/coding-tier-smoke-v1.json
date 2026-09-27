@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/coding-tier-smoke-v1.json",
+  "title":"PASI coding tier smoke result v1",
+  "type":"object",
+  "required":["tier_version","profile_name","profile_digest","provider","model","registry_digest","available","passed","reason","checked_at"],
+  "properties":{
+    "tier_version":{"const":1},
+    "profile_name":{"type":"string","minLength":1},
+    "profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "provider":{"type":"string","minLength":1},
+    "model":{"type":"string","minLength":1},
+    "registry_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "available":{"type":"boolean"},
+    "passed":{"type":"boolean"},
+    "reason":{"type":"string","minLength":1},
+    "checked_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

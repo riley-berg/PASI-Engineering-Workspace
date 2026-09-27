@@ -7,3 +7,4 @@ build/
 .runtime/
 extensions/pasi-chatgpt/src/vendor/typescript.js
 extensions/pasi-chatgpt/.bridge-token
+.ai/

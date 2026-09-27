@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "..");
 const extensionRoot = path.join(root, "extensions", "pasi-chatgpt");
@@ -78,6 +79,14 @@ test("native controller uses bounded timeouts and progress-based recovery", () =
   assert.ok(recoveryProgress.includes("no_progress"));
   assert.ok(detectors.includes("usage_limited"));
   assert.ok(detectors.includes("context_exhausted"));
+});
+
+test("recovery progress can be evaluated repeatedly in one isolated world", () => {
+  const context = vm.createContext({ console });
+  vm.runInContext(recoveryProgress, context, { filename: "recovery_progress.js" });
+  vm.runInContext(recoveryProgress, context, { filename: "recovery_progress.js" });
+  assert.equal(typeof context.PASI_RECOVERY_PROGRESS?.decideRecovery, "function");
+  assert.equal(typeof context.PASI_RECOVERY_PROGRESS?.ProgressTracker, "function");
 });
 
 test("userscript runtime remains loaded alongside the native bridge plane", () => {

@@ -813,6 +813,11 @@ class BridgeState:
             for item in queue:
                 if item.get("operation_id") != operation_id or item.get("operation_type") != "prompt":
                     continue
+                if not self._completion_markers_satisfied(
+                    response_text,
+                    item.get("completion_markers"),
+                ):
+                    return dict(item)
                 stored_response = self.state_manager.load_terminal_response(operation_id)
                 current = item.get("response_text")
                 authoritative = (
@@ -1064,6 +1069,11 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
+            if not self._completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            ):
+                return
             stored_response = self.state_manager.load_terminal_response(operation_id)
             current_response = item.get("response_text")
             if (
@@ -1125,6 +1135,11 @@ class BridgeState:
             or not response_text.strip()
         ):
             return False
+        if not self._completion_markers_satisfied(
+            response_text,
+            item.get("completion_markers"),
+        ):
+            return False
 
         item["response_text"] = response_text
         item["response_text_available"] = True
@@ -1137,6 +1152,26 @@ class BridgeState:
             time.time(),
         )
         return True
+
+    @staticmethod
+    def _completion_markers_satisfied(
+        response_text: object,
+        completion_markers: object,
+    ) -> bool:
+        if not isinstance(response_text, str) or not response_text.strip():
+            return False
+        if completion_markers is None:
+            return True
+        if not isinstance(completion_markers, list) or not completion_markers:
+            return True
+        lines = [line.strip() for line in response_text.splitlines()]
+        for marker in completion_markers:
+            if not isinstance(marker, str) or not marker.strip():
+                continue
+            marker = marker.strip()
+            if any(line == marker or line.startswith(marker + ":") for line in lines):
+                return True
+        return False
 
     @staticmethod
     def _retry_class(error: str) -> str:
@@ -1173,6 +1208,10 @@ class BridgeState:
                     and item.get("response_text_available") is True
                     and isinstance(item.get("response_text"), str)
                     and bool(str(item.get("response_text")).strip())
+                    and self._completion_markers_satisfied(
+                        str(item.get("response_text")),
+                        item.get("completion_markers"),
+                    )
                 ):
                     validate_transition(current_status, "completed")
                     item["status"] = "completed"

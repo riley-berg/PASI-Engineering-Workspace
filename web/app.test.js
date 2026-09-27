@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildViewModel, healthTone, normalizeFailures, normalizeLedger, normalizeNotifications, normalizeRecoveryDecision } from "./app.js";
+import { normalizePlannerMemory, normalizeRoadmapSummary, plannerTaskStatusClass } from "./planner.js";
 
 test("health tone maps authoritative runtime states", () => {
   assert.equal(healthTone("connected"), "success");
@@ -142,4 +143,40 @@ test("notification normalizer keeps durable identity and acknowledgement revisio
   assert.equal(items[0].notification_id, "ntf-1");
   assert.equal(items[0].revision, 2);
   assert.equal(items[0].acknowledged, false);
+});
+
+
+test("planner view models preserve roadmap authority and memory provenance", () => {
+  const vm = normalizeRoadmapSummary({
+    roadmap: {
+      roadmap_id: "pasi-frontend",
+      version: 4,
+      revision: 3,
+      canonical_sha256: "abc",
+      phases: [{ id: "FE-P2", status: "active" }],
+      tasks: [{ id: "FE-P2.1", title: "Roadmap manager", phase_id: "FE-P2", status: "active" }],
+    },
+    ready_task_ids: [],
+    blocked_reasons: { "FE-P2.2": "dependency FE-P2.1 is not completed" },
+  });
+  assert.equal(vm.roadmap.roadmap_id, "pasi-frontend");
+  assert.equal(vm.roadmap.revision, 3);
+  assert.equal(vm.readyTaskIds.length, 0);
+  assert.equal(vm.blockedReasons["FE-P2.2"], "dependency FE-P2.1 is not completed");
+  assert.equal(plannerTaskStatusClass("active"), "active");
+
+  const memories = normalizePlannerMemory([
+    {
+      memory_id: "mem-1",
+      scope: "task:FE-P2.1",
+      kind: "decision",
+      content: "Dependency graph is authoritative.",
+      provenance_refs: ["evidence://1"],
+      confidence: 0.9,
+      status: "active",
+      revision: 2,
+    },
+  ]);
+  assert.equal(memories[0].memory_id, "mem-1");
+  assert.deepEqual(memories[0].provenance_refs, ["evidence://1"]);
 });

@@ -2121,6 +2121,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             and isinstance(response_text, str)
             and bool(response_text.strip())
         )
+        if (
+            existing_operation.get("operation_type") == "prompt"
+            and incoming_response_verified
+            and not self.bridge_state._completion_markers_satisfied(
+                response_text,
+                existing_operation.get("completion_markers"),
+            )
+        ):
+            self._send_json(
+                {
+                    "error": "Prompt completion response did not satisfy the configured completion marker."
+                },
+                HTTPStatus.CONFLICT,
+            )
+            return
         if existing_operation.get("status") == "completed":
             # A duplicate acknowledgement is idempotent. A later verified
             # response payload is still valid evidence when the original

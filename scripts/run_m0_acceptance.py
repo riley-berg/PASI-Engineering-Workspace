@@ -79,7 +79,7 @@ def queue_operation(
     markers: list[str] | None = None,
     m0_recovery_probe: bool = False,
 ) -> dict:
-    body = {
+    body: dict[str, object] = {
         "operation_type": operation_type,
         "prompt": prompt,
         "idempotency_key": key,

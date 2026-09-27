@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "suite_id": "pasi-p0-runtime-smoke",
-  "suite_version": 1,
+  "suite_version": 2,
   "allowed_origins": ["http://127.0.0.1:*", "http://localhost:*"],
   "steps": [
     {
-      "id": "backend-health",
+      "id": "backend-healthz",
       "action": "api_get_json",
       "url": "/healthz",
       "expected_status": 200,
@@ -14,10 +14,45 @@
       "timeout_ms": 5000
     },
     {
+      "id": "runtime-health",
+      "action": "api_get_json",
+      "url": "/v1/runtime/health",
+      "expected_status": 200,
+      "json_path": "health.connection_status",
+      "value": "connected",
+      "timeout_ms": 5000
+    },
+    {
+      "id": "operation-projection",
+      "action": "api_get_json",
+      "url": "/v1/runtime/operations/p0-human-test",
+      "expected_status": 200,
+      "json_path": "operation.operation_id",
+      "value": "p0-human-test",
+      "timeout_ms": 5000
+    },
+    {
+      "id": "event-feed",
+      "action": "api_get_json",
+      "url": "/v1/runtime/events/p0-human-test",
+      "expected_status": 200,
+      "json_path": "events.0.event_type",
+      "value": "acceptance.fixture.seeded",
+      "timeout_ms": 5000
+    },
+    {
       "id": "open-app",
       "action": "navigate",
-      "url": "/",
+      "url": "/?operation_id=p0-human-test",
       "timeout_ms": 30000
+    },
+    {
+      "id": "operation-visible",
+      "action": "assert_text",
+      "selector": "body",
+      "text": "p0-human-test",
+      "contains": true,
+      "timeout_ms": 10000
     },
     {
       "id": "body-visible",

@@ -27,6 +27,8 @@ from .recovery import (
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
+from .selection_store import SelectionNotFound, SQLiteSelectionStore
+from .task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot, SelectionDecision, SelectionError, StaleSelection
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
@@ -61,12 +63,19 @@ __all__ = [
     "DuplicateRoadmap",
     "Roadmap",
     "RoadmapNotFound",
+    "SelectionDecision",
+    "SelectionError",
+    "SelectionNotFound",
     "RoadmapPhase",
     "SQLiteEventStore",
     "SQLiteRoadmapStore",
+    "SQLiteSelectionStore",
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",
+    "EvidenceAwareTaskSelector",
+    "EvidenceSnapshot",
+    "StaleSelection",
     "digest_text",
     "load_roadmap",
     "migrate_operation_state_database",

@@ -4,69 +4,51 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTENT_JS = ROOT / "extensions" / "pasi-chatgpt" / "src" / "content.js"
+RECOVERY_JS = ROOT / "extensions" / "pasi-chatgpt" / "src" / "recovery.js"
 
 
 class TestChatGPTChatReuse(unittest.TestCase):
     def setUp(self) -> None:
         self.source = CONTENT_JS.read_text(encoding="utf-8")
+        self.recovery = RECOVERY_JS.read_text(encoding="utf-8")
 
-    def test_used_chat_switches_back_to_automation_chat_without_creating_one(self) -> None:
-        start = self.source.index("async function ensureTaskChat()")
-        end = self.source.index("async function observe()", start)
-        ensure_task_chat = self.source[start:end]
+    def test_completed_task_continues_via_durable_next_operation(self) -> None:
+        self.assertIn("next_operation", self.source)
+        self.assertIn("scheduleImmediateOperation(chainedOperation)", self.source)
+        self.assertIn("else scheduleImmediatePoll()", self.source)
+        self.assertNotIn("createFreshChat()", self.source)
 
-        self.assertNotIn("createFreshChat()", ensure_task_chat)
-        self.assertIn('pasi_automation_chat_url', ensure_task_chat)
-        self.assertIn("if (automationChatUrl !== url)", ensure_task_chat)
-        self.assertIn("chat_switch_requested: true", ensure_task_chat)
-        self.assertIn("location.assign(automationChatUrl)", ensure_task_chat)
+    def test_new_chat_is_reserved_for_verified_recovery(self) -> None:
+        self.assertIn("operation_type: 'new_chat'", self.recovery)
+        self.assertIn("const reason = replacementReason()", self.recovery)
+        self.assertIn("if (!reason)", self.recovery)
+        self.assertIn("replacement_reason: reason", self.recovery)
 
-    def test_fresh_chat_requires_usage_limit(self) -> None:
-        start = self.source.index("async function handleChatLimit()")
-        end = self.source.index("async function ensureTaskChat()", start)
-        handle_limit = self.source[start:end]
+    def test_context_exhaustion_prepares_a_new_chat_for_the_same_operation(self) -> None:
+        self.assertIn("handleContextExhausted", self.recovery)
+        self.assertIn("CHAT_EXHAUSTED:", self.recovery)
+        self.assertIn("await queueNewChat()", self.recovery)
+        self.assertIn("markRetryableFailure", self.recovery)
 
-        self.assertIn("chatgpt.chatLimitReached()", handle_limit)
-        self.assertIn("chatgpt.ensureThinkingEnabled()", handle_limit)
-        self.assertIn("createFreshChat()", handle_limit)
-        self.assertIn("without advancing the current task", handle_limit)
+    def test_usage_limit_does_not_delete_or_advance_the_current_operation(self) -> None:
+        self.assertIn("CHAT_USAGE_LIMITED:", self.recovery)
+        self.assertIn("will not delete or replace the conversation solely because usage is exhausted", self.recovery)
+        self.assertIn("retry_runner_after_provider_limit", self.recovery)
 
-    def test_chat_limit_is_the_fresh_chat_trigger(self) -> None:
-        start = self.source.index("async function handleChatLimit()")
-        end = self.source.index("async function ensureTaskChat()", start)
-        handle_limit = self.source[start:end]
+    def test_fresh_chat_recovery_is_bounded(self) -> None:
+        self.assertIn("MAX_CONTEXT_RECOVERIES", self.recovery)
+        self.assertIn("MAX_NEW_CHAT_WAIT_MS", self.recovery)
+        self.assertIn("new_chat recovery operation did not finish within the recovery grace window", self.recovery)
 
-        self.assertIn("chatgpt.chatLimitReached()", handle_limit)
-        self.assertIn("createFreshChat()", handle_limit)
-        self.assertIn("pasi_automation_chat_url", handle_limit)
+    def test_same_chat_completion_does_not_require_url_change(self) -> None:
+        self.assertIn("next_operation", self.source)
+        self.assertIn("scheduleImmediateOperation", self.source)
+        self.assertNotIn("location.assign", self.source)
 
-    def test_completed_task_continues_in_same_chat(self) -> None:
-        start = self.source.index('if (message.type === "pasi.acceptance_passed")')
-        end = self.source.index("async function handleOffline()", start)
-        completion_handler = self.source[start:end]
-
-        self.assertNotIn("createFreshChat()", completion_handler)
-        self.assertIn("same_chat_continuation: true", completion_handler)
-        self.assertIn("protocol.TYPES.CHAT_READY", completion_handler)
-
-    def test_response_complete_does_not_infer_fresh_chat_from_url_change(self) -> None:
-        start = self.source.index("protocol.TYPES.RESPONSE_COMPLETE")
-        end = self.source.index("await storageSet(", start)
-        block = self.source[start:end]
-        self.assertIn("fresh_chat_created_after_usage: freshChatCreatedAfterUsage", block)
-        self.assertNotIn("priorChatUrl && priorChatUrl !== url", block)
-
-    def test_fresh_chat_event_records_usage_limit_reason(self) -> None:
-        observe = self.source[self.source.index("async function performObserve()"):]
-        self.assertIn('fresh_chat_creation_reason: "usage_limit"', observe)
-
-    def test_fresh_chat_updates_automation_chat_identity(self) -> None:
-        start = self.source.index("if (awaitingFreshChat && url !== priorChatUrl)")
-        end = self.source.index("await handleChatLimit()", start)
-        fresh_chat_handler = self.source[start:end]
-
-        self.assertIn('pasi_automation_chat_url: url', fresh_chat_handler)
-        self.assertIn("protocol.TYPES.FRESH_CHAT", fresh_chat_handler)
+    def test_recovery_preserves_the_current_operation_context(self) -> None:
+        self.assertIn("recovery_context", self.source)
+        self.assertIn("recoveryContextFromActiveState", self.recovery)
+        self.assertIn("resume_operation_id", self.recovery)
 
 
 if __name__ == "__main__":

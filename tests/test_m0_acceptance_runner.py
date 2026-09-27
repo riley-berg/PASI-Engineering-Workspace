@@ -64,3 +64,11 @@ def test_runtime_evidence_detects_connection_recovery_on_same_operation() -> Non
     assert recovery["resumed_after_reconnect"] is True
     assert recovery["same_operation_resumed"] is True
     assert recovery["operation_id"] == "op-1"
+
+
+def test_runner_uses_controlled_recovery_probe_for_real_p0_1_operation() -> None:
+    import inspect
+    from scripts import run_m0_acceptance
+
+    source = inspect.getsource(run_m0_acceptance.main)
+    assert "m0_recovery_probe=True" in source

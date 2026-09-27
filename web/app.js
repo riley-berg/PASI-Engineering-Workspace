@@ -439,6 +439,22 @@ async function getJson(url, options = {}) {
   return payload;
 }
 
+async function loadLedger(apiBase, filters = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) params.set(key, value);
+  }
+  return getJson(`${apiBase}/v1/runtime/ledger?${params.toString()}`);
+}
+
+async function loadFailures(apiBase) {
+  return getJson(`${apiBase}/v1/runtime/failures`);
+}
+
+async function loadMigrations(apiBase) {
+  return getJson(`${apiBase}/v1/runtime/migrations`);
+}
+
 async function loadHealth(apiBase) {
   return getJson(`${apiBase}/v1/runtime/health`);
 }
@@ -470,21 +486,32 @@ async function refresh() {
   banner.className = "banner loading";
   banner.textContent = "Refreshing authoritative runtime state…";
   try {
-    const healthPayload = await loadHealth(apiBase);
+    const [healthPayload, ledgerPayload, failurePayload, migrationPayload] = await Promise.all([
+      loadHealth(apiBase),
+      loadLedger(apiBase),
+      loadFailures(apiBase).catch(() => ({ signatures: [] })),
+      loadMigrations(apiBase),
+    ]);
     renderHealth(healthPayload.health || {});
+    renderLedger(ledgerPayload.entries || []);
+    renderFailures(failurePayload.signatures || []);
+    renderMigration(migrationPayload || {});
+
     const operationId = qs("#operation-id").value.trim() ||
       new URLSearchParams(location.search).get("operation_id") || "";
     if (!operationId) {
-      renderOperation(buildViewModel({}));
-      renderAcceptance(buildViewModel({}));
-      renderTimeline(buildViewModel({}));
-      renderRecovery(buildViewModel({}));
-      renderLongRun(buildViewModel({}));
+      const emptyVm = buildViewModel({});
+      renderOperation(emptyVm);
+      renderAcceptance(emptyVm);
+      renderTimeline(emptyVm);
+      renderRecovery(emptyVm);
+      renderLongRun(emptyVm);
       banner.className = "banner ready";
       banner.textContent = "Runtime API is healthy. Select an operation to inspect.";
       qs("#last-refresh").textContent = `Refreshed ${new Date().toLocaleTimeString()}`;
       return;
     }
+
     const projection = await loadOperation(apiBase, operationId);
     const vm = buildViewModel(projection);
     renderOperation(vm);
@@ -531,6 +558,28 @@ function bindControls() {
 
 function boot() {
   qs("#refresh").addEventListener("click", refresh);
+
+  qs("#ledger-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const apiBase = document.documentElement.dataset.apiBase || DEFAULT_API_BASE;
+    try {
+      const payload = await loadLedger(apiBase, {
+        task_id: qs("#ledger-task").value.trim(),
+        run_id: qs("#ledger-run").value.trim(),
+        provider: qs("#ledger-provider").value.trim(),
+        outcome: qs("#ledger-outcome").value.trim(),
+      });
+      renderLedger(payload.entries || []);
+    } catch (error) {
+      const root = qs("#ledger-table");
+      root.replaceChildren();
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = error instanceof Error ? error.message : String(error);
+      root.append(empty);
+    }
+  });
+
   qs("#operation-form").addEventListener("submit", (event) => {
     event.preventDefault();
     const operationId = qs("#operation-id").value.trim();
@@ -543,7 +592,6 @@ function boot() {
   bindControls();
   refresh();
 }
-
 if (typeof document !== "undefined") {
   boot();
 }

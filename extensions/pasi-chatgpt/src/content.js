@@ -1943,23 +1943,37 @@
   async function waitForConversationDomReady() {
     let previousUsers = -1;
     let previousAssistants = -1;
+    let previousUserTextSignature = null;
     let stableSamples = 0;
 
     await waitUntil(() => {
       if (!chatUrl()) return null;
 
-      const users = userMessages().length;
+      const userNodes = userMessages();
+      const users = userNodes.length;
       const assistants = assistantMessages().length;
-      if (users === previousUsers && assistants === previousAssistants) {
+      const userTextSignature = userNodes
+        .map((node) => normalize(messageText(node)))
+        .join('\u001f');
+      const userTextReady = userNodes.every((node) => Boolean(normalize(messageText(node))));
+
+      if (
+        users === previousUsers &&
+        assistants === previousAssistants &&
+        userTextSignature === previousUserTextSignature &&
+        userTextReady
+      ) {
         stableSamples += 1;
       } else {
         previousUsers = users;
         previousAssistants = assistants;
+        previousUserTextSignature = userTextSignature;
         stableSamples = 0;
       }
 
-      // Require several consecutive identical DOM samples so an existing
-      // conversation is not reported as 0:0 while ChatGPT is still hydrating.
+      // Require several consecutive identical DOM/text samples so an existing
+      // conversation is not reported ready while ChatGPT is still hydrating
+      // or replacing message nodes.
       return composer() && stableSamples >= 3;
     }, 10000, DOM_POLL_MS);
 

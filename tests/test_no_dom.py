@@ -93,7 +93,7 @@ def test_p0_4_supervisor_is_restart_safe():
 def _python_module_exists(root: Path, module: str) -> bool:
     parts = module.split(".")
     base = root.joinpath(*parts)
-    return base.is_file() or (base / "__init__.py").is_file()
+    return base.is_file() or base.is_dir()
 
 
 def _resolve_import(root: Path, source: Path, module: str, level: int = 0) -> str:
@@ -138,19 +138,23 @@ def test_repository_wide_import_and_path_audit():
             if isinstance(node, ast.Import):
                 imports = [(alias.name, 0) for alias in node.names]
             elif isinstance(node, ast.ImportFrom):
-                imports = [(_resolve_import(root, path, node.module or "", node.level), node.level)]
+                module = _resolve_import(root, path, node.module or "", node.level)
+                if not module:
+                    continue
+                if not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
+                    continue
+                for alias in node.names:
+                    candidate = f"{module}.{alias.name}" if module else alias.name
+                    if alias.name == "*" or _python_module_exists(root, candidate) or _python_module_exists(root, module):
+                        continue
+                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {candidate}")
+                continue
             else:
                 continue
             for module, level in imports:
                 if not module or not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
                     continue
-                if isinstance(node, ast.ImportFrom):
-                    if _python_module_exists(root, module):
-                        continue
-                    base = module.rsplit(".", 1)[0] if "." in module else ""
-                    if not base or not _python_module_exists(root, base):
-                        raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
-                elif not _python_module_exists(root, module):
+                if not _python_module_exists(root, module):
                     raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
 
 

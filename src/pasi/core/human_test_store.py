@@ -20,6 +20,10 @@ class HumanTestRunNotFound(KeyError):
     """Raised when a human-test run does not exist."""
 
 
+class DuplicateHumanTestRun(ValueError):
+    """Raised when a human-test run id is reused for different evidence."""
+
+
 class HumanTestStore:
     """Durable human-test evidence store; the extension cannot write trust state."""
 
@@ -69,9 +73,10 @@ class HumanTestStore:
     def record_run(self, run: HumanTestRun) -> HumanTestRun:
         payload = run.to_dict()
         with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT OR REPLACE INTO human_test_run(
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO human_test_run(
                     run_id,
                     suite_id,
                     suite_version,
@@ -94,7 +99,9 @@ class HumanTestStore:
                     json.dumps(payload, sort_keys=True, separators=(",", ":")),
                     run.ended_at,
                 ),
-            )
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateHumanTestRun(run.run_id) from exc
         return run
 
     def get_run(self, run_id: str) -> HumanTestRun:

@@ -64,6 +64,7 @@ WSL must use the same checkout that Windows just deployed:
     bash scripts/run_bridge.sh
 
 That launcher:
+
 1. creates or reuses .runtime/bridge-token;
 2. synchronizes the same token to extensions/pasi-chatgpt/.bridge-token;
 3. runs python3 -m pasi_bridge.
@@ -80,6 +81,7 @@ From WSL:
     python3 scripts/verify_bridge.py
 
 This verifies:
+
 - the repository-local runtime token exists;
 - the extension token and runtime token are identical;
 - the source extension is Manifest V3;
@@ -94,6 +96,7 @@ From PowerShell:
     powershell -ExecutionPolicy Bypass -File .\scripts\verify_extension_deployment.ps1
 
 This additionally verifies that:
+
 - C:\PASI\pasi-chatgpt-unpacked exists;
 - the deployed commit equals the current Engineering Workspace commit;
 - runtime/source/deployed bridge tokens all match;

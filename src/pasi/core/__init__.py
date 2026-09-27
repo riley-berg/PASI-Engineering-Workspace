@@ -33,6 +33,11 @@ from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
 from .retrieval import ProvenanceAwareRetriever, RetrievedMemory, RetrievalError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
+from .runtime_api import RuntimeAPIService, make_handler
+from .runtime_controls import AuthorizationError, ControlError, IdempotencyConflict, RuntimeCommandStore, RuntimeControlService
+from .runtime_events import RuntimeEventFeed
+from .runtime_health import ConnectionStatus, HealthError, RuntimeHealth, RuntimeHealthStore
+from .runtime_projection import RuntimeIdentity, RuntimeProjectionService
 from .selection_store import SelectionNotFound, SQLiteSelectionStore
 from .task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot, SelectionDecision, SelectionError, StaleSelection
 from .schedule_store import ScheduleNotFound, SQLiteScheduleStore
@@ -92,6 +97,20 @@ __all__ = [
     "RetrievalError",
     "Roadmap",
     "RoadmapNotFound",
+    "RuntimeAPIService",
+    "RuntimeCommandStore",
+    "RuntimeControlService",
+    "RuntimeEventFeed",
+    "RuntimeHealth",
+    "RuntimeHealthStore",
+    "ConnectionStatus",
+    "HealthError",
+    "RuntimeIdentity",
+    "RuntimeProjectionService",
+    "AuthorizationError",
+    "ControlError",
+    "IdempotencyConflict",
+    "make_handler",
     "SelectionDecision",
     "SelectionError",
     "SelectionNotFound",

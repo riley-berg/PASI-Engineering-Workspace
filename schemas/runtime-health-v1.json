@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/runtime-health-v1.json",
+  "title":"PASI runtime health v1",
+  "type":"object",
+  "required":["connection_status","heartbeat_at","degraded_reason","recovery_phase","controller_version","runner_version","provider_version","code_head","revision","updated_at"],
+  "properties":{
+    "connection_status":{"enum":["connected","degraded","disconnected","recovering"]},
+    "heartbeat_at":{"type":"string","format":"date-time"},
+    "degraded_reason":{"type":"string"},
+    "recovery_phase":{"type":"string"},
+    "controller_version":{"type":"string"},
+    "runner_version":{"type":"string"},
+    "provider_version":{"type":"string"},
+    "code_head":{"type":"string"},
+    "revision":{"type":"integer","minimum":0},
+    "updated_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

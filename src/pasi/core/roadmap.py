@@ -340,6 +340,32 @@ class Roadmap:
             tasks=self.tasks + tuple(children),
         )
 
+    def add_tasks(self, tasks_to_add: tuple[RoadmapTask, ...]) -> "Roadmap":
+        if not tasks_to_add:
+            raise RoadmapError("at least one task is required")
+        existing_ids = {task.id for task in self.tasks}
+        new_ids = {task.id for task in tasks_to_add}
+        if len(new_ids) != len(tasks_to_add) or existing_ids & new_ids:
+            raise RoadmapError("task ids must be unique and new")
+        phase_ids = {phase.id for phase in self.phases}
+        task_ids = existing_ids | new_ids
+        for task in tasks_to_add:
+            if task.phase_id not in phase_ids:
+                raise RoadmapError(
+                    f"task {task.id} references missing phase {task.phase_id}"
+                )
+            if not set(task.depends_on).issubset(task_ids):
+                raise RoadmapError(
+                    f"task {task.id} references a missing dependency"
+                )
+        return Roadmap(
+            roadmap_id=self.roadmap_id,
+            version=ROADMAP_SCHEMA_VERSION,
+            revision=self.revision + 1,
+            phases=self.phases,
+            tasks=self.tasks + tasks_to_add,
+        )
+
     def blocked_tasks(self) -> tuple[RoadmapTask, ...]:
         completed = {
             task.id for task in self.tasks

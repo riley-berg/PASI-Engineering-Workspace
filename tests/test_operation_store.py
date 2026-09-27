@@ -87,7 +87,7 @@ def test_operation_state_rejects_unsupported_schema_and_bad_digest():
         OperationState(
             operation_id="op-1",
             operation_type="task",
-            schema_version=2,
+            schema_version=3,
         )
 
     with pytest.raises(InvalidOperationState):

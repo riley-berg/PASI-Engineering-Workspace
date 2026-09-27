@@ -75,6 +75,7 @@ class ChatOperation:
     prompt: str
     idempotency_key: str | None = None
     completion_markers: list[str] | None = None
+    m0_recovery_probe: bool = False
 
     status: str = "queued"
 

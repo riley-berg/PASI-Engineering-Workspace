@@ -137,6 +137,16 @@ class HostResourceObserver:
         errors: list[str] = []
         usage = resource.getrusage(resource.RUSAGE_SELF)
         rss_bytes = int(usage.ru_maxrss * 1024) if os.name == "posix" else int(usage.ru_maxrss)
+        if os.path.exists("/proc/self/status"):
+            try:
+                with open("/proc/self/status", encoding="utf-8") as status_file:
+                    for line in status_file:
+                        if line.startswith("VmRSS:"):
+                            rss_kib = int(line.split()[1])
+                            rss_bytes = rss_kib * 1024
+                            break
+            except (OSError, ValueError):
+                pass
         disk = shutil.disk_usage(Path.cwd())
         try:
             fd_count = len(os.listdir("/proc/self/fd"))

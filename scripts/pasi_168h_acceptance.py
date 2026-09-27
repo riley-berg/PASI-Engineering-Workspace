@@ -114,7 +114,15 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     if not (worktree / ".git").exists():
         git(root, "worktree", "add", "-B", branch, str(worktree), "origin/main", timeout=120)
     elif git(worktree, "branch", "--show-current") != branch:
-        git(worktree, "checkout", branch)
+        branch_ref = git(worktree, "show-ref", "--verify", f"refs/heads/{branch}", check=False)
+        if branch_ref:
+            git(worktree, "checkout", branch)
+        else:
+            # Smoke mode creates a clean reusable worktree on its own temporary
+            # branch. A subsequent real run uses a fresh timestamped branch, so
+            # create that branch from the worktree's current clean HEAD rather
+            # than failing because the branch does not exist yet.
+            git(worktree, "checkout", "-b", branch)
     if git(worktree, "status", "--porcelain", check=False):
         raise RuntimeError("acceptance worktree is not clean")
 

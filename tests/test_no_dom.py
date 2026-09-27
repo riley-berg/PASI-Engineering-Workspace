@@ -149,11 +149,8 @@ def test_repository_wide_import_and_path_audit():
                     continue
                 if not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
                     continue
-                for alias in node.names:
-                    candidate = f"{module}.{alias.name}" if module else alias.name
-                    if alias.name == "*" or _python_module_exists(root, candidate) or _python_module_exists(root, module):
-                        continue
-                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {candidate}")
+                if not _python_module_exists(root, module):
+                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
                 continue
             else:
                 continue

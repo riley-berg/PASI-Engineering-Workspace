@@ -1652,7 +1652,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 {
                     "error": str(exc)
                 },
-                HTTPStatus.CONFLICT,
+                HTTPStatus.BAD_REQUEST,
             )
         except Exception:
             self._send_json(

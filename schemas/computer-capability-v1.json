@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/computer-capability-v1.json",
+  "title":"PASI computer capability v1",
+  "type":"object",
+  "required":["capability_id","version","operation","input_schema","output_schema","authorization","side_effect","resource_limits","scope"],
+  "properties":{
+    "capability_id":{"type":"string","minLength":1},
+    "version":{"type":"integer","minimum":1},
+    "operation":{"type":"string","minLength":1},
+    "input_schema":{"type":"object"},
+    "output_schema":{"type":"object"},
+    "authorization":{"enum":["none","operator","approval"]},
+    "side_effect":{"enum":["read","write","external_write"]},
+    "resource_limits":{"type":"object","additionalProperties":{"type":"number","minimum":0}},
+    "scope":{"type":"string","minLength":1},
+    "digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "additionalProperties":false
+}

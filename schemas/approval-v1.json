@@ -1,0 +1,18 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/approval-v1.json",
+  "title":"PASI scoped approval v1",
+  "type":"object",
+  "required":["approval_id","operation_id","capability_id","target","issued_at","expires_at","token_digest","used"],
+  "properties":{
+    "approval_id":{"type":"string","minLength":1},
+    "operation_id":{"type":"string","minLength":1},
+    "capability_id":{"type":"string","minLength":1},
+    "target":{"type":"string","minLength":1},
+    "issued_at":{"type":"string","format":"date-time"},
+    "expires_at":{"type":"string","format":"date-time"},
+    "token_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "used":{"type":"boolean"}
+  },
+  "additionalProperties":false
+}

@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/recovery-outcome-v1.json",
+  "title":"PASI host recovery outcome v1",
+  "type":"object",
+  "required":["operation_id","classification","actions_attempted","succeeded_action","exhausted"],
+  "properties":{
+    "operation_id":{"type":"string","minLength":1},
+    "classification":{"enum":["retryable","recoverable","blocked","terminal","human_required"]},
+    "actions_attempted":{"type":"array","items":{"type":"string"}},
+    "succeeded_action":{"type":"string"},
+    "exhausted":{"type":"boolean"}
+  },
+  "additionalProperties":false
+}

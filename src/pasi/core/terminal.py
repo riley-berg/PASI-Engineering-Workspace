@@ -1,0 +1,229 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import sqlite3
+import subprocess
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Mapping, Sequence
+
+
+class TerminalCapabilityError(ValueError):
+    """Raised when a terminal capability request violates policy."""
+
+
+@dataclass(frozen=True)
+class TerminalCommand:
+    operation_id: str
+    argv: tuple[str, ...]
+    cwd: Path
+    timeout_seconds: float = 30.0
+    max_output_bytes: int = 256_000
+    env: Mapping[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        if not self.operation_id.strip():
+            raise TerminalCapabilityError("operation_id is required")
+        if not self.argv or any(not arg for arg in self.argv):
+            raise TerminalCapabilityError("argv must contain non-empty arguments")
+        if self.argv[0].startswith("-"):
+            raise TerminalCapabilityError("executable must not begin with '-'")
+        if self.timeout_seconds <= 0 or self.timeout_seconds > 300:
+            raise TerminalCapabilityError("timeout_seconds out of bounds")
+        if self.max_output_bytes <= 0 or self.max_output_bytes > 10_000_000:
+            raise TerminalCapabilityError("max_output_bytes out of bounds")
+        if not self.cwd.is_absolute():
+            raise TerminalCapabilityError("cwd must be absolute")
+        if self.env is not None:
+            for key, value in self.env.items():
+                if not isinstance(key, str) or not key or not isinstance(value, str):
+                    raise TerminalCapabilityError("environment entries must be strings")
+
+
+@dataclass(frozen=True)
+class TerminalResult:
+    operation_id: str
+    argv: tuple[str, ...]
+    cwd: str
+    exit_code: int | None
+    timed_out: bool
+    duration_seconds: float
+    stdout_digest: str
+    stderr_digest: str
+    stdout: str
+    stderr: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "operation_id": self.operation_id,
+            "argv": list(self.argv),
+            "cwd": self.cwd,
+            "exit_code": self.exit_code,
+            "timed_out": self.timed_out,
+            "duration_seconds": self.duration_seconds,
+            "stdout_digest": self.stdout_digest,
+            "stderr_digest": self.stderr_digest,
+        }
+
+
+class SQLiteTerminalEvidenceStore:
+    """Durable terminal execution evidence keyed by operation identity."""
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path)
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS terminal_evidence (
+                    operation_id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+    def record(self, result: TerminalResult) -> TerminalResult:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO terminal_evidence(operation_id, payload_json)
+                VALUES (?, ?)
+                """,
+                (
+                    result.operation_id,
+                    json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")),
+                ),
+            )
+        return result
+
+    def get(self, operation_id: str) -> TerminalResult:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM terminal_evidence WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(operation_id)
+        payload = json.loads(row["payload_json"])
+        return TerminalResult(
+            operation_id=payload["operation_id"],
+            argv=tuple(payload["argv"]),
+            cwd=payload["cwd"],
+            exit_code=payload["exit_code"],
+            timed_out=payload["timed_out"],
+            duration_seconds=float(payload["duration_seconds"]),
+            stdout_digest=payload["stdout_digest"],
+            stderr_digest=payload["stderr_digest"],
+            stdout="",
+            stderr="",
+        )
+
+
+class TypedTerminalExecutor:
+    """Execute an allowlisted argv vector with bounded workspace scope."""
+
+    def __init__(
+        self,
+        *,
+        workspace_root: Path,
+        executable_allowlist: Sequence[str],
+        evidence_store: SQLiteTerminalEvidenceStore,
+        inherited_env_keys: Sequence[str] = ("PATH", "HOME", "LANG", "LC_ALL"),
+    ) -> None:
+        self.workspace_root = workspace_root.resolve()
+        self.executable_allowlist = frozenset(executable_allowlist)
+        self.evidence_store = evidence_store
+        self.inherited_env_keys = frozenset(inherited_env_keys)
+
+        if not self.workspace_root.is_dir():
+            raise TerminalCapabilityError("workspace_root must be an existing directory")
+
+    def _safe_cwd(self, cwd: Path) -> Path:
+        resolved = cwd.resolve()
+        try:
+            resolved.relative_to(self.workspace_root)
+        except ValueError as exc:
+            raise TerminalCapabilityError("cwd escapes approved workspace root") from exc
+        return resolved
+
+    def execute(self, command: TerminalCommand) -> TerminalResult:
+        cwd = self._safe_cwd(command.cwd)
+        executable = command.argv[0]
+        if executable not in self.executable_allowlist:
+            raise TerminalCapabilityError(f"executable is not allowlisted: {executable}")
+        if any(chr(0) in arg for arg in command.argv):
+            raise TerminalCapabilityError("argv contains NUL")
+
+        env: dict[str, str] = {}
+        for key in self.inherited_env_keys:
+            value = os.environ.get(key)
+            if value is not None:
+                env[key] = value
+        if command.env:
+            for key, value in command.env.items():
+                if key not in self.inherited_env_keys:
+                    raise TerminalCapabilityError(
+                        f"environment key is not allowlisted: {key}"
+                    )
+                env[key] = value
+
+        started = time.monotonic()
+        timed_out = False
+        stdout = ""
+        stderr = ""
+        exit_code: int | None = None
+        try:
+            completed = subprocess.run(
+                list(command.argv),
+                cwd=cwd,
+                env=env,
+                capture_output=True,
+                text=False,
+                timeout=command.timeout_seconds,
+                check=False,
+                shell=False,
+            )
+            exit_code = int(completed.returncode)
+            stdout = completed.stdout[: command.max_output_bytes].decode(
+                "utf-8", errors="replace"
+            )
+            stderr = completed.stderr[: command.max_output_bytes].decode(
+                "utf-8", errors="replace"
+            )
+        except subprocess.TimeoutExpired as exc:
+            timed_out = True
+            if isinstance(exc.stdout, bytes):
+                stdout = exc.stdout[: command.max_output_bytes].decode(
+                    "utf-8", errors="replace"
+                )
+            if isinstance(exc.stderr, bytes):
+                stderr = exc.stderr[: command.max_output_bytes].decode(
+                    "utf-8", errors="replace"
+                )
+        duration = time.monotonic() - started
+
+        result = TerminalResult(
+            operation_id=command.operation_id,
+            argv=tuple(command.argv),
+            cwd=str(cwd),
+            exit_code=exit_code,
+            timed_out=timed_out,
+            duration_seconds=duration,
+            stdout_digest=hashlib.sha256(stdout.encode("utf-8")).hexdigest(),
+            stderr_digest=hashlib.sha256(stderr.encode("utf-8")).hexdigest(),
+            stdout=stdout,
+            stderr=stderr,
+        )
+        return self.evidence_store.record(result)

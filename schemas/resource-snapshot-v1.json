@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/resource-snapshot-v1.json",
+  "title":"PASI host resource snapshot v1",
+  "type":"object",
+  "required":["operation_id","run_id","timestamp","rss_bytes","cpu_seconds","cpu_percent","disk_used_bytes","disk_free_bytes","file_descriptor_count","sampling_error"],
+  "properties":{
+    "operation_id":{"type":"string","minLength":1},
+    "run_id":{"type":"string","minLength":1},
+    "timestamp":{"type":"string","format":"date-time"},
+    "rss_bytes":{"type":"integer","minimum":0},
+    "cpu_seconds":{"type":"number","minimum":0},
+    "cpu_percent":{"type":"number","minimum":0},
+    "disk_used_bytes":{"type":"integer","minimum":0},
+    "disk_free_bytes":{"type":"integer","minimum":0},
+    "file_descriptor_count":{"type":["integer","null"],"minimum":0},
+    "sampling_error":{"type":"string"}
+  },
+  "additionalProperties":false
+}

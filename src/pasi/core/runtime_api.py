@@ -6,6 +6,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from pasi.core.human_testing import HumanTestRun
+from pasi.core.human_test_store import HumanTestRunNotFound, HumanTestStore
 from pasi.core.operation_store import OperationStateNotFound
 from pasi.core.runtime_controls import (
     AuthorizationError,
@@ -28,11 +30,15 @@ class RuntimeAPIService:
         event_feed: RuntimeEventFeed,
         health_store: RuntimeHealthStore,
         controls: RuntimeControlService,
+        human_tests: HumanTestStore | None = None,
+        human_test_ingest_token: str = "",
     ) -> None:
         self.projection = projection
         self.event_feed = event_feed
         self.health_store = health_store
         self.controls = controls
+        self.human_tests = human_tests
+        self.human_test_ingest_token = human_test_ingest_token
 
     def request(
         self,
@@ -45,6 +51,46 @@ class RuntimeAPIService:
         parsed = urlparse(path)
         if method == "GET" and parsed.path == "/healthz":
             return HTTPStatus.OK, {"status": "ok"}
+
+        if method == "GET" and parsed.path == "/v1/human-tests/trust":
+            if self.human_tests is None:
+                return HTTPStatus.NOT_FOUND, {"error": "human-test service unavailable"}
+            certificate = self.human_tests.get_trust()
+            return HTTPStatus.OK, {
+                "trusted": bool(
+                    certificate is not None and certificate.status.value == "trusted"
+                ),
+                "certificate": None if certificate is None else certificate.to_dict(),
+            }
+
+        if method == "GET" and parsed.path.startsWith("/v1/human-tests/runs/"):
+            if self.human_tests is None:
+                return HTTPStatus.NOT_FOUND, {"error": "human-test service unavailable"}
+            run_id = parsed.path.rsplit("/", 1)[-1]
+            try:
+                return HTTPStatus.OK, self.human_tests.get_run(run_id).to_dict()
+            except HumanTestRunNotFound:
+                return HTTPStatus.NOT_FOUND, {"error": "human-test run not found"}
+
+        if method == "POST" and parsed.path == "/v1/human-tests/runs":
+            if self.human_tests is None:
+                return HTTPStatus.NOT_FOUND, {"error": "human-test service unavailable"}
+            if not self.human_test_ingest_token:
+                return HTTPStatus.SERVICE_UNAVAILABLE, {"error": "human-test ingest is not configured"}
+            auth = headers.get("Authorization", "")
+            if auth != "Bearer " + self.human_test_ingest_token:
+                return HTTPStatus.UNAUTHORIZED, {"error": "human-test ingest authorization failed"}
+            try:
+                run = HumanTestRun.from_mapping(body or {})
+            except (TypeError, ValueError) as exc:
+                return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
+            stored = self.human_tests.record_run(run)
+            payload = stored.to_dict()
+            return HTTPStatus.OK, {
+                "run_id": stored.run_id,
+                "status": stored.status.value,
+                "evidence_sha256": payload["evidence_sha256"],
+            }
 
         if method == "GET" and parsed.path == "/v1/runtime/health":
             try:

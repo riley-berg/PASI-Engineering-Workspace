@@ -284,7 +284,7 @@ def main() -> int:
     expected_user, expected_assistant = baseline_counts
 
     operations: list[dict[str, Any]] = []
-    seen_fingerprints: dict[str, int] = {}
+    generated_fingerprints: dict[str, int] = {}
     session_marker = uuid.uuid4().hex[:10]
 
     # Queue all 20 operations before the browser controller consumes them. The
@@ -298,9 +298,9 @@ def main() -> int:
             "This is a PASI M1 sequential handoff acceptance operation."
         )
         fingerprint = prompt_fingerprint(prompt)
-        if fingerprint in seen_fingerprints:
-            raise M1LiveError(f"generated repeated prompt at index {index}")
-        seen_fingerprints[fingerprint] = index
+        if fingerprint in generated_fingerprints:
+            raise M1LiveError(f"generated repeated prompt at index {index}; first seen at {generated_fingerprints[fingerprint]}")
+        generated_fingerprints[fingerprint] = index
 
         queued = queue_operation(
             client,
@@ -432,19 +432,26 @@ def main() -> int:
         expected_user, expected_assistant = counts
 
         fingerprint = str(expected["prompt_fingerprint"])
-        prior_index = seen_fingerprints.get(fingerprint)
-        if prior_index is not None and prior_index != index:
+        prior_index = next(
+            (item["index"] for item in operations[:position] if item["prompt_fingerprint"] == fingerprint),
+            None,
+        )
+        if prior_index is not None:
             repeated_prompts.append(
                 {"index": index, "repeated_from_index": prior_index, "fingerprint": fingerprint}
             )
-        seen_fingerprints[fingerprint] = index
 
         claimed_at = result.get("claimed_at")
-        completed_at = result.get("updated_at")
-        completed_at_epoch = float(completed_at) if isinstance(completed_at, (int, float)) else time.time()
         completed_at_ms = timing.get("completed_at_ms")
         if not isinstance(completed_at_ms, (int, float)):
             raise M1LiveError(f"operation {index} lacks completed_at_ms timing")
+        completed_at_epoch = float(completed_at_ms) / 1000.0
+
+        observed_chat_url = str(result.get("chat_url") or state.get("chat_url") or "")
+        if observed_chat_url and observed_chat_url != chat_url:
+            raise M1LiveError(
+                f"operation {index} moved away from the dedicated automation chat: {observed_chat_url!r}"
+            )
 
         results.append(
             {
@@ -459,7 +466,7 @@ def main() -> int:
                 "timing": timing,
                 "user_delta": user_delta,
                 "assistant_delta": assistant_delta,
-                "chat_url": result.get("chat_url") or state.get("chat_url"),
+                "chat_url": observed_chat_url or chat_url,
                 "retry_count": result.get("retry_count", 0),
                 "recovery_event_count": len(result.get("recovery_events") or []),
             }

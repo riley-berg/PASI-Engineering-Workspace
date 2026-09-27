@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-POLICY_PATH = Path(__file__).resolve().parents[1] / "automation" / "chromium" / "pasi-chatgpt" / "timeout-policy.json"
+POLICY_PATH = Path(__file__).resolve().parents[1] / "extensions" / "pasi-chatgpt" / "timeout-policy.json"
 
 DEFAULTS: dict[str, float] = {
     "heartbeat_seconds": 15.0,

@@ -37,6 +37,7 @@ test("human-test evidence is bound to code head and durable backend ingest", () 
   assert.ok(service.includes("codeHead"));
   assert.ok(service.includes("/v1/human-tests/runs"));
   assert.ok(service.includes("evidence_sha256"));
+  assert.ok(service.includes("runStep(tabId, step, suite.allowed_origins, targetOrigin, runtimeControlToken)"));
   assert.ok(service.includes("captureVisibleTab"));
   assert.ok(service.includes("policy_violations"));
 });

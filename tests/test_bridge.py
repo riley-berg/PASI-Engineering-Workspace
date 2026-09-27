@@ -1362,8 +1362,12 @@ def test_completion_does_not_claim_an_unrelated_next_operation(tmp_path: Path) -
     assert completed["status"] == "completed"
     assert "next_operation_id" not in completed
     assert chained is None
-    assert bridge.get_operation(second.operation_id)["status"] == "queued"
-    assert bridge.get_operation(third.operation_id)["status"] == "queued"
+    second_state = bridge.get_operation(second.operation_id)
+    third_state = bridge.get_operation(third.operation_id)
+    assert second_state is not None
+    assert third_state is not None
+    assert second_state["status"] == "queued"
+    assert third_state["status"] == "queued"
 
 
 def test_duplicate_completion_does_not_claim_a_unrelated_operation(tmp_path: Path) -> None:
@@ -1387,7 +1391,9 @@ def test_duplicate_completion_does_not_claim_a_unrelated_operation(tmp_path: Pat
     assert completed is not None
     assert completed["response_text"] == "first response"
     assert chained is None
-    assert bridge.get_operation(second.operation_id)["status"] == "queued"
+    second_state = bridge.get_operation(second.operation_id)
+    assert second_state is not None
+    assert second_state["status"] == "queued"
 
 
 def test_wait_for_operation_wakes_on_durable_completion(tmp_path: Path) -> None:

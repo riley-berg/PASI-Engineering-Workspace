@@ -31,11 +31,13 @@ from urllib.parse import quote, urlsplit
 from urllib.request import Request, urlopen
 
 
+ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 DEFAULT_COUNT = 20
 POLL_SECONDS = 0.25
 MAX_RESPONSE_BYTES = 2_000_000
-ACCEPTANCE_DIR = Path(".runtime/acceptance")
+RUNTIME_TOKEN = ROOT / ".runtime" / "bridge-token"
+ACCEPTANCE_DIR = ROOT / ".runtime" / "acceptance"
 M0_EVIDENCE = ACCEPTANCE_DIR / "m0-live.json"
 M1_EVIDENCE = ACCEPTANCE_DIR / "m1-live.json"
 DURABLE_CHAT_STATE = ACCEPTANCE_DIR / "durable-automation-chat.json"
@@ -61,6 +63,14 @@ class BridgeClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.token = os.environ.get("PASI_BRIDGE_TOKEN", "").strip()
+        # The Engineering Workspace bridge is provisioned from the repository-local
+        # .runtime/bridge-token. Keep the legacy ~/.pasi token only as a fallback
+        # for older environments; it must not override the canonical workspace token.
+        if not self.token:
+            try:
+                self.token = RUNTIME_TOKEN.read_text(encoding="utf-8").strip()
+            except OSError:
+                self.token = ""
         if not self.token:
             try:
                 self.token = (Path.home() / ".pasi" / "bridge-token").read_text(encoding="utf-8").strip()

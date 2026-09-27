@@ -80,3 +80,12 @@ input:focus-visible,button:focus-visible{outline:3px solid rgba(102,179,255,.45)
 .operation-link{display:inline-flex;padding:4px 7px;border:1px solid var(--border);border-radius:7px;color:var(--accent);text-decoration:none;font-size:11px}
 @media (max-width:900px){.filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:600px){.filter-grid{grid-template-columns:1fr}}
+
+.notification-list{display:grid;gap:9px}
+.notification-card{display:grid;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);padding:12px}
+.notification-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.notification-message{font-size:13px}
+.notification-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:11px}
+.notification-card.error{border-color:rgba(255,107,120,.35)}
+.notification-card.warning{border-color:rgba(241,191,95,.35)}
+.notification-card.critical{border-color:rgba(255,107,120,.65)}

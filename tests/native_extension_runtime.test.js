@@ -71,6 +71,14 @@ test("usage or context exhaustion creates a bounded fresh-chat recovery path", (
   assert.ok(recovery.includes("MAX_CONTEXT_RECOVERIES"));
 });
 
+test("M0 recovery probe is wired through the native controller", () => {
+  assert.ok(content.includes("m0_recovery_probe"));
+  assert.ok(content.includes("PASI_RECOVERY_PROBE"));
+  assert.ok(recovery.includes("triggerConnectionLoss"));
+  assert.ok(recovery.includes("phase: 'connection_lost'"));
+  assert.ok(recovery.includes("phase: 'connection_restored'"));
+});
+
 test("live acceptance captures runtime errors including RECOVERY_DEFAULTS", () => {
   assert.ok(content.includes("chatgpt_runtime_error"));
   assert.ok(content.includes("recovery_defaults_match"));

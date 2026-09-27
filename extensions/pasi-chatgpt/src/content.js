@@ -1570,10 +1570,43 @@
     };
   }
 
-  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null) {
+  async function waitForConversationSignatureDelta(baseline, timeoutMs = 10000) {
+    if (!baseline || !Number.isFinite(Number(baseline.user)) || !Number.isFinite(Number(baseline.assistant))) {
+      return conversationSignature();
+    }
+
+    const targetUser = Number(baseline.user) + 1;
+    const targetAssistant = Number(baseline.assistant) + 1;
+    const observed = await waitUntil(() => {
+      const users = userMessages().length;
+      const assistants = assistantMessages().length;
+      return users === targetUser && assistants === targetAssistant
+        ? { users, assistants }
+        : null;
+    }, timeoutMs, DOM_POLL_MS);
+
+    if (!observed) {
+      throw new Error(
+        'PASI_NATIVE: completed response did not reach exact +1/+1 conversation counts; ' +
+        'baseline=' + String(baseline.user) + ':' + String(baseline.assistant) +
+        ' current=' + String(userMessages().length) + ':' + String(assistantMessages().length)
+      );
+    }
+
+    return conversationSignature();
+  }
+
+  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null, signatureBaseline = null) {
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
     }
+    // Do not acknowledge completion until the ChatGPT DOM itself reflects the
+    // exact user+assistant turn produced by this operation. Response detection can
+    // succeed before the final message nodes are mounted.
+    if (signatureBaseline) {
+      await waitForConversationSignatureDelta(signatureBaseline);
+    }
+
     const body = {
       operation_id: operationId,
       chat_url: chatUrl(),
@@ -1740,6 +1773,10 @@
             : fingerprint();
           const promptText = operationPrompt(operation);
           const assistantSnapshot = snapshotAssistantMessages();
+          const signatureBaseline = {
+            user: userMessages().length,
+            assistant: assistantMessages().length
+          };
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
               operation_id: operation.operation_id,
@@ -1813,7 +1850,13 @@
             { assistantSnapshot, prompt: promptText }
           );
           browserTiming.completed_at_ms = Date.now();
-          const completion = await finishOperation(operation.operation_id, response, true, browserTiming);
+          const completion = await finishOperation(
+            operation.operation_id,
+            response,
+            true,
+            browserTiming,
+            signatureBaseline
+          );
           chainedOperation = completion?.next_operation || null;
           finalized = true;
           return;

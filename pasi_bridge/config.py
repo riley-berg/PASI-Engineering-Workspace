@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AI_DIR = PROJECT_ROOT / ".ai"
 
 FAILURES_DIR = AI_DIR / "failures"

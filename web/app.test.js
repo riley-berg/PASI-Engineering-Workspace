@@ -122,3 +122,25 @@ test("ledger and failure normalizers preserve provenance and affected-operation 
   assert.deepEqual(failures[0].affected_operations, ["op-1", "op-2"]);
   assert.equal(failures[0].current_code_head, "abc123");
 });
+
+
+test("notification normalizer keeps durable identity and acknowledgement revision", () => {
+  const { normalizeNotifications } = await import("./app.js");
+  const items = normalizeNotifications([
+    {
+      notification_id: "ntf-1",
+      scope: "runtime",
+      source_event_id: "event-1",
+      severity: "warning",
+      message: "Attention",
+      entity_type: "operation",
+      entity_id: "op-1",
+      occurred_at: "2026-01-01T00:00:00Z",
+      acknowledged: false,
+      revision: 2,
+    },
+  ]);
+  assert.equal(items[0].notification_id, "ntf-1");
+  assert.equal(items[0].revision, 2);
+  assert.equal(items[0].acknowledged, false);
+});

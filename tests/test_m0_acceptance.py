@@ -63,11 +63,19 @@ class TestM0Acceptance(unittest.TestCase):
             with self.assertRaises(M0AcceptanceError):
                 self.response(**overrides)
 
-    def test_live_contract_allows_same_chat_and_requires_thinking_and_connection_recovery(self) -> None:
+    def test_live_contract_allows_connection_recovery_evidence_when_present(self) -> None:
         value = self.response()
         self.assertFalse(value.runtime_evidence.fresh_chat_created_after_usage)
         self.assertTrue(value.runtime_evidence.thinking_enabled)
+        self.assertIsNotNone(value.runtime_evidence.connection_recovery)
+        assert value.runtime_evidence.connection_recovery is not None
         self.assertTrue(value.runtime_evidence.connection_recovery.resumed_after_reconnect)
+
+    def test_live_contract_allows_same_chat_without_connection_recovery(self) -> None:
+        runtime_evidence = dict(self.response().runtime_evidence.to_dict())
+        runtime_evidence["connection_recovery"] = None
+        value = self.response(runtime_evidence=runtime_evidence)
+        self.assertIsNone(value.runtime_evidence.connection_recovery)
 
     def test_live_contract_allows_usage_gated_fresh_chat(self) -> None:
         value = self.response(

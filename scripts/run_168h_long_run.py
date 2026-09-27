@@ -325,11 +325,42 @@ def ensure_chat_ready(
 
     reason = chat_limit_reason(health)
     if reason:
+        event_number = len(evidence["automation"]["fresh_chat_events"]) + 1
+        thinking_before = health.get("thinking_enabled") is True
+        if not thinking_before:
+            select = queue_auxiliary(
+                client,
+                "select_reasoning",
+                run_id=run_id,
+                suffix=f"pre-fresh-thinking-{event_number}",
+            )
+            select_id = str(select["operation_id"])
+            select_result = wait_for_terminal(
+                client,
+                select_id,
+                thinking_timeout_seconds,
+            )
+            if select_result.get("status") != "completed":
+                raise LongRunError(
+                    "Thinking-selection operation failed before fresh-chat recovery"
+                )
+            deadline = time.monotonic() + thinking_timeout_seconds
+            while time.monotonic() < deadline:
+                health = browser_health(client)
+                if health.get("thinking_enabled") is True:
+                    thinking_before = True
+                    break
+                time.sleep(POLL_SECONDS)
+        if not thinking_before:
+            raise LongRunError(
+                "Thinking was not verified before usage/context fresh-chat recovery"
+            )
+
         fresh = queue_auxiliary(
             client,
             "new_chat",
             run_id=run_id,
-            suffix=f"new-chat-{len(evidence['automation']['fresh_chat_events']) + 1}",
+            suffix=f"new-chat-{event_number}",
         )
         fresh_id = str(fresh["operation_id"])
         result = wait_for_terminal(
@@ -346,7 +377,7 @@ def ensure_chat_ready(
             "timestamp": utc_now(),
             "reason": reason,
             "fresh_chat_operation_id": fresh_id,
-            "thinking_verified_before": False,
+            "thinking_verified_before": thinking_before,
             "thinking_verified_after": False,
         }
 
@@ -391,7 +422,7 @@ def ensure_chat_ready(
         client,
         "select_reasoning",
         run_id=run_id,
-        suffix="select-thinking",
+        suffix=f"select-thinking-{uuid.uuid4().hex}",
     )
     select_id = str(select["operation_id"])
     select_result = wait_for_terminal(
@@ -642,16 +673,76 @@ class TelemetrySampler:
             )
 
     def _run(self) -> None:
-        next_capture = time.monotonic()
+        next_health = time.monotonic()
+        next_resource = time.monotonic()
         while not self.stop_event.is_set():
             now = time.monotonic()
-            if now >= next_capture:
-                self.capture()
-                next_capture = now + min(
-                    HEALTH_INTERVAL_SECONDS,
-                    RESOURCE_INTERVAL_SECONDS,
-                )
+            if now >= next_health:
+                self.capture_health()
+                next_health = now + HEALTH_INTERVAL_SECONDS
+            if now >= next_resource:
+                self.capture_resource()
+                next_resource = now + RESOURCE_INTERVAL_SECONDS
             self.stop_event.wait(1.0)
+
+    def capture_health(self) -> None:
+        operation_id = self.operation_id_getter()
+        try:
+            health = browser_health(self.client)
+            browser_status = (
+                "healthy"
+                if health.get("native_controller") is True
+                and str(health.get("chat_url") or "").startswith(
+                    "https://chatgpt.com/c/"
+                )
+                else "unhealthy"
+            )
+            heartbeat_age = health.get("heartbeat_age")
+            if not isinstance(heartbeat_age, (int, float)):
+                heartbeat_age = health.get("heartbeat_age_seconds")
+            if not isinstance(heartbeat_age, (int, float)):
+                heartbeat_age = 999999.0
+
+            self.evidence["health"]["samples"].append(
+                {
+                    "timestamp": utc_now(),
+                    "bridge_status": "ok",
+                    "browser_status": browser_status,
+                    "heartbeat_age_seconds": float(heartbeat_age),
+                    "operation_id": operation_id,
+                    "phase": str(health.get("phase") or ""),
+                }
+            )
+            if browser_status != "healthy":
+                self.evidence["health"]["failure_count"] += 1
+        except Exception as exc:
+            self.evidence["health"]["failure_count"] += 1
+            self.evidence["health"]["samples"].append(
+                {
+                    "timestamp": utc_now(),
+                    "bridge_status": "error",
+                    "browser_status": "error",
+                    "heartbeat_age_seconds": 999999.0,
+                    "operation_id": operation_id,
+                    "phase": "health_error",
+                    "error": str(exc),
+                }
+            )
+
+    def capture_resource(self) -> None:
+        try:
+            self.evidence["resources"]["samples"].append(
+                self.resource_sampler.sample()
+            )
+        except Exception as exc:
+            self.evidence["resources"]["sampling_failures"] += 1
+            self.evidence["resources"]["sampling_errors"].append(
+                {"timestamp": utc_now(), "error": str(exc)}
+            )
+
+    def capture(self) -> None:
+        self.capture_health()
+        self.capture_resource()
 
 
 def recovery_phases(operation_state: dict[str, Any]) -> list[str]:
@@ -1279,15 +1370,14 @@ def main() -> int:
                 time.monotonic() - monotonic_start
             )
 
+        telemetry.stop()
+        telemetry.capture()
         ended_at = utc_now()
         ended_dt = datetime.fromisoformat(ended_at)
         evidence["ended_at"] = ended_at
         evidence["duration_seconds"] = (
             ended_dt - started_dt
         ).total_seconds()
-
-        telemetry.capture()
-        telemetry.stop()
         summarize_resources(evidence)
 
         if evidence["health"]["samples"]:
@@ -1319,6 +1409,20 @@ def main() -> int:
             ended=ended_dt,
         )
         persist_final(evidence, "PASS", [])
+
+        verifier = ROOT / "scripts" / "verify_168h_long_run.py"
+        verification = subprocess.run(
+            [sys.executable, str(verifier), str(FINAL_EVIDENCE)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if verification.returncode != 0:
+            raise LongRunError(
+                "independent 168-hour verifier rejected the evidence: "
+                + (verification.stdout.strip() or verification.stderr.strip())
+            )
+
         PARTIAL_EVIDENCE.unlink(missing_ok=True)
 
         print(

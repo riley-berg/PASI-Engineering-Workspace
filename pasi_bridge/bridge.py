@@ -431,6 +431,10 @@ class BridgeState:
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                chain_id=normalized_chain_id,
+                sequence_index=normalized_sequence_index,
+                predecessor_operation_id=normalized_predecessor,
+                prompt_fingerprint=prompt_fingerprint,
                 status="queued",
             )
             item = operation.to_dict()

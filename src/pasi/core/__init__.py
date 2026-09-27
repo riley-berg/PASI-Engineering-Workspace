@@ -53,6 +53,7 @@ from .recovery import (
 )
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
+from .planner_api import DashboardAPIService, PlannerConsoleService
 from .retrieval import ProvenanceAwareRetriever, RetrievedMemory, RetrievalError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .dependency_graph import DependencyGraph, StaleDependencyGraph
@@ -175,7 +176,9 @@ __all__ = [
     "OperationRevisionConflict",
     "OperationState",
     "OperationStateNotFound",
+    "DashboardAPIService",
     "Planner",
+    "PlannerConsoleService",
     "PlannerDecision",
     "RecoveryClassification",
     "RecoveryDecision",

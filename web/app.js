@@ -302,6 +302,131 @@ function renderLongRun(vm) {
   note.textContent = `Authoritative sequence progress: ${Math.round(pct)}%.`;
 }
 
+function renderMigration(payload) {
+  const migration = payload || {};
+  setText("#migration-component", migration.component);
+  setText("#migration-stored", migration.stored_version);
+  setText("#migration-current", migration.current_version);
+  setText("#migration-required", migration.migration_required == null ? "" : String(migration.migration_required));
+  setText("#migration-safe", migration.migration_safe == null ? "" : String(migration.migration_safe));
+  setText("#migration-updated", humanTime(migration.updated_at));
+  const pill = qs("#migration-pill");
+  const warning = migration.migration_required || migration.migration_safe === false;
+  pill.textContent = warning ? "attention" : "ready";
+  pill.className = `pill ${warning ? "warning" : "success"}`;
+}
+
+function renderLedger(entries) {
+  const list = normalizeLedger(entries);
+  setText("#ledger-count", `${list.length} entr${list.length === 1 ? "y" : "ies"}`);
+  const root = qs("#ledger-table");
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No ledger entries match these filters.";
+    root.append(empty);
+    return;
+  }
+  const table = document.createElement("table");
+  const headers = ["Operation", "Task", "Run", "Provider", "Branch", "PR", "Outcome"];
+  const thead = document.createElement("thead");
+  const headerRow = document.createElement("tr");
+  for (const header of headers) {
+    const th = document.createElement("th");
+    th.textContent = header;
+    headerRow.append(th);
+  }
+  thead.append(headerRow);
+  const tbody = document.createElement("tbody");
+  for (const entry of list) {
+    const tr = document.createElement("tr");
+    const operationCell = document.createElement("td");
+    const link = document.createElement("a");
+    link.className = "table-link";
+    const url = new URL(location.href);
+    url.searchParams.set("operation_id", entry.operation_id);
+    link.href = url.toString();
+    link.textContent = entry.operation_id || "—";
+    operationCell.append(link);
+    tr.append(operationCell);
+    for (const value of [
+      entry.task_id,
+      entry.run_id,
+      entry.provider,
+      entry.branch,
+      entry.pr_number == null ? "" : String(entry.pr_number),
+      entry.outcome,
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = value || "—";
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  table.append(thead, tbody);
+  root.append(table);
+}
+
+function renderFailures(signatures) {
+  const list = normalizeFailures(signatures);
+  setText("#failure-count", `${list.length} signature${list.length === 1 ? "" : "s"}`);
+  const root = qs("#failure-list");
+  root.replaceChildren();
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No failure signatures reported.";
+    root.append(empty);
+    return;
+  }
+  for (const signature of list) {
+    const card = document.createElement("article");
+    card.className = "signature-card";
+    const head = document.createElement("div");
+    head.className = "signature-head";
+    const title = document.createElement("strong");
+    title.textContent = `${signature.failure_family || "failure"} · ${signature.failure_code || "unknown"}`;
+    const count = document.createElement("span");
+    count.className = "pill warning";
+    count.textContent = `${signature.occurrence_count} occurrence${signature.occurrence_count === 1 ? "" : "s"}`;
+    head.append(title, count);
+
+    const meta = document.createElement("div");
+    meta.className = "signature-meta";
+    for (const value of [signature.subsystem, signature.current_code_head]) {
+      if (value) {
+        const span = document.createElement("span");
+        span.textContent = value;
+        meta.append(span);
+      }
+    }
+
+    const links = document.createElement("div");
+    links.className = "operation-links";
+    for (const operationId of signature.affected_operations) {
+      const link = document.createElement("a");
+      link.className = "operation-link";
+      const url = new URL(location.href);
+      url.searchParams.set("operation_id", operationId);
+      link.href = url.toString();
+      link.textContent = operationId;
+      links.append(link);
+    }
+    if (signature.evidence_ref) {
+      const evidence = document.createElement("a");
+      evidence.className = "operation-link";
+      evidence.href = signature.evidence_ref;
+      evidence.target = "_blank";
+      evidence.rel = "noreferrer";
+      evidence.textContent = "evidence";
+      links.append(evidence);
+    }
+    card.append(head, meta, links);
+    root.append(card);
+  }
+}
+
 async function getJson(url, options = {}) {
   const response = await fetch(url, {
     headers: { Accept: "application/json", ...(options.headers || {}) },

@@ -66,6 +66,43 @@
     });
   }
 
+  function armM0RecoveryProbe(operation) {
+    if (operation?.m0_recovery_probe !== true) return;
+    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
+    try {
+      if (sessionStorage.getItem(key) === 'fired') return;
+    } catch (_) {}
+
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (extensionContextInvalidated || activeOperationId !== operation.operation_id) {
+        clearInterval(timer);
+        return;
+      }
+      if (Date.now() - started > TIMEOUTS.generation) {
+        clearInterval(timer);
+        return;
+      }
+      if (!generating()) return;
+      try {
+        if (sessionStorage.getItem(key) === 'fired') {
+          clearInterval(timer);
+          return;
+        }
+      } catch (_) {}
+
+      const trigger = globalThis.PASI_RECOVERY_PROBE?.triggerConnectionLoss;
+      if (typeof trigger !== 'function') return;
+
+      try {
+        sessionStorage.setItem(key, 'fired');
+      } catch (_) {}
+
+      clearInterval(timer);
+      void trigger(operation.operation_id, 'm0_controlled_live_probe');
+    }, 250);
+  }
+
   function scheduleImmediatePoll() {
     if (immediatePollQueued || extensionContextInvalidated) return;
     immediatePollQueued = true;
@@ -1748,6 +1785,7 @@
             throw new Error('PASI_NATIVE: submission accepted but generation did not start');
           }
           browserTiming.generation_start_ms = generationStartMs;
+          armM0RecoveryProbe(operation);
           const response = await waitForResponse(
             baseline,
             Array.isArray(operation.completion_markers)

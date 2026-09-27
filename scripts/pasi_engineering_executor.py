@@ -43,6 +43,26 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+def canonical_issue_context() -> str:
+    import urllib.request
+    token=os.environ.get("PASI_GITHUB_TOKEN","").strip() or os.environ.get("GITHUB_TOKEN","").strip()
+    issue=os.environ.get("PASI_TASK_SOURCE_ISSUE","").strip()
+    if not token or not issue:
+        return ""
+    req=urllib.request.Request(
+        f"https://api.github.com/repos/{REPO}/issues/{issue}",
+        headers={"Accept":"application/vnd.github+json","Authorization":f"Bearer {token}","User-Agent":"pasi-engineering-workspace-168h"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req,timeout=20) as response:
+            payload=json.loads(response.read().decode("utf-8"))
+    except Exception:
+        return ""
+    body=payload.get("body") if isinstance(payload,dict) else ""
+    return str(body or "")[:30000]
+
+
 def main():
     root=Path(os.environ.get("PASI_ACCEPTANCE_WORKTREE","")).expanduser().resolve()
     if not root.is_dir():raise SystemExit("PASI_ACCEPTANCE_WORKTREE required")

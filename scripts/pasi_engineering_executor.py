@@ -72,7 +72,12 @@ def main():
     if code or status.strip():raise SystemExit("acceptance worktree must start clean")
     if not os.environ.get("PASI_TASK_ID") or not os.environ.get("PASI_TASK_TITLE"):raise SystemExit("task metadata missing")
     runtime=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve();runtime.mkdir(parents=True,exist_ok=True)
-    ext=Path(os.environ.get("PASI_ENGINEERING_EXTENSION_ROOT",str(Path(__file__).resolve().parents[1]/"automation"/"chromium"/"pasi-chatgpt"))).expanduser().resolve()
+    ext=Path(
+        os.environ.get(
+            "PASI_ENGINEERING_EXTENSION_ROOT",
+            str(Path(__file__).resolve().parents[1] / "extensions" / "pasi-chatgpt"),
+        )
+    ).expanduser().resolve()
     code,out=run([sys.executable,str(Path(__file__).with_name("pasi_engineering_browser_preflight.py")),"--extension-root",str(ext)],Path(__file__).resolve().parents[1],60);(runtime/"last-preflight.txt").write_text(out+"\n",encoding="utf-8")
     if code:return code
     task_id=os.environ["PASI_TASK_ID"]

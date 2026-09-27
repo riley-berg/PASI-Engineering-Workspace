@@ -1,4 +1,5 @@
-importScripts('timeout-config.js');
+try { importScripts("vendor/typescript.js"); } catch (_) {}
+importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
@@ -244,11 +245,11 @@ async function injectExistingChatTabs() {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         files: [
-          'timeout-config.js',
-          'detectors.js',
-          'recovery_progress.js',
-          'content.js',
-          'recovery.js'
+          'src/timeout-config.js',
+          'src/detectors.js',
+          'src/recovery_progress.js',
+          'src/content.js',
+          'src/recovery.js'
         ]
       });
     } catch (_) {
@@ -328,4 +329,41 @@ if (chrome.sidePanel?.setPanelBehavior) {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) inspect();
+});
+
+
+/*
+ * PASI userscript/API message plane. The native ChatGPT bridge listener above
+ * remains the only listener allowed to talk to 127.0.0.1:8765.
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (String(message?.type || "").startsWith("pasi.userscript.") && message?.type !== "pasi.userscript.rpc") {
+    globalThis.PASIUserScriptManager.handle(message, sender)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
+    return true;
+  }
+
+  if (String(message?.type || "").startsWith("pasi.api.")) {
+    globalThis.PASIBackgroundAPI.handle(message, sender)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
+    return true;
+  }
+
+  return undefined;
+});
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "pasi.http.stream") return;
+  port.onMessage.addListener((message) => {
+    if (message?.type !== globalThis.PASIExtensionAPIContract.MESSAGE_TYPES.HTTP_STREAM_START) return;
+    void globalThis.PASIBackgroundAPI.startHttpStream(port, message);
+  });
+});
+
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === "update" || details.reason === "install") {
+    void globalThis.PASIUserScriptManager.restore();
+  }
 });

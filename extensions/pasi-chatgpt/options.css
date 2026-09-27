@@ -1,0 +1,33 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+body { margin: 0; }
+main { max-width: 1180px; margin: 0 auto; padding: 28px; }
+header { display: flex; justify-content: space-between; gap: 24px; align-items: start; }
+.eyebrow { letter-spacing: .16em; text-transform: uppercase; opacity: .6; margin: 0 0 6px; }
+h1 { margin: 0; font-size: 32px; }
+.subhead { opacity: .72; margin-top: 8px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin: 24px 0 14px; }
+button, input, select, .file-button { font: inherit; border: 1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius: 8px; padding: 9px 11px; background: Canvas; color: CanvasText; }
+button { cursor: pointer; }
+.file-button { cursor: pointer; }
+.file-button input { display: none; }
+.status { min-height: 24px; margin: 10px 0; opacity: .8; }
+.scripts { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px,1fr)); gap: 14px; }
+.card { border: 1px solid color-mix(in srgb, CanvasText 14%, transparent); border-radius: 12px; padding: 16px; background: color-mix(in srgb, Canvas 95%, CanvasText 5%); }
+.card h2 { font-size: 17px; margin: 0 0 4px; }
+.meta { opacity: .68; font-size: 12px; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+.tag { border-radius: 999px; padding: 3px 8px; background: color-mix(in srgb, CanvasText 10%, transparent); font-size: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hosts { margin: 10px 0; font-size: 12px; opacity: .8; }
+.warning { margin-top: 8px; color: #b45309; }
+@media (prefers-color-scheme: dark) {
+  .warning { color: #fbbf24; }
+}
+
+.conflict{border:1px solid color-mix(in srgb,CanvasText 16%,transparent);border-radius:12px;padding:14px;margin:12px 0}.conflict-item{border-top:1px solid color-mix(in srgb,CanvasText 10%,transparent);padding:12px 0}.conflict-item:first-child{border-top:0}.diff{font:11px ui-monospace,monospace;max-height:260px;overflow:auto;white-space:pre-wrap}.diff-add{background:#dcfce7}.diff-remove{background:#fee2e2}.conflict-actions{display:flex;gap:8px;align-items:center;margin-top:8px}
+.cloudbar{display:flex;flex-wrap:wrap;gap:8px;padding:12px;border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:10px;margin:12px 0}.cloudbar input{min-width:150px}

@@ -114,8 +114,14 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     if not (worktree / ".git").exists():
         git(root, "worktree", "add", "-B", branch, str(worktree), "origin/main", timeout=120)
     elif git(worktree, "branch", "--show-current") != branch:
-        branch_ref = git(worktree, "show-ref", "--verify", f"refs/heads/{branch}", check=False)
-        if branch_ref:
+        result = subprocess.run(
+            ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+            cwd=worktree,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
             git(worktree, "checkout", branch)
         else:
             # Smoke mode creates a clean reusable worktree on its own temporary

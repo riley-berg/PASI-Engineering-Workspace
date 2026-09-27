@@ -21,6 +21,7 @@
   const ports = new Map();
   const valueWatchers = new Map();
   const menuCommands = new Map();
+  const PASI_NOTIFICATION_ICON = "data:image/svg+xml;charset=UTF-8," + encodeURIComponent("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"128\" height=\"128\" viewBox=\"0 0 128 128\"><rect width=\"128\" height=\"128\" rx=\"24\" fill=\"#111827\"/><path d=\"M30 39h68v50H30z\" fill=\"none\" stroke=\"#fff\" stroke-width=\"8\"/><path d=\"M42 53h44M42 68h32\" stroke=\"#fff\" stroke-width=\"8\" stroke-linecap=\"round\"/></svg>");
 
   function ensureAvailable() {
     if (!chrome.userScripts?.register) {
@@ -884,7 +885,7 @@
           type: "basic",
           title: String(args.title || script.name),
           message: String(args.message || ""),
-          iconUrl: "icons/icon128.png",
+          iconUrl: PASI_NOTIFICATION_ICON,
         })};
       case "clipboard.write": {
         requireGrant(script, "clipboard", method);

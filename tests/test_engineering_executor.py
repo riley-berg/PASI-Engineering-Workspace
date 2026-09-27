@@ -25,7 +25,7 @@ PASI_RESULT_PATCH_END
 
 def test_executor_uses_canonical_chat_guard():
     source = Path(executor.__file__).read_text(encoding="utf-8")
-    assert "pasi_chat_guard.py" in source
+    assert '"-m","scripts.pasi_chat_guard"' in source
     assert "pasi_engineering_chat_guard.py" not in source
 
 

@@ -53,3 +53,12 @@ class TestChatGPTChatReuse(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_completion_publishes_fresh_conversation_signature_before_return(self) -> None:
+        finish = self.source.split("async function finishOperation(", 1)[1].split(
+            "async function failOperation", 1
+        )[0]
+        self.assertIn("await reportObservation('chatgpt_state'", finish)
+        self.assertIn("conversation_signature: conversationSignature()", finish)
+        self.assertIn("before the completion", finish)

@@ -39,7 +39,7 @@ def _build_evidence():
         }
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    end = start + timedelta(seconds=604800)
+    end = start + timedelta(seconds=verifier.POLICY["target_duration_seconds"])
 
     operations = []
     for index in range(1, verifier.POLICY["expected_logical_operations"] + 1):
@@ -128,7 +128,7 @@ def _build_evidence():
         "controller_version": "controller",
         "policy": copy.deepcopy(verifier.POLICY),
         "health": {
-            "sample_interval_seconds": 300,
+            "sample_interval_seconds": verifier.POLICY["health_sample_interval_seconds"],
             "samples": health,
             "failure_count": 0,
             "max_gap_seconds": 300,
@@ -152,7 +152,7 @@ def _build_evidence():
             "rss_p95_bytes": 100_000_000,
             "peak_cpu_15m_average_percent": 5.0,
             "cpu_15m_p95_percent": 5.0,
-            "runtime_disk_growth_bytes": 604800,
+            "runtime_disk_growth_bytes": verifier.POLICY["target_duration_seconds"],
             "minimum_free_disk_bytes": 50 * 1024**3,
             "peak_fd_count": 100,
         },
@@ -219,7 +219,7 @@ def test_duplicate_operation_fails():
 def test_skipped_sequence_fails():
     verifier = load_verifier()
     evidence = _build_evidence()
-    evidence["operations"][10]["sequence_index"] = 12
+    evidence["operations"][1]["sequence_index"] = 3
     try:
         verifier.verify_evidence(evidence)
     except verifier.VerificationError as exc:

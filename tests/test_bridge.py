@@ -163,7 +163,7 @@ def test_warm_queue_cache_avoids_reloading_persistent_queue(tmp_path: Path) -> N
     assert load_queue.call_count == 1
 
 
-def test_queue_idempotency_reuses_only_nonterminal_matching_operation(tmp_path: Path) -> None:
+def test_queue_idempotency_reuses_the_same_operation_through_terminal_completion(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
     first = bridge.queue_operation("prompt", "same prompt", idempotency_key="key-1")
     duplicate = bridge.queue_operation("prompt", "same prompt", idempotency_key="key-1")
@@ -177,8 +177,9 @@ def test_queue_idempotency_reuses_only_nonterminal_matching_operation(tmp_path: 
     bridge.heartbeat(first.operation_id)
     bridge.complete_operation(first.operation_id, response_text="finished", response_text_available=True)
     replay = bridge.queue_operation("prompt", "same prompt", idempotency_key="key-1")
-    assert replay.operation_id != first.operation_id
-    assert bridge.get_status()["history_size"] == 2
+    assert replay.operation_id == first.operation_id
+    assert replay.status == "completed"
+    assert bridge.get_status()["history_size"] == 1
 
 
 def test_queue_idempotency_survives_bridge_restart(tmp_path: Path) -> None:
@@ -200,12 +201,15 @@ def test_queue_idempotency_survives_bridge_restart(tmp_path: Path) -> None:
     assert restarted_bridge.get_status()["history_size"] == 1
 
 
-def test_queue_idempotency_does_not_cross_prompt_or_operation_type(tmp_path: Path) -> None:
+def test_queue_idempotency_key_is_immutable_across_prompt_or_operation_type(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
-    first = bridge.queue_operation("prompt", "first", idempotency_key="shared")
-    second = bridge.queue_operation("prompt", "second", idempotency_key="shared")
-    third = bridge.queue_operation("new_chat", "", idempotency_key="shared")
-    assert len({first.operation_id, second.operation_id, third.operation_id}) == 3
+    bridge.queue_operation("prompt", "first", idempotency_key="shared")
+
+    with pytest.raises(ValueError, match="already bound"):
+        bridge.queue_operation("prompt", "second", idempotency_key="shared")
+
+    with pytest.raises(ValueError, match="already bound"):
+        bridge.queue_operation("new_chat", "", idempotency_key="shared")
 
 
 def test_http_get_next_operation_claims_oldest_queued_operation(tmp_path: Path) -> None:
@@ -1340,12 +1344,12 @@ def test_timing_normalization_preserves_completion_to_prompt_latency_metric() ->
     assert normalized["completion_to_prompt_injected_ms"] == 7
 
 
-def test_completion_claims_exactly_one_next_operation_atomically(tmp_path: Path) -> None:
+def test_completion_does_not_claim_an_unrelated_next_operation(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
     first = bridge.queue_operation("prompt", "first")
     second = bridge.queue_operation("prompt", "second")
     third = bridge.queue_operation("prompt", "third")
-    bridge.claim_next_operation()
+    bridge.claim_operation(first.operation_id)
     bridge.heartbeat(first.operation_id)
 
     completed, chained = bridge.complete_operation_and_claim_next(
@@ -1356,20 +1360,18 @@ def test_completion_claims_exactly_one_next_operation_atomically(tmp_path: Path)
 
     assert completed is not None
     assert completed["status"] == "completed"
-    assert completed["next_operation_id"] == second.operation_id
-    assert chained is not None
-    assert chained["operation_id"] == second.operation_id
-    assert chained["status"] == "claimed"
-    third_operation = bridge.get_operation(third.operation_id)
-    assert third_operation is not None
-    assert third_operation["status"] == "queued"
+    assert "next_operation_id" not in completed
+    assert chained is None
+    assert bridge.get_operation(second.operation_id)["status"] == "queued"
+    assert bridge.get_operation(third.operation_id)["status"] == "queued"
 
 
-def test_duplicate_completion_returns_the_same_chained_operation(tmp_path: Path) -> None:
+def test_duplicate_completion_does_not_claim_a_unrelated_operation(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
     first = bridge.queue_operation("prompt", "first")
     second = bridge.queue_operation("prompt", "second")
-    bridge.claim_next_operation()
+    bridge.claim_operation(first.operation_id)
+    bridge.heartbeat(first.operation_id)
     bridge.complete_operation_and_claim_next(
         first.operation_id,
         response_text="first response",
@@ -1384,10 +1386,8 @@ def test_duplicate_completion_returns_the_same_chained_operation(tmp_path: Path)
 
     assert completed is not None
     assert completed["response_text"] == "first response"
-    assert chained is not None
-    assert chained["operation_id"] == second.operation_id
-    assert chained["status"] == "claimed"
-
+    assert chained is None
+    assert bridge.get_operation(second.operation_id)["status"] == "queued"
 
 
 def test_wait_for_operation_wakes_on_durable_completion(tmp_path: Path) -> None:

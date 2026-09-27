@@ -145,7 +145,7 @@ def _build_evidence(verifier=None):
             "sample_interval_seconds": verifier.POLICY["health_sample_interval_seconds"],
             "samples": health,
             "failure_count": 0,
-            "max_gap_seconds": 300,
+            "max_gap_seconds": verifier.POLICY["health_sample_interval_seconds"],
             "max_heartbeat_age_seconds": 1,
         },
         "operations": operations,
@@ -295,6 +295,27 @@ def test_resource_leak_fails():
         assert "RSS p95" in str(exc)
     else:
         raise AssertionError("expected RSS growth to fail")
+
+
+def test_fresh_chat_requires_thinking_before_and_after():
+    verifier = load_verifier()
+    evidence = _build_evidence(verifier)
+    evidence["automation"]["fresh_chat_creations"] = 1
+    evidence["automation"]["fresh_chat_events"] = [
+        {
+            "timestamp": "2026-01-01T00:05:00+00:00",
+            "reason": "usage_limit",
+            "thinking_verified_before": False,
+            "thinking_verified_after": True,
+        }
+    ]
+    _rehash(evidence)
+    try:
+        verifier.verify_evidence(evidence)
+    except verifier.VerificationError as exc:
+        assert "before fresh chat" in str(exc)
+    else:
+        raise AssertionError("expected missing pre-fresh-chat Thinking verification to fail")
 
 
 def test_tampered_evidence_fails():

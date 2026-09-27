@@ -31,6 +31,7 @@ def test_m0_runtime_evidence_accepts_full_runtime_evidence() -> None:
     assert evidence.fresh_chat_created_after_usage is False
     assert evidence.fresh_chat_creation_reason == ""
     assert evidence.thinking_enabled is True
+    assert evidence.connection_recovery is not None
     assert evidence.connection_recovery.operation_id == "op-1"
 
 

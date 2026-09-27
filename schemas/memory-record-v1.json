@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/memory-record-v1.json",
+  "title":"PASI project memory record v1",
+  "type":"object",
+  "required":["memory_id","scope","kind","content","provenance_refs","source_operation_id","confidence","status","revision","created_at","updated_at"],
+  "properties":{
+    "memory_id":{"type":"string","minLength":1},
+    "scope":{"type":"string","minLength":1},
+    "kind":{"type":"string","minLength":1},
+    "content":{"type":"string","minLength":1},
+    "provenance_refs":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+    "source_operation_id":{"type":"string"},
+    "confidence":{"type":"number","minimum":0,"maximum":1},
+    "status":{"enum":["active","archived"]},
+    "revision":{"type":"integer","minimum":0},
+    "created_at":{"type":"string","format":"date-time"},
+    "updated_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

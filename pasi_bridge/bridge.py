@@ -42,7 +42,7 @@ MAX_TIMING_KEYS = frozenset({
     "ack_verified",
     "submission_via",
 })
-BRIDGE_TOKEN_FILE = Path.home() / ".pasi" / "bridge-token"
+BRIDGE_TOKEN_FILE = Path(os.environ.get("PASI_BRIDGE_TOKEN_FILE", str(CONFIG.project_root / ".runtime" / "bridge-token"))).expanduser().resolve()
 RUNNER_CAPABILITIES_PATH = Path.home() / ".pasi" / "runner" / "capabilities.json"
 RUNNER_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))).expanduser().resolve()
 RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"

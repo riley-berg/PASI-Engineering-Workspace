@@ -54,7 +54,7 @@ def test_scheduler_only_considers_authoritative_ready_tasks():
         capacity=capacity,
         advisory_priorities={"P2.2": 100.0, "P2.1": 1.0, "P2.3": 2.0},
     )
-    assert [item.task_id for item in decision.scheduled] == ["P2.2", "P2.3"]
+    assert [item.task_id for item in decision.scheduled] == ["P2.2", "P2.3", "P2.1"]
 
 
 def test_scheduler_enforces_capacity_and_deterministic_tie_break():

@@ -11,6 +11,10 @@ from .health import HealthClassification, ProviderHealthError, ProviderHealthMon
 
 __all__ = [
     "ChatMessage",
+    "BenchmarkCase",
+    "BenchmarkError",
+    "BenchmarkReport",
+    "BenchmarkRunner",
     "BoundedFallbackOrchestrator",
     "FallbackDecision",
     "FallbackError",

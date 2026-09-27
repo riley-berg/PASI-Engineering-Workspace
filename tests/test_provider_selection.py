@@ -19,7 +19,7 @@ def cap(name, capabilities, context=32768, output=4096, models=("m1", "m2")):
         models=models,
         capabilities=tuple(capabilities),
         context_window_tokens=context,
-        max_output_tokens=output,
+        max_output_tokens=min(output, context - 1),
         configuration_provenance=f"test:{name}",
         metadata={},
     )

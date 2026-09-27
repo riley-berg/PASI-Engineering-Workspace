@@ -41,7 +41,7 @@ POLICY: dict[str, Any] = {
     "min_free_disk_fraction_of_start": 0.10,
     "max_fd_multiplier_peak": 2.0,
     "min_fd_peak_floor": 512,
-    "fresh_chat_allowed_reasons": ["usage_limit", "context_limit"],
+    "fresh_chat_allowed_reasons": ["usage_limit"],
 }
 
 

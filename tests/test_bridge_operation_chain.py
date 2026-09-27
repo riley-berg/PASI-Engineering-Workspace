@@ -112,7 +112,9 @@ def test_claim_next_skips_a_chain_item_whose_predecessor_is_not_complete(tmp_pat
         state._save_queue([predecessor, blocked])
 
     assert state.claim_next_operation() is None
-    assert state.get_operation("op-blocked")["status"] == "queued"
+    blocked_state = state.get_operation("op-blocked")
+    assert blocked_state is not None
+    assert blocked_state["status"] == "queued"
 
 
 def test_complete_does_not_claim_an_unrelated_queued_operation(tmp_path):
@@ -141,4 +143,6 @@ def test_complete_does_not_claim_an_unrelated_queued_operation(tmp_path):
     assert completed is not None
     assert completed["status"] == "completed"
     assert chained is None
-    assert state.get_operation(unrelated.operation_id)["status"] == "queued"
+    unrelated_state = state.get_operation(unrelated.operation_id)
+    assert unrelated_state is not None
+    assert unrelated_state["status"] == "queued"

@@ -36,7 +36,11 @@ if ($robocopyExit -ge 8) {
     throw "robocopy failed with exit code $robocopyExit"
 }
 
-$gitSha = (& git -C $RepoRoot rev-parse HEAD).Trim()
+$resolveGitShaScript = Join-Path $RepoRoot "scripts\\resolve_source_commit.ps1"
+if (-not (Test-Path $resolveGitShaScript)) {
+    throw "Missing source commit resolver: $resolveGitShaScript"
+}
+$gitSha = (& $resolveGitShaScript -RepoRoot $RepoRoot).Trim()
 $deployedMetadata = [ordered]@{
     source_commit = $gitSha
     source_extension = $source

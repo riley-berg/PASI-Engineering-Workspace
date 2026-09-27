@@ -794,7 +794,12 @@
     }
 
     const reloadAt = Date.parse(String(state.reload_at || ''));
-    if (Number.isFinite(reloadAt) && Date.now() - reloadAt < RECOVERY_GRACE_MS) {
+    const controlledLiveProbe = state.recovery_source === 'm2_controlled_live_probe';
+    if (
+      !controlledLiveProbe &&
+      Number.isFinite(reloadAt) &&
+      Date.now() - reloadAt < RECOVERY_GRACE_MS
+    ) {
       await report('chatgpt_recovery', { phase: 'grace_wait', operation_id: operationId, recovery_action: 'wait_after_reload', grace_remaining_ms: RECOVERY_GRACE_MS - (Date.now() - reloadAt) });
       return;
     }
@@ -812,6 +817,20 @@
         same_operation_resumed: true,
         response_stopped_on_loss: state.response_stopped_on_loss === true,
         checkpoint_preserved: state.checkpoint_preserved === true,
+        resume_phase: 'response_generation'
+      });
+    }
+    if (controlledLiveProbe) {
+      await report('chatgpt_recovery', {
+        phase: 'controlled_probe_resume',
+        operation_id: operationId,
+        recovery_action: 'resume_same_operation',
+        recovery_reason: 'connection_error',
+        recovery_source: 'm2_controlled_live_probe',
+        resumed_after_reconnect: true,
+        same_operation_resumed: true,
+        response_stopped_on_loss: true,
+        checkpoint_preserved: true,
         resume_phase: 'response_generation'
       });
     }

@@ -103,7 +103,7 @@ function resolveTarget(rawUrl, baseOrigin) {
   return new URL(value, baseOrigin + "/").toString();
 }
 
-async function runStep(tabId, step, allowedOrigins, targetOrigin) {
+async function runStep(tabId, step, allowedOrigins, targetOrigin, runtimeControlToken) {
   const startedAt = now();
 
   try {
@@ -224,7 +224,7 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken, runtimeCon
   try {
     let tabId = tabs[0].id;
     for (const step of suite.steps) {
-      const result = await runStep(tabId, step, suite.allowed_origins, targetOrigin);
+      const result = await runStep(tabId, step, suite.allowed_origins, targetOrigin, runtimeControlToken);
       steps.push(result);
       if (result.status === "FAIL") break;
       const current = await chrome.tabs.get(tabId);
@@ -270,6 +270,8 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken, runtimeCon
       await backendRequest("/v1/human-tests/runs", "POST", evidence, backendToken);
     } catch (error) {
       evidence.policy_violations.push("evidence_ingest_failed:" + String(error?.message || error));
+      const postIngestCanonical = {...evidence, evidence_sha256: ""};
+      evidence.evidence_sha256 = await sha256Text(canonicalize(postIngestCanonical));
     }
     await chrome.storage.local.set({"pasi-human-test:last-run": evidence});
     return evidence;

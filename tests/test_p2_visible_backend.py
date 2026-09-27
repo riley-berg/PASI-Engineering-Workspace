@@ -380,3 +380,60 @@ def test_p2_17_notifications_are_event_derived_idempotent_and_acknowledgeable(tm
             first.notification_id,
             expected_revision=0,
         )
+
+
+def test_p2_12_typed_projects_transport_distinguishes_auth_rate_and_bad_data(monkeypatch):
+    import urllib.error
+
+    from pasi.core.projects_sync import (
+        GitHubProjectsRESTTransport,
+        ProjectAuthenticationError,
+        ProjectRateLimitError,
+        ProjectRemoteDataError,
+    )
+
+    transport = GitHubProjectsRESTTransport(
+        token="token",
+        owner="owner",
+        owner_kind="org",
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"[]"
+
+    def auth_failure(*args, **kwargs):
+        raise urllib.error.HTTPError("https://api.github.com", 401, "unauthorized", {}, None)
+
+    monkeypatch.setattr(
+        "pasi.core.projects_sync.urllib.request.urlopen",
+        auth_failure,
+    )
+    with pytest.raises(ProjectAuthenticationError):
+        transport._request("GET", "/failure")
+
+    def rate_failure(*args, **kwargs):
+        raise urllib.error.HTTPError("https://api.github.com", 429, "rate", {}, None)
+
+    monkeypatch.setattr(
+        "pasi.core.projects_sync.urllib.request.urlopen",
+        rate_failure,
+    )
+    with pytest.raises(ProjectRateLimitError):
+        transport._request("GET", "/failure")
+
+    def malformed(*args, **kwargs):
+        return Response()
+
+    monkeypatch.setattr(
+        "pasi.core.projects_sync.urllib.request.urlopen",
+        malformed,
+    )
+    with pytest.raises(ProjectRemoteDataError):
+        transport._request("GET", "/malformed")

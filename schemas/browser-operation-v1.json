@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/browser-operation-v1.json",
+  "title":"PASI semantic browser operation v1",
+  "oneOf":[
+    {"required":["operation_id","url"],"properties":{"operation_id":{"type":"string"},"url":{"type":"string","format":"uri"}}},
+    {"required":["operation_id","target_id"],"properties":{"operation_id":{"type":"string"},"target_id":{"type":"string","minLength":1}}},
+    {"required":["operation_id","target_id","value"],"properties":{"operation_id":{"type":"string"},"target_id":{"type":"string","minLength":1},"value":{"type":"string"}}}
+  ]
+}

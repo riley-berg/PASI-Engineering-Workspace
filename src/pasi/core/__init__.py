@@ -1,6 +1,27 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
 from .context_compiler import CompiledContext, ContextCompilationError, ContextCompiler, ContextSource
 from .cross_run_learning import CrossRunLearning, LearningPromotionError, LearningProposal
+from .approvals import Approval, ApprovalError, SQLiteApprovalStore
+from .computer_adapters import (
+    AdapterError,
+    ApplicationLauncher,
+    BrowserClick,
+    BrowserController,
+    BrowserFill,
+    BrowserNavigation,
+    FileReadResult,
+    FileWriteResult,
+    ProcessInvocation,
+    ScopedFileAdapter,
+    SemanticBrowserAdapter,
+    SubprocessProcessAdapter,
+    TypedGitAdapter,
+    VSCodeAdapter,
+)
+from .computer_capabilities import CapabilityDescriptor, CapabilityError, SQLiteCapabilityRegistry
+from .computer_control import ComputerActionResult, ComputerControlError, ComputerControlService, HostRecoveryController, RecoveryAction, RecoveryOutcome
+from .resource_observer import HostResourceObserver, ResourceObservationError, ResourceSnapshot, SQLiteResourceObservationStore
+from .terminal import TerminalCapabilityError, TerminalCommand, TerminalResult, SQLiteTerminalEvidenceStore, TypedTerminalExecutor
 from .github_issue_intake import GitHubIssueTaskIntake, GitHubIssueTaskProposal, IssueIntakeError
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
@@ -64,6 +85,14 @@ from .scheduling import CostAwareScheduler, ResourceEstimate, ScheduleDecision, 
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
+    "AdapterError",
+    "ApplicationLauncher",
+    "Approval",
+    "ApprovalError",
+    "BrowserClick",
+    "BrowserController",
+    "BrowserFill",
+    "BrowserNavigation",
     "BoundedChildTaskGenerator",
     "BoundedRepairController",
     "DependencyGraph",
@@ -97,6 +126,11 @@ __all__ = [
     "SQLiteProjectSyncStore",
     "DeterministicRecoveryClassifier",
     "ChildTaskGenerationError",
+    "CapabilityDescriptor",
+    "CapabilityError",
+    "ComputerActionResult",
+    "ComputerControlError",
+    "ComputerControlService",
     "CompiledContext",
     "ContextCompilationError",
     "ContextCompiler",
@@ -105,13 +139,22 @@ __all__ = [
     "LearningPromotionError",
     "LearningProposal",
     "DuplicateMemory",
+    "FileReadResult",
+    "FileWriteResult",
     "GitHubIssueTaskIntake",
+    "HostRecoveryController",
+    "HostResourceObserver",
     "GitHubIssueTaskProposal",
     "IssueIntakeError",
     "MemoryError",
     "MemoryNotFound",
     "MemoryRecord",
     "MemoryStatus",
+    "ProcessInvocation",
+    "RecoveryAction",
+    "RecoveryOutcome",
+    "ResourceObservationError",
+    "ResourceSnapshot",
     "CompactionError",
     "CompactionGroup",
     "MemoryCompactor",
@@ -168,7 +211,11 @@ __all__ = [
     "RoadmapPhase",
     "SQLiteEventStore",
     "SQLiteRoadmapStore",
+    "SQLiteApprovalStore",
+    "SQLiteCapabilityRegistry",
     "SQLiteMemoryStore",
+    "SQLiteResourceObservationStore",
+    "SQLiteTerminalEvidenceStore",
     "SQLiteSelectionStore",
     "SQLiteScheduleStore",
     "SQLiteFailureRegistry",
@@ -182,6 +229,15 @@ __all__ = [
     "SchedulerCapacity",
     "ScheduledTask",
     "StaleSchedule",
+    "ScopedFileAdapter",
+    "SemanticBrowserAdapter",
+    "SubprocessProcessAdapter",
+    "TerminalCapabilityError",
+    "TerminalCommand",
+    "TerminalResult",
+    "TypedGitAdapter",
+    "TypedTerminalExecutor",
+    "VSCodeAdapter",
     "digest_text",
     "load_roadmap",
     "migrate_operation_state_database",

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/durable-event-v1.json",
+  "title": "PASI durable event v1",
+  "type": "object",
+  "required": [
+    "event_id",
+    "event_type",
+    "source",
+    "operation_id",
+    "task_id",
+    "run_id",
+    "correlation_id",
+    "causation_id",
+    "payload",
+    "evidence_refs",
+    "occurred_at",
+    "schema_version",
+    "payload_sha256"
+  ],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "event_type": {"type": "string", "minLength": 1, "maxLength": 128},
+    "source": {"type": "string", "minLength": 1, "maxLength": 128},
+    "operation_id": {"type": "string", "maxLength": 256},
+    "task_id": {"type": "string", "maxLength": 256},
+    "run_id": {"type": "string", "maxLength": 256},
+    "correlation_id": {"type": "string", "maxLength": 256},
+    "causation_id": {"type": "string", "maxLength": 256},
+    "payload": {"type": "object"},
+    "evidence_refs": {"type": "array", "items": {"type": "string", "maxLength": 512}},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "schema_version": {"const": 1},
+    "payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sequence": {"type": ["integer", "null"], "minimum": 1}
+  },
+  "additionalProperties": false
+}

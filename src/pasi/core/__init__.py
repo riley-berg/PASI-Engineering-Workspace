@@ -32,7 +32,7 @@ from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature
 from .ledger import InvalidLedgerEntry, OperationLedgerEntry
 from .ledger_store import DuplicateLedgerEntry, LedgerEntryNotFound, LineageConflict, SQLiteOperationLedger
 from .human_testing import CodeChangeCandidate, HumanTestRun, HumanTestStepResult, HumanTestTrustCertificate, HumanTestTrustEvaluator, HumanTestTrustPolicy, SelfImprovementDecision, SelfImprovementGate, TrustStatus
-from .human_test_store import HumanTestRunNotFound, HumanTestStore
+from .human_test_store import DuplicateHumanTestRun, HumanTestRunNotFound, HumanTestStore
 from .migrations import MigrationError, migrate_operation_state_database
 from .operation_state import (
     InvalidOperationState,
@@ -162,6 +162,7 @@ __all__ = [
     "MemoryCompactor",
     "CodeChangeCandidate",
     "DuplicateEvent",
+    "DuplicateHumanTestRun",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",
     "DurableEvent",

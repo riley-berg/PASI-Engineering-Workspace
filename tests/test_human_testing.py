@@ -130,3 +130,11 @@ def test_human_test_store_persists_runs_and_trust(tmp_path):
     restarted = HumanTestStore(tmp_path / "human-tests.db")
     assert restarted.get_run("run-2").status is HumanTestStatus.PASS
     assert restarted.get_trust().status is TrustStatus.TRUSTED
+
+
+def test_human_test_evidence_tampering_is_rejected():
+    original = run(99).to_dict()
+    original["steps"][0]["observed"]["status"] = "tampered"
+    import pytest
+    with pytest.raises(ValueError, match="evidence hash mismatch"):
+        HumanTestRun.from_mapping(original)

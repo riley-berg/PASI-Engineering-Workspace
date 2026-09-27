@@ -36,6 +36,7 @@ MAX_PREDECESSOR_OPERATION_ID_CHARS = 200
 MAX_SEQUENCE_INDEX = 1_000_000
 MAX_RECOVERY_EVENTS_PER_OPERATION = 64
 M1_CHECKPOINT_SCHEMA_VERSION = 1
+M2_RECOVERY_SCHEMA_VERSION = 1
 MAX_TIMING_KEYS = frozenset({
     "injected_at_ms",
     "ack_at_ms",
@@ -1502,6 +1503,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "personal-ai-system-chatgpt-bridge",
                     "m1_checkpoint_schema_version": M1_CHECKPOINT_SCHEMA_VERSION,
+                    "m2_recovery_schema_version": M2_RECOVERY_SCHEMA_VERSION,
                 }
             )
             return

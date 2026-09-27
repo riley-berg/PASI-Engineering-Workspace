@@ -8,7 +8,8 @@
     "verify:extension": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify_extension_deployment.ps1",
     "bridge:run": "bash scripts/run_bridge.sh",
     "bridge:verify": "python scripts/verify_bridge.py",
-    "bridge:token": "python scripts/provision_bridge_token.py"
+    "bridge:token": "python scripts/provision_bridge_token.py",
+    "test:extension": "node --test tests/native_extension_runtime.test.js"
   },
   "devDependencies": {
     "typescript": "7.0.2",

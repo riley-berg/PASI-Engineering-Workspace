@@ -828,6 +828,7 @@ class BridgeState:
                 "queue_size": queue_size,
                 "history_size": len(queue),
                 "counts": counts,
+                "runtime_error_observation_priority": 200,
             }
 
     def _persist_verified_response_observation(

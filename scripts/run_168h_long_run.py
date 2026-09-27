@@ -618,69 +618,11 @@ class TelemetrySampler:
         self.stop_event.set()
         self.thread.join(timeout=5)
 
-    def capture(self) -> None:
-        operation_id = self.operation_id_getter()
-        try:
-            health = browser_health(self.client)
-            browser_status = (
-                "healthy"
-                if health.get("native_controller") is True
-                and str(health.get("chat_url") or "").startswith(
-                    "https://chatgpt.com/c/"
-                )
-                else "unhealthy"
-            )
-            heartbeat_age = health.get("heartbeat_age")
-            if not isinstance(heartbeat_age, (int, float)):
-                heartbeat_age = health.get("heartbeat_age_seconds")
-            if not isinstance(heartbeat_age, (int, float)):
-                heartbeat_age = 999999.0
-
-            self.evidence["health"]["samples"].append(
-                {
-                    "timestamp": utc_now(),
-                    "bridge_status": "ok",
-                    "browser_status": browser_status,
-                    "heartbeat_age_seconds": float(heartbeat_age),
-                    "operation_id": operation_id,
-                    "phase": str(health.get("phase") or ""),
-                }
-            )
-
-            if browser_status != "healthy":
-                self.evidence["health"]["failure_count"] += 1
-        except Exception as exc:
-            self.evidence["health"]["failure_count"] += 1
-            self.evidence["health"]["samples"].append(
-                {
-                    "timestamp": utc_now(),
-                    "bridge_status": "error",
-                    "browser_status": "error",
-                    "heartbeat_age_seconds": 999999.0,
-                    "operation_id": operation_id,
-                    "phase": "health_error",
-                    "error": str(exc),
-                }
-            )
-
-        try:
-            self.evidence["resources"]["samples"].append(
-                self.resource_sampler.sample()
-            )
-        except Exception as exc:
-            self.evidence["resources"]["sampling_failures"] += 1
-            self.evidence["resources"]["sampling_errors"].append(
-                {"timestamp": utc_now(), "error": str(exc)}
-            )
-
     def _run(self) -> None:
         next_health = time.monotonic()
         next_resource = time.monotonic()
         while not self.stop_event.is_set():
             now = time.monotonic()
-            if now >= next_health:
-                self.capture_health()
-                next_health = now + HEALTH_INTERVAL_SECONDS
             captured = False
             if now >= next_health:
                 self.capture_health()
@@ -748,10 +690,6 @@ class TelemetrySampler:
             self.evidence["resources"]["sampling_errors"].append(
                 {"timestamp": utc_now(), "error": str(exc)}
             )
-
-    def capture(self) -> None:
-        self.capture_health()
-        self.capture_resource()
 
 
 def recovery_phases(operation_state: dict[str, Any]) -> list[str]:
@@ -1264,7 +1202,12 @@ def main() -> int:
             has_recovery_events = isinstance(recovery_events, list) and bool(recovery_events)
 
             if planned_recovery or has_recovery_events:
-                recovery_record = validate_recovery(final, operation_id=operation_id)
+                recovery_record = validate_recovery(
+                    final,
+                    operation_id=operation_id,
+                    controlled_probe=planned_recovery,
+                )
+                assert recovery_record is not None
                 recovery_number = len(evidence["recoveries"]) + 1
                 recovery_record["recovery_id"] = f"{run_id}-recovery-{recovery_number:02d}"
                 recovery_record["planned"] = planned_recovery

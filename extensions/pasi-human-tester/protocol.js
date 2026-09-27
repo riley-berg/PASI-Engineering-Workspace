@@ -12,7 +12,8 @@
     "wait_ms",
     "reload",
     "screenshot",
-    "api_get_json"
+    "api_get_json",
+    "runtime_control"
   ]);
 
   function originOf(url) {
@@ -39,6 +40,9 @@
     }
     if (step.selector !== undefined && String(step.selector).length > 1000) {
       throw new TypeError("selector exceeds configured bound");
+    }
+    if (step.action === "runtime_control" && !["start","stop","retry","recover"].includes(step.control_action)) {
+      throw new TypeError("invalid runtime control action");
     }
     if (step.timeout_ms !== undefined) {
       const timeout = Number(step.timeout_ms);

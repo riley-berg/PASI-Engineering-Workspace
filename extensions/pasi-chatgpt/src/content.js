@@ -1621,6 +1621,25 @@
                 payload.next_operation.__pasi_baseline_fingerprint = fingerprintFromText(responseText);
               }
             }
+            // Publish a fresh conversation signature before the completion
+            // acknowledgement returns to the acceptance runner. The periodic
+            // heartbeat can lag by several seconds, which is too stale for
+            // exact +1/+1 M1 handoff verification.
+            await reportObservation('chatgpt_state', {
+              chat_url: chatUrl(),
+              conversation_context_exhausted: contextExhausted(),
+              chat_exhausted: contextExhausted(),
+              provider_usage_limited: usageLimited(),
+              github_attached: githubAttached,
+              reasoning_mode: reasoningMode,
+              reasoning_capability: reasoningMode === 'unavailable'
+                ? 'unavailable'
+                : (thinkingEnabled() === true ? 'available' : 'unknown'),
+              conversation_signature: conversationSignature(),
+              active_operation_id: operationId,
+              native_controller: true
+            }).catch(() => {});
+
             setTimeout(publishResponseTelemetry, RESPONSE_TELEMETRY_DEFER_MS);
             return payload;
           } catch (_) {

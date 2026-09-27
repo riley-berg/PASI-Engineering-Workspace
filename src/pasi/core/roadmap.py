@@ -139,6 +139,13 @@ class RoadmapTask:
                 item_limit=1024,
             ),
             parent_task_id=str(value.get("parent_task_id", "")),
+            source_issue_number=(
+                int(value["source_issue_number"])
+                if value.get("source_issue_number") is not None
+                else None
+            ),
+            source_url=str(value.get("source_url", "")),
+            source_title=str(value.get("source_title", "")),
             status=TaskStatus(value.get("status", TaskStatus.PLANNED.value)),
             revision=int(value.get("revision", 0)),
         )

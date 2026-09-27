@@ -1,4 +1,5 @@
 from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
+from .cross_run_learning import CrossRunLearning, LearningPromotionError, LearningProposal
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
 from .memory_compaction import CompactionError, CompactionGroup, MemoryCompactor
@@ -42,6 +43,9 @@ __all__ = [
     "BoundedRepairController",
     "DeterministicRecoveryClassifier",
     "ChildTaskGenerationError",
+    "CrossRunLearning",
+    "LearningPromotionError",
+    "LearningProposal",
     "DuplicateMemory",
     "MemoryError",
     "MemoryNotFound",

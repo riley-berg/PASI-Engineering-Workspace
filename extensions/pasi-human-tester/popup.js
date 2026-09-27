@@ -1,5 +1,5 @@
-async function loadSuite() {
-  const response = await fetch(chrome.runtime.getURL("suites/p0-smoke-v1.json"));
+async function loadSuite(filename) {
+  const response = await fetch(chrome.runtime.getURL("suites/" + filename));
   if (!response.ok) throw new Error("failed to load suite");
   return await response.json();
 }
@@ -20,7 +20,7 @@ document.getElementById("run").addEventListener("click", async () => {
     const controlToken = document.getElementById("control-token").value;
     if (!origin) throw new Error("target origin is required");
     if (!/^[0-9a-f]{40}$/.test(codeHead)) throw new Error("code head must be a 40-character SHA");
-    const suite = await loadSuite();
+    const suite = await loadSuite(document.getElementById("suite").value);
     await requestOriginPermission(origin);
     const response = await chrome.runtime.sendMessage({
       type: "pasi-human-test-run-suite",

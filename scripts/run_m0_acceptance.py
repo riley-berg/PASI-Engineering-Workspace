@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
@@ -172,33 +173,37 @@ def build_runtime_evidence(
     recovered_operation_id = str(
         (retry_event or {}).get("operation_id") or operation_id
     )
+    connection_recovery = None
+    if (
+        connection_error_event is not None
+        and retry_event is not None
+        and recovered_operation_id == operation_id
+    ):
+        connection_recovery = {
+            "connection_loss_detected": True,
+            "response_stopped_on_loss": True,
+            "checkpoint_preserved": True,
+            "resumed_after_reconnect": True,
+            "same_operation_resumed": True,
+            "operation_id": recovered_operation_id,
+            "resume_phase": str(
+                connection_error_event.get("resume_phase")
+                or connection_error_event.get("recovery_reason")
+                or "connection_recovery"
+            ),
+            "source": str(
+                connection_error_event.get("recovery_source")
+                or retry_event.get("recovery_source")
+                or "browser_recovery"
+            ),
+        }
     return {
         "fresh_chat_created_after_usage": fresh_chat_created,
         "fresh_chat_creation_reason": (
             "usage_limit" if fresh_chat_created else ""
         ),
         "thinking_enabled": health_data.get("thinking_enabled") is True,
-        "connection_recovery": {
-            "connection_loss_detected": connection_error_event is not None,
-            "response_stopped_on_loss": connection_error_event is not None,
-            "checkpoint_preserved": connection_error_event is not None,
-            "resumed_after_reconnect": retry_event is not None,
-            "same_operation_resumed": (
-                retry_event is not None
-                and recovered_operation_id == operation_id
-            ),
-            "operation_id": recovered_operation_id,
-            "resume_phase": str(
-                (connection_error_event or {}).get("resume_phase")
-                or (connection_error_event or {}).get("recovery_reason")
-                or "connection_recovery"
-            ),
-            "source": str(
-                (connection_error_event or {}).get("recovery_source")
-                or (retry_event or {}).get("recovery_source")
-                or "browser_recovery"
-            ),
-        },
+        "connection_recovery": connection_recovery,
     }
 
 
@@ -253,6 +258,17 @@ def wait_for_real_operation(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Run one real PASI M0 operation and record live browser evidence."
+    )
+    parser.add_argument(
+        "--controlled-recovery-probe",
+        action="store_true",
+        help="Inject the deterministic native recovery path for targeted recovery testing.",
+    )
+    args = parser.parse_args()
+    controlled_recovery_probe = bool(args.controlled_recovery_probe)
+
     started_wall = now_iso()
     started_at = time.time()
     result: dict = {
@@ -262,6 +278,7 @@ def main() -> int:
         "recovery_defaults_observation": None,
         "acceptance": None,
         "status": "FAIL",
+        "controlled_recovery_probe": controlled_recovery_probe,
     }
 
     try:
@@ -317,6 +334,8 @@ def main() -> int:
             "The native controller will ensure Thinking is enabled; "
             "if it is already enabled it will send the prompt without changing it."
         )
+        if controlled_recovery_probe:
+            print("Controlled recovery probe enabled for this M0 run.")
         print("Waiting for the real authenticated ChatGPT operation to finish...")
 
         prompt_result = queue_operation(
@@ -324,7 +343,7 @@ def main() -> int:
             prompt,
             f"m0-live:{run_id}:prompt",
             ["PASI_RESULT_STATUS: complete"],
-            m0_recovery_probe=True,
+            m0_recovery_probe=controlled_recovery_probe,
         )
         operation_id = str(
             ((prompt_result.get("operation") or {}).get("operation_id") or "")
@@ -340,7 +359,7 @@ def main() -> int:
         result["operation_id"] = operation_id
         result["fresh_chat_created_after_usage"] = create_fresh_chat
         result["thinking_enabled"] = health_data.get("thinking_enabled") is True
-        result["controlled_recovery_probe"] = True
+        result["controlled_recovery_probe"] = controlled_recovery_probe
         if runtime_error is not None:
             result["recovery_defaults_error"] = True
             result["recovery_defaults_observation"] = runtime_error

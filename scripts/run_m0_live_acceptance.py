@@ -72,7 +72,6 @@ def main() -> int:
             verified_task_id=response.task_id,
             evidence=f"{response.evidence}\ncommit={commit}\nclean_worktree=true",
         )
-        progression.save(progression_path)
         if receipt.next_task_id and receipt.next_prompt:
             evidence_payload = json.loads(evidence.read_text(encoding="utf-8"))
             evidence_payload["next_task_id"] = receipt.next_task_id
@@ -85,16 +84,17 @@ def main() -> int:
                 json.dumps(evidence_payload, indent=2) + "\n",
                 encoding="utf-8",
             )
+        persistent_evidence = persist_evidence(
+            evidence,
+            REPO_ROOT / ".runtime" / "acceptance" / "m0-live.json",
+        )
+        progression.save(progression_path)
         print(
             "M0 PASS: authenticated response -> contract parsing -> patch application -> "
             "canonical validation -> commit -> clean worktree"
         )
         print(f"task_id={response.task_id}")
         print(f"commit={commit}")
-        persistent_evidence = persist_evidence(
-            evidence,
-            REPO_ROOT / ".runtime" / "acceptance" / "m0-live.json",
-        )
         print(f"evidence={persistent_evidence}")
         if receipt.next_task_id and receipt.next_prompt:
             print(f"next_task={receipt.next_task_id}")

@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import subprocess
 
 
 def test_engineering_workspace_uses_pasi_chatgpt_handoff():
@@ -80,3 +81,5 @@ def test_p0_4_supervisor_is_restart_safe():
     assert "PASI_168H_MAX_RESTARTS" in source
     assert "preserving run state and restarting" in source
     assert "pasi_168h_acceptance.py" in source
+    result = subprocess.run(["bash", "-n", str(root / "scripts" / "run_p0_4_168h.sh")], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr

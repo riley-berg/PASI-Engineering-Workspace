@@ -22,3 +22,11 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
     assert "Tampermonkey" in readme
     assert "does not depend on Tampermonkey or Greasemonkey" in readme
     assert "CONTROLLER_VERSION = '2.4.11'" in content.read_text(encoding="utf-8")
+
+
+def test_computer_use_package_imports_without_historical_modules():
+    from automation.computer_use.capability_gateway import CapabilityGateway
+    from automation.computer_use.local_access import LocalAccessBroker
+
+    assert CapabilityGateway is not None
+    assert LocalAccessBroker is not None

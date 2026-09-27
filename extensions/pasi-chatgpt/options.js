@@ -156,7 +156,7 @@
         await refresh();
       };
       card.querySelector('[data-action="edit"]').onclick = () => {
-        window.open("editor.html?id=" + encodeURIComponent(script.id), "_blank");
+        void chrome.tabs.create({url: chrome.runtime.getURL("editor.html?id=" + encodeURIComponent(script.id))});
       };
       card.querySelector('[data-action="host"]').onclick = async () => {
         await requestHostAccess(script);

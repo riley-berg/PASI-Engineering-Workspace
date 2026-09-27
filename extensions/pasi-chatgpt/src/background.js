@@ -1,5 +1,5 @@
-try { importScripts("src/vendor/typescript.js"); } catch (_) {}
-importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/userscript_backup.js", "src/userscript_dnr.js", "src/userscript_install_queue.js", "src/userscript_vcs.js", "src/userscript_compiler.js", "src/userscript_cloud.js", "src/background-userscripts.js", "src/background-api.js");
+try { importScripts("vendor/typescript.js"); } catch (_) {}
+importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js");
 
 (() => {
   "use strict";

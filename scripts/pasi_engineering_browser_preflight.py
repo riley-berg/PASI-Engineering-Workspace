@@ -1,35 +1,170 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json,os,re,secrets,stat,subprocess,sys,time
+
+import json
+import os
+import re
+import secrets
+import stat
+import subprocess
+import sys
+import time
 from pathlib import Path
-from urllib.request import Request,urlopen
-def token_path():return Path(os.environ.get("PASI_BRIDGE_TOKEN_FILE",str(Path.home()/".pasi"/"bridge-token"))).expanduser()
-def token():
-    p=token_path();p.parent.mkdir(parents=True,exist_ok=True)
-    if not p.exists():p.write_text(secrets.token_urlsafe(48)+"\n",encoding="utf-8");p.chmod(stat.S_IRUSR|stat.S_IWUSR)
-    return p.read_text(encoding="utf-8").strip()
-def get(path,t):
-    with urlopen(Request("http://127.0.0.1:8765"+path,headers={"Authorization":f"Bearer {t}"}),timeout=3) as r:return json.loads(r.read(2000000).decode("utf-8"))
-def healthy(t):
-    try:return isinstance(get("/health",t),dict)
-    except Exception:return False
-def version(root):
-    m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",(root/"content.js").read_text(encoding="utf-8"));return m.group(1) if m else None
-def main():
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+
+def token_path() -> Path:
+    return Path(
+        os.environ.get(
+            "PASI_BRIDGE_TOKEN_FILE",
+            str(Path.home() / ".pasi" / "bridge-token"),
+        )
+    ).expanduser()
+
+
+def token() -> str:
+    path = token_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(
+            secrets.token_urlsafe(48) + "\n",
+            encoding="utf-8",
+        )
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    return path.read_text(encoding="utf-8").strip()
+
+
+def get(path: str, bridge_token: str) -> dict:
+    request = Request(
+        "http://127.0.0.1:8765" + path,
+        headers={"Authorization": f"Bearer {bridge_token}"},
+    )
+    with urlopen(request, timeout=3) as response:
+        return json.loads(response.read(2_000_000).decode("utf-8"))
+
+
+def healthy() -> bool:
+    try:
+        return isinstance(get("/health", ""), dict)
+    except Exception:
+        return False
+
+
+def authorized(bridge_token: str) -> bool:
+    try:
+        return isinstance(get("/status", bridge_token), dict)
+    except HTTPError as exc:
+        if exc.code == 401:
+            return False
+        return False
+    except Exception:
+        return False
+
+
+def version(root: Path) -> str | None:
+    match = re.search(
+        r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
+        (root / "content.js").read_text(encoding="utf-8"),
+    )
+    return match.group(1).strip() if match else None
+
+
+def start_bridge(runtime: Path, bridge_token: str) -> None:
+    log = (runtime / "bridge.log").open("a", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PASI_BRIDGE_TOKEN": bridge_token,
+        "PASI_RUNTIME_DIR": str(runtime),
+    }
+    process = subprocess.Popen(
+        [sys.executable, "-m", "automation.orchestrator.bridge"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        stdout=log,
+        stderr=log,
+        start_new_session=True,
+    )
+    (runtime / "bridge.pid").write_text(
+        str(process.pid) + "\n",
+        encoding="utf-8",
+    )
+    log.close()
+
+
+def main() -> None:
     import argparse
-    p=argparse.ArgumentParser();p.add_argument("--extension-root",type=Path,required=True);a=p.parse_args()
-    root=a.extension_root.expanduser().resolve();m=json.loads((root/"manifest.json").read_text(encoding="utf-8"))
-    if m.get("manifest_version")!=3:raise SystemExit("MV3 extension required")
-    t=token();runtime=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve();runtime.mkdir(parents=True,exist_ok=True)
-    if not healthy(t):
-        log=(runtime/"bridge.log").open("a",encoding="utf-8");env={**os.environ,"PASI_BRIDGE_TOKEN":t,"PASI_RUNTIME_DIR":str(runtime)}
-        pr=subprocess.Popen([sys.executable,"-m","automation.orchestrator.bridge"],cwd=Path(__file__).resolve().parents[1],env=env,stdout=log,stderr=log,start_new_session=True);(runtime/"bridge.pid").write_text(str(pr.pid)+"\n",encoding="utf-8");log.close()
-    deadline=time.monotonic()+20
-    while time.monotonic()<deadline and not healthy(t):time.sleep(.5)
-    if not healthy(t):raise SystemExit(f"bridge did not become healthy: {runtime/'bridge.log'}")
-    (root/".bridge-token").write_text(t+"\n",encoding="utf-8")
-    obs=get("/browser/health",t);o=obs.get("observation",{});d=o.get("data",{}) if isinstance(o,dict) else {};expected=version(root)
-    if d.get("kind") not in {"chatgpt_health","chatgpt_state"}:raise SystemExit("browser controller health unavailable")
-    if expected and d.get("controller_version")!=expected:raise SystemExit("controller version mismatch")
-    print(json.dumps({"bridge":"healthy","extension_root":str(root),"controller_version":expected,"browser":d},indent=2))
-if __name__=="__main__":main()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--extension-root", type=Path, required=True)
+    args = parser.parse_args()
+
+    root = args.extension_root.expanduser().resolve()
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("manifest_version") != 3:
+        raise SystemExit("Engineering Workspace ChatGPT controller must be MV3")
+
+    bridge_token = token()
+    runtime = Path(
+        os.environ.get(
+            "PASI_ENGINEERING_RUNTIME_DIR",
+            str(Path.home() / ".pasi" / "engineering-workspace-168h" / "runtime"),
+        )
+    ).expanduser().resolve()
+    runtime.mkdir(parents=True, exist_ok=True)
+
+    if healthy() and not authorized(bridge_token):
+        raise SystemExit(
+            "127.0.0.1:8765 is already serving a PASI bridge that rejects the "
+            "Engineering Workspace bridge token. Stop the stale bridge process "
+            "(do not rotate credentials behind a live bridge), then rerun this "
+            "preflight."
+        )
+
+    if not authorized(bridge_token):
+        start_bridge(runtime, bridge_token)
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline and not authorized(bridge_token):
+        time.sleep(0.5)
+
+    if not authorized(bridge_token):
+        raise SystemExit(
+            f"Engineering Workspace PASI bridge did not become authorized; inspect "
+            f"{runtime / 'bridge.log'}"
+        )
+
+    extension_token = root / ".bridge-token"
+    extension_token.write_text(bridge_token + "\n", encoding="utf-8")
+    extension_token.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+    observation = get("/browser/health", bridge_token)
+    observation = observation.get("observation", {})
+    data = observation.get("data", {}) if isinstance(observation, dict) else {}
+    expected = version(root)
+    if data.get("kind") not in {"chatgpt_health", "chatgpt_state"}:
+        raise SystemExit(
+            "Engineering Workspace ChatGPT controller is not reporting a usable health state"
+        )
+    if expected and data.get("controller_version") != expected:
+        raise SystemExit(
+            f"controller version mismatch: extension={expected!r}, "
+            f"browser={data.get('controller_version')!r}"
+        )
+
+    print(
+        json.dumps(
+            {
+                "bridge": "healthy",
+                "authorized": True,
+                "extension_root": str(root),
+                "controller_version": expected,
+                "browser": data,
+            },
+            indent=2,
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()

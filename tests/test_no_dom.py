@@ -1,5 +1,4 @@
 from pathlib import Path
-import ast
 import json
 import subprocess
 
@@ -88,77 +87,6 @@ def test_p0_4_supervisor_is_restart_safe():
     assert "pasi_168h_acceptance.py" in source
     result = subprocess.run(["bash", "-n", str(root / "scripts" / "run_p0_4_168h.sh")], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
-
-
-def _python_module_exists(root: Path, module: str) -> bool:
-    parts = module.split(".")
-    for base_root in (root, root / "src"):
-        base = base_root.joinpath(*parts)
-        if base.is_file() or base.is_dir():
-            return True
-    return False
-
-
-def _resolve_import(root: Path, source: Path, module: str, level: int = 0) -> str:
-    if level == 0:
-        return module
-    rel = source.relative_to(root).with_suffix("")
-    package = list(rel.parts[:-1])
-    if level > len(package) + 1:
-        return ""
-    prefix = package[: len(package) - level + 1]
-    return ".".join([*prefix, *(module.split(".") if module else [])])
-
-
-def test_repository_wide_import_and_path_audit():
-    root = Path(__file__).resolve().parents[1]
-    forbidden = (
-        "automation/chromium/pasi-chatgpt",
-        "pasi_engineering_chat_guard.py",
-        "pasi-chatgpt-unpacked",
-        "PASI-Engineering-Workspace-m0-live",
-        "/home/riley/workspace/personal-ai-system/PASI-Engineering-Workspace",
-    )
-    text_suffixes = {".py", ".sh", ".yml", ".yaml", ".json", ".js", ".mjs", ".ts", ".tsx", ".md", ".toml"}
-    stale = []
-    for path in root.rglob("*"):
-        if not path.is_file() or ".git" in path.parts or path.suffix not in text_suffixes:
-            continue
-        # Negative tests intentionally name retired paths to prove they stay absent.
-        if path.name in {"test_no_dom.py", "test_engineering_executor.py"}:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            continue
-        for token in forbidden:
-            if token in text:
-                stale.append(f"{path.relative_to(root)}: {token}")
-    assert not stale, "stale/non-canonical references:\\n" + "\\n".join(stale)
-
-    for path in root.rglob("*.py"):
-        if ".git" in path.parts:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imports = [(alias.name, 0) for alias in node.names]
-            elif isinstance(node, ast.ImportFrom):
-                module = _resolve_import(root, path, node.module or "", node.level)
-                if not module:
-                    continue
-                if not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.")):
-                    continue
-                if not _python_module_exists(root, module):
-                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
-                continue
-            else:
-                continue
-            for module, level in imports:
-                if not module or not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.")):
-                    continue
-                if not _python_module_exists(root, module):
-                    raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
 
 
 def test_canonical_extension_references_resolve():

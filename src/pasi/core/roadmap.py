@@ -92,6 +92,9 @@ class RoadmapTask:
     acceptance_requirements: tuple[str, ...] = ()
     evidence_requirements: tuple[str, ...] = ()
     parent_task_id: str = ""
+    source_issue_number: int | None = None
+    source_url: str = ""
+    source_title: str = ""
     status: TaskStatus = TaskStatus.PLANNED
     revision: int = 0
 
@@ -107,6 +110,15 @@ class RoadmapTask:
             raise RoadmapError(f"task {self.id} requires evidence_requirements")
         if self.parent_task_id and self.parent_task_id == self.id:
             raise RoadmapError("task cannot be its own parent")
+        if self.source_issue_number is not None:
+            if not isinstance(self.source_issue_number, int) or self.source_issue_number <= 0:
+                raise RoadmapError("source_issue_number must be a positive integer or null")
+            if not self.source_url.strip() or not self.source_title.strip():
+                raise RoadmapError(
+                    f"task {self.id} source metadata requires source_url and source_title"
+                )
+        if self.source_url and not self.source_title:
+            raise RoadmapError("source_title is required when source_url is present")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -117,6 +129,9 @@ class RoadmapTask:
             "acceptance_requirements": list(self.acceptance_requirements),
             "evidence_requirements": list(self.evidence_requirements),
             "parent_task_id": self.parent_task_id,
+            "source_issue_number": self.source_issue_number,
+            "source_url": self.source_url,
+            "source_title": self.source_title,
             "status": self.status.value,
             "revision": self.revision,
         }

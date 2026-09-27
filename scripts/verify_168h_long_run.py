@@ -265,9 +265,10 @@ def verify_recoveries(evidence: dict[str, Any]) -> None:
         required = {
             "connection_lost",
             "ready_for_retry",
-            "controlled_probe_resume",
             "retry_resumed",
         }
+        if item.get("planned") is True:
+            required.add("controlled_probe_resume")
         if not required.issubset(set(phases)):
             raise VerificationError("recovery phase chain is incomplete")
         if item.get("planned") is False and item.get("controlled_probe") not in {False, None}:

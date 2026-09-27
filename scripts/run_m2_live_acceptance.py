@@ -303,7 +303,7 @@ def main() -> int:
         health = client.get("/health")
         if health.get("status") != "ok":
             raise M2LiveError(f"bridge health is not ok: {health}")
-        if health.get("m1_live_acceptance_checkpoint_schema_version") != M2_CHECKPOINT_SCHEMA_VERSION:
+        if health.get("m1_checkpoint_schema_version") != M2_CHECKPOINT_SCHEMA_VERSION:
             raise M2LiveError(
                 "bridge checkpoint schema mismatch; expected "
                 f"{M2_CHECKPOINT_SCHEMA_VERSION}"

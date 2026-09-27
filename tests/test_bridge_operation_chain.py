@@ -53,6 +53,7 @@ def test_chain_sequence_requires_completed_immediate_predecessor(tmp_path):
     assert second.chain_id == "chain-1"
     assert second.sequence_index == 2
     assert second.predecessor_operation_id == first.operation_id
+    assert second.predecessor_completed_at_ms is None
 
     claimed_second = state.claim_operation(second.operation_id)
     assert claimed_second is not None
@@ -146,3 +147,45 @@ def test_complete_does_not_claim_an_unrelated_queued_operation(tmp_path):
     unrelated_state = state.get_operation(unrelated.operation_id)
     assert unrelated_state is not None
     assert unrelated_state["status"] == "queued"
+
+
+def test_chain_persists_predecessor_completion_timing_for_next_operation(tmp_path):
+    state = make_state(tmp_path)
+
+    first = state.queue_operation(
+        "prompt",
+        "first",
+        idempotency_key="timed-first",
+        chain_id="timed-chain",
+        sequence_index=1,
+    )
+    state.claim_operation(first.operation_id)
+    completed, _ = state.complete_operation_and_claim_next(
+        first.operation_id,
+        response_text="first",
+        response_text_available=True,
+        timing={
+            "injected_at_ms": 1000,
+            "ack_at_ms": 1100,
+            "generation_start_ms": 1200,
+            "completed_at_ms": 1500,
+            "user_messages_added": 1,
+            "ack_verified": True,
+            "submission_via": "verified",
+        },
+    )
+    assert completed is not None
+
+    second = state.queue_operation(
+        "prompt",
+        "second",
+        idempotency_key="timed-second",
+        chain_id="timed-chain",
+        sequence_index=2,
+        predecessor_operation_id=first.operation_id,
+    )
+    assert second.predecessor_completed_at_ms == 1500
+
+    queued = state.get_operation(second.operation_id)
+    assert queued is not None
+    assert queued["predecessor_completed_at_ms"] == 1500

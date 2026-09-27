@@ -31,7 +31,11 @@ class TestExtensionLifecycleSafety(unittest.TestCase):
         self.assertIn("const BRIDGE = 'http://127.0.0.1:8765';", self.background)
 
     def test_completion_is_durable_before_next_prompt(self) -> None:
-        self.assertIn("finishOperation(operation.operation_id, response, true, browserTiming, signatureBaseline)", self.content)
+        self.assertIn("const completion = await finishOperation(", self.content)
+        self.assertIn("operation.operation_id,", self.content)
+        self.assertIn("response,", self.content)
+        self.assertIn("browserTiming,", self.content)
+        self.assertIn("signatureBaseline", self.content)
         self.assertIn("next_operation", self.content)
         self.assertIn("scheduleImmediateOperation(chainedOperation)", self.content)
         self.assertIn("'POST /chat/finished'", self.background)

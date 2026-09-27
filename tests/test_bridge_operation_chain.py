@@ -189,3 +189,26 @@ def test_chain_persists_predecessor_completion_timing_for_next_operation(tmp_pat
     queued = state.get_operation(second.operation_id)
     assert queued is not None
     assert queued["predecessor_completed_at_ms"] == 1500
+
+
+def test_m2_recovery_probe_is_only_valid_for_prompt_operations(tmp_path):
+    state = make_state(tmp_path)
+
+    with pytest.raises(ValueError, match="m2_recovery_probe is only permitted"):
+        state.queue_operation(
+            "new_chat",
+            "",
+            idempotency_key="m2-new-chat",
+            m2_recovery_probe=True,
+        )
+
+    operation = state.queue_operation(
+        "prompt",
+        "reply with marker",
+        idempotency_key="m2-prompt",
+        m2_recovery_probe=True,
+    )
+    assert operation.m2_recovery_probe is True
+    persisted = state.get_operation(operation.operation_id)
+    assert persisted is not None
+    assert persisted["m2_recovery_probe"] is True

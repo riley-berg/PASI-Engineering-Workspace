@@ -13,6 +13,8 @@
     "browser_name":{"type":"string","minLength":1},
     "browser_version":{"type":"string","minLength":1},
     "target_origin":{"type":"string","format":"uri"},
+    "extension_version":{"type":"string","minLength":1},
+    "execution_source":{"const":"mv3-human-test-extension"},
     "started_at":{"type":"string","format":"date-time"},
     "ended_at":{"type":"string","format":"date-time"},
     "status":{"enum":["PASS","FAIL"]},

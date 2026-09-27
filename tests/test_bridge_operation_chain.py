@@ -212,3 +212,11 @@ def test_m2_recovery_probe_is_only_valid_for_prompt_operations(tmp_path):
     persisted = state.get_operation(operation.operation_id)
     assert persisted is not None
     assert persisted["m2_recovery_probe"] is True
+
+
+def test_m2_controlled_connection_loss_is_retryable():
+    from pasi_bridge.bridge import BridgeState
+
+    assert BridgeState._is_transient_browser_error(
+        "PASI_NATIVE: controlled/observed connection loss interrupted generation; current chat preserved for bounded retry."
+    )

@@ -92,8 +92,11 @@ def test_p0_4_supervisor_is_restart_safe():
 
 def _python_module_exists(root: Path, module: str) -> bool:
     parts = module.split(".")
-    base = root.joinpath(*parts)
-    return base.is_file() or base.is_dir()
+    for base_root in (root, root / "src"):
+        base = base_root.joinpath(*parts)
+        if base.is_file() or base.is_dir():
+            return True
+    return False
 
 
 def _resolve_import(root: Path, source: Path, module: str, level: int = 0) -> str:

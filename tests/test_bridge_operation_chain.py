@@ -108,7 +108,8 @@ def test_claim_next_skips_a_chain_item_whose_predecessor_is_not_complete(tmp_pat
         "sequence_index": 2,
         "predecessor_operation_id": "op-predecessor",
     }
-    state._save_queue([predecessor, blocked])
+    with state.lock:
+        state._save_queue([predecessor, blocked])
 
     assert state.claim_next_operation() is None
     assert state.get_operation("op-blocked")["status"] == "queued"

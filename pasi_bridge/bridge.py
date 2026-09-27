@@ -2009,7 +2009,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         *args: Any,
     ) -> None:
         """Keep successful request traffic out of the long-lived bridge log."""
-        message = format_string % args
+        message = format % args
         if not _bridge_access_log_should_emit(message):
             return
         print("[Bridge] " + message, flush=True)

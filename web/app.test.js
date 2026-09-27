@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildViewModel, healthTone, normalizeFailures, normalizeLedger, normalizeRecoveryDecision } from "./app.js";
+import { buildViewModel, healthTone, normalizeFailures, normalizeLedger, normalizeNotifications, normalizeRecoveryDecision } from "./app.js";
 
 test("health tone maps authoritative runtime states", () => {
   assert.equal(healthTone("connected"), "success");
@@ -125,7 +125,6 @@ test("ledger and failure normalizers preserve provenance and affected-operation 
 
 
 test("notification normalizer keeps durable identity and acknowledgement revision", () => {
-  const { normalizeNotifications } = await import("./app.js");
   const items = normalizeNotifications([
     {
       notification_id: "ntf-1",

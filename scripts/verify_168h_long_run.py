@@ -398,6 +398,8 @@ def verify_automation(evidence: dict[str, Any]) -> None:
         event = as_dict(raw, f"fresh_chat_events[{index}]")
         if event.get("reason") not in POLICY["fresh_chat_allowed_reasons"]:
             raise VerificationError("unauthorized fresh-chat reason")
+        if event.get("thinking_verified_before") is not True:
+            raise VerificationError("Thinking not verified before fresh chat")
         if event.get("thinking_verified_after") is not True:
             raise VerificationError("Thinking not verified after fresh chat")
 

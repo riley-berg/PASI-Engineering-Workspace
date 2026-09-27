@@ -250,6 +250,7 @@ class BridgeState:
         prompt: str,
         idempotency_key: str | None = None,
         completion_markers: list[str] | None = None,
+        m0_recovery_probe: bool = False,
     ) -> ChatOperation:
         if completion_markers is not None:
             if (
@@ -274,6 +275,13 @@ class BridgeState:
             if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > MAX_IDEMPOTENCY_KEY_CHARS:
                 raise ValueError("idempotency_key must be a nonblank bounded string")
 
+        if not isinstance(m0_recovery_probe, bool):
+            raise ValueError("m0_recovery_probe must be a boolean")
+        if m0_recovery_probe and (
+            operation_type != "prompt" or "PASI TASK P0.1" not in prompt
+        ):
+            raise ValueError("m0_recovery_probe is only permitted for the P0.1 prompt operation")
+
         with self.lock:
             queue = self._load_queue()
             if idempotency_key is not None:
@@ -293,6 +301,7 @@ class BridgeState:
                 prompt=prompt,
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
+                m0_recovery_probe=m0_recovery_probe,
                 status="queued",
             )
             item = operation.to_dict()
@@ -1605,6 +1614,11 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "idempotency_key must be a nonblank bounded string."}, HTTPStatus.BAD_REQUEST)
             return
 
+        m0_recovery_probe = payload.get("m0_recovery_probe", False)
+        if not isinstance(m0_recovery_probe, bool):
+            self._send_json({"error": "m0_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
+
         if not isinstance(
             operation_type,
             str,
@@ -1647,6 +1661,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 prompt=prompt,
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
+                m0_recovery_probe=m0_recovery_probe,
             )
         )
 

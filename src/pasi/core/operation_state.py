@@ -5,7 +5,12 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
-OPERATION_STATE_SCHEMA_VERSION = 1
+MAX_METADATA_KEYS = 64
+MAX_METADATA_KEY_CHARS = 128
+MAX_METADATA_VALUE_CHARS = 1024
+
+OPERATION_STATE_SCHEMA_VERSION = 2
+SUPPORTED_OPERATION_STATE_SCHEMA_VERSIONS = frozenset({1, 2})
 OPERATION_STATUSES = frozenset({"queued", "claimed", "generating", "completed", "failed"})
 MAX_ID_CHARS = 256
 MAX_PROVIDER_CHARS = 128
@@ -91,6 +96,7 @@ class OperationState:
     pr_number: int | None = None
     failure_signature: str = ""
     recovery_count: int = 0
+    metadata: dict[str, str] = field(default_factory=dict)
 
     created_at: str = field(default_factory=utc_now)
     updated_at: str = field(default_factory=utc_now)
@@ -105,8 +111,31 @@ class OperationState:
         self.status = _bounded_string(self.status, name="status", limit=64, allow_empty=False)
         if self.status not in OPERATION_STATUSES:
             raise InvalidOperationState(f"unsupported operation status: {self.status!r}")
-        if self.schema_version != OPERATION_STATE_SCHEMA_VERSION:
-            raise InvalidOperationState(f"unsupported operation-state schema version: {self.schema_version!r}")
+        if self.schema_version not in SUPPORTED_OPERATION_STATE_SCHEMA_VERSIONS:
+            raise InvalidOperationState(
+                f"unsupported operation-state schema version: {self.schema_version!r}"
+            )
+        if not isinstance(self.metadata, dict):
+            raise InvalidOperationState("metadata must be an object")
+        if len(self.metadata) > MAX_METADATA_KEYS:
+            raise InvalidOperationState(f"metadata exceeds {MAX_METADATA_KEYS} keys")
+        normalized_metadata: dict[str, str] = {}
+        for key, value in self.metadata.items():
+            normalized_key = _bounded_string(
+                key,
+                name="metadata key",
+                limit=MAX_METADATA_KEY_CHARS,
+                allow_empty=False,
+            )
+            normalized_value = _bounded_string(
+                value,
+                name=f"metadata[{normalized_key}]",
+                limit=MAX_METADATA_VALUE_CHARS,
+            )
+            normalized_metadata[normalized_key] = normalized_value
+        self.metadata = normalized_metadata
+        if self.schema_version == 1:
+            self.schema_version = OPERATION_STATE_SCHEMA_VERSION
         if not isinstance(self.state_revision, int) or self.state_revision < 0:
             raise InvalidOperationState("state_revision must be a non-negative integer")
 
@@ -162,6 +191,7 @@ class OperationState:
             "pr_number": value.get("pr_number"),
             "failure_signature": value.get("failure_signature", ""),
             "recovery_count": value.get("recovery_count", 0),
+            "metadata": value.get("metadata", {}),
             "created_at": value.get("created_at", utc_now()),
             "updated_at": value.get("updated_at", utc_now()),
         }
@@ -173,7 +203,7 @@ class OperationState:
             raise InvalidOperationTransition(f"unsupported operation status: {normalized!r}")
         return normalized in _ALLOWED_TRANSITIONS[self.status]
 
-    def transition(self, status: str, *, expected_revision: int | None = None, phase: str | None = None, provider: str | None = None, prompt_digest: str | None = None, response_digest: str | None = None, verification_status: str | None = None, commit_sha: str | None = None, pr_number: int | None = None, failure_signature: str | None = None) -> "OperationState":
+    def transition(self, status: str, *, expected_revision: int | None = None, phase: str | None = None, provider: str | None = None, prompt_digest: str | None = None, response_digest: str | None = None, verification_status: str | None = None, commit_sha: str | None = None, pr_number: int | None = None, failure_signature: str | None = None, metadata: dict[str, str] | None = None) -> "OperationState":
         if expected_revision is not None and expected_revision != self.state_revision:
             raise OperationRevisionConflict(f"expected revision {expected_revision}, current revision {self.state_revision}")
         if not self.can_transition_to(status):
@@ -195,8 +225,8 @@ class OperationState:
         for name, value in (
             ("phase", phase), ("provider", provider), ("prompt_digest", prompt_digest),
             ("response_digest", response_digest), ("verification_status", verification_status),
-            ("commit_sha", commit_sha), ("pr_number", pr_number), ("failure_signature", failure_signature),
+            ("commit_sha", commit_sha), ("pr_number", pr_number), ("failure_signature", failure_signature), ("metadata", metadata),
         ):
             if value is not None:
                 updates[name] = value
-        return replace(self, **updates)
+        return replace(self, schema_version=OPERATION_STATE_SCHEMA_VERSION, **updates)

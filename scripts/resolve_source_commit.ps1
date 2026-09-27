@@ -8,34 +8,24 @@ $ErrorActionPreference = "Stop"
 
 $resolvedRoot = (Resolve-Path $RepoRoot).Path
 
-function Try-NativeGitSha {
-    param([string]$Root)
-
-    $output = & git -C $Root rev-parse HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$output)) {
-        return ([string]$output).Trim()
-    }
-
-    return $null
-}
-
-$gitSha = Try-NativeGitSha -Root $resolvedRoot
-if (-not [string]::IsNullOrWhiteSpace($gitSha)) {
-    Write-Output $gitSha
-    exit 0
-}
-
+# This checkout is operated from WSL. Its .git metadata can be a WSL-linked
+# worktree path that Windows Git cannot resolve, producing "not a git repository:
+# (NULL)". Resolve the source commit through WSL Git instead of invoking native
+# Windows Git on the WSL-backed worktree.
 $wslCommand = Get-Command wsl.exe -ErrorAction SilentlyContinue
-if ($null -ne $wslCommand) {
-    $wslRootOutput = & wsl.exe wslpath -a -u -- "$resolvedRoot" 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$wslRootOutput)) {
-        $wslRoot = ([string]$wslRootOutput).Trim()
-        $wslShaOutput = & wsl.exe git -C "$wslRoot" rev-parse HEAD 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace([string]$wslShaOutput)) {
-            Write-Output ([string]$wslShaOutput).Trim()
-            exit 0
-        }
-    }
+if ($null -eq $wslCommand) {
+    throw "WSL is required to resolve the source commit for this checkout: $resolvedRoot"
 }
 
-throw "Unable to determine source commit SHA for repository: $resolvedRoot. Native Git could not resolve it and WSL Git fallback was unavailable or failed."
+$wslRootOutput = & wsl.exe wslpath -a -u -- "$resolvedRoot" 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslRootOutput)) {
+    throw "Unable to convert repository path to WSL form: $resolvedRoot"
+}
+
+$wslRoot = ([string]$wslRootOutput).Trim()
+$wslShaOutput = & wsl.exe -e git -C "$wslRoot" rev-parse HEAD 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslShaOutput)) {
+    throw "Unable to determine source commit SHA through WSL Git for repository: $resolvedRoot"
+}
+
+Write-Output ([string]$wslShaOutput).Trim()

@@ -63,7 +63,7 @@ class RuntimeAPIService:
                 "certificate": None if certificate is None else certificate.to_dict(),
             }
 
-        if method == "GET" and parsed.path.startsWith("/v1/human-tests/runs/"):
+        if method == "GET" and parsed.path.startswith("/v1/human-tests/runs/"):
             if self.human_tests is None:
                 return HTTPStatus.NOT_FOUND, {"error": "human-test service unavailable"}
             run_id = parsed.path.rsplit("/", 1)[-1]

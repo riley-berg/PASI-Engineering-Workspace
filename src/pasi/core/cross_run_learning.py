@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 
 from pasi.core.memory import MemoryError, MemoryRecord
-from pasi.core.memory_store import SQLiteMemoryStore
+from pasi.core.memory_store import DuplicateMemory, SQLiteMemoryStore
 
 
 class LearningPromotionError(MemoryError):
@@ -92,9 +92,7 @@ class CrossRunLearning:
         )
         try:
             return self.store.create(record)
-        except Exception as exc:
-            if "already" not in str(exc).lower() and "duplicate" not in str(exc).lower():
-                raise
+        except DuplicateMemory:
             existing = self.store.get(memory_id)
             if (
                 existing.scope != record.scope

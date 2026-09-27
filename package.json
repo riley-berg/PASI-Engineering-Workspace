@@ -9,6 +9,7 @@
     "bridge:run": "bash scripts/run_bridge.sh",
     "bridge:verify": "python scripts/verify_bridge.py",
     "bridge:token": "python scripts/provision_bridge_token.py",
+    "acceptance:m0": "python scripts/run_m0_acceptance.py",
     "test:extension": "node --test tests/native_extension_runtime.test.js"
   },
   "devDependencies": {

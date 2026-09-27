@@ -61,6 +61,15 @@ if __name__ == "__main__":
         self.assertIn("await waitForConversationDomReady()", self.source)
         self.assertIn("lastStateReportAt = 0", self.source)
 
+    def test_submit_prompt_fast_paths_preserve_timing_evidence(self) -> None:
+        submit = self.source.split("async function submitPrompt(", 1)[1].split(
+            "function freshCompletionHandoff", 1
+        )[0]
+        self.assertIn("user_messages_added: countNewUserMessages(userMessages(), snapshot)", submit)
+        self.assertIn("ack_verified: via === 'verified'", submit)
+        self.assertIn("submission_via: finalVia", submit)
+        self.assertGreaterEqual(submit.count("timing: {"), 3)
+
     def test_completion_waits_for_exact_dom_turn_before_acknowledgement(self) -> None:
         self.assertIn("async function waitForConversationSignatureDelta(", self.source)
         self.assertIn("targetUser = Number(baseline.user) + 1", self.source)

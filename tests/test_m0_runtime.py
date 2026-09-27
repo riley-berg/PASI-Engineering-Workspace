@@ -26,7 +26,7 @@ def runtime_mapping() -> dict:
     }
 
 
-def test_m0_runtime_evidence_requires_all_live_runtime_guards() -> None:
+def test_m0_runtime_evidence_accepts_full_runtime_evidence() -> None:
     evidence = M0RuntimeEvidence.from_mapping(runtime_mapping())
     assert evidence.fresh_chat_created_after_usage is False
     assert evidence.fresh_chat_creation_reason == ""
@@ -39,12 +39,29 @@ def test_m0_runtime_evidence_requires_all_live_runtime_guards() -> None:
     [
         ("fresh_chat_creation_reason", "usage_limit"),
         ("thinking_enabled", False),
-        ("connection_recovery", {}),
     ],
 )
 def test_m0_runtime_evidence_rejects_missing_live_guards(field: str, value: object) -> None:
     payload = runtime_mapping()
     payload[field] = value
+    with pytest.raises(M0RuntimeError):
+        M0RuntimeEvidence.from_mapping(payload)
+
+
+def test_m0_runtime_evidence_accepts_without_connection_recovery() -> None:
+    payload = runtime_mapping()
+    payload.pop("connection_recovery")
+
+    evidence = M0RuntimeEvidence.from_mapping(payload)
+
+    assert evidence.connection_recovery is None
+    assert evidence.to_dict()["connection_recovery"] is None
+
+
+def test_m0_runtime_evidence_still_validates_recovery_when_present() -> None:
+    payload = runtime_mapping()
+    payload["connection_recovery"] = {}
+
     with pytest.raises(M0RuntimeError):
         M0RuntimeEvidence.from_mapping(payload)
 

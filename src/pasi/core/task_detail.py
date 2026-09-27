@@ -92,13 +92,11 @@ class TaskDetailReadModel:
                 entry.outcome in {"queued", "claimed", "generating"}
                 for entry in self.ledger.list_task(task.id)
             )
-        if self.events is not None:
-            event_count = len(self.events.list(limit=1000, operation_id=None))
-            if history:
-                event_count = sum(
-                    len(self.events.list(operation_id=item["operation_id"], limit=1000))
-                    for item in history
-                )
+        if self.events is not None and history:
+            event_count = sum(
+                len(self.events.list(operation_id=item["operation_id"], limit=1000))
+                for item in history
+            )
 
         return TaskDetail(
             roadmap_id=self.roadmap.roadmap_id,

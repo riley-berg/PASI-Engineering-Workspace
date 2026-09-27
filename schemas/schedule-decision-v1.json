@@ -1,0 +1,46 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/schedule-decision-v1.json",
+  "title":"PASI schedule decision v1",
+  "type":"object",
+  "required":["roadmap_id","roadmap_revision","capacity","scheduled","excluded","created_at"],
+  "properties":{
+    "roadmap_id":{"type":"string","minLength":1},
+    "roadmap_revision":{"type":"integer","minimum":0},
+    "capacity":{
+      "type":"object",
+      "required":["cpu_millicores","memory_mb","time_seconds"],
+      "properties":{
+        "cpu_millicores":{"type":"integer","minimum":1},
+        "memory_mb":{"type":"integer","minimum":1},
+        "time_seconds":{"type":"number","exclusiveMinimum":0}
+      },
+      "additionalProperties":false
+    },
+    "scheduled":{
+      "type":"array",
+      "items":{
+        "type":"object",
+        "required":["task_id","estimate","advisory_priority"],
+        "properties":{
+          "task_id":{"type":"string","minLength":1},
+          "estimate":{
+            "type":"object",
+            "required":["cpu_millicores","memory_mb","time_seconds"],
+            "properties":{
+              "cpu_millicores":{"type":"integer","minimum":1},
+              "memory_mb":{"type":"integer","minimum":1},
+              "time_seconds":{"type":"number","exclusiveMinimum":0}
+            },
+            "additionalProperties":false
+          },
+          "advisory_priority":{"type":"number"}
+        },
+        "additionalProperties":false
+      }
+    },
+    "excluded":{"type":"object","additionalProperties":{"type":"string"}},
+    "created_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

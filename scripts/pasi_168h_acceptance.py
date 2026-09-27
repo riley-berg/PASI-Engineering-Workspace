@@ -114,6 +114,8 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     if not (worktree / ".git").exists():
         git(root, "worktree", "add", "-B", branch, str(worktree), "origin/main", timeout=120)
     elif git(worktree, "branch", "--show-current") != branch:
+        if git(worktree, "status", "--porcelain", check=False):
+            raise RuntimeError("acceptance worktree is not clean")
         result = subprocess.run(
             ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
             cwd=worktree,
@@ -124,10 +126,10 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
         if result.returncode == 0:
             git(worktree, "checkout", branch)
         else:
-            # Smoke mode creates a clean reusable worktree on its own temporary
-            # branch. A subsequent real run uses a fresh timestamped branch, so
-            # create that branch from the worktree's current clean HEAD rather
-            # than failing because the branch does not exist yet.
+            # A reusable acceptance worktree may still point at an older
+            # timestamped branch. New acceptance runs must always start from
+            # the freshly fetched canonical origin/main.
+            git(worktree, "checkout", "--detach", "origin/main")
             git(worktree, "checkout", "-b", branch)
     if git(worktree, "status", "--porcelain", check=False):
         raise RuntimeError("acceptance worktree is not clean")

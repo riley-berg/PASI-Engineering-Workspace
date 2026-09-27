@@ -301,9 +301,9 @@ def test_tampered_evidence_fails():
     verifier = load_verifier()
     evidence = _build_evidence(verifier)
     evidence["summary"]["terminal_chat_errors"] = 1
-    _rehash(evidence)
     try:
         verifier.verify_evidence(evidence)
-    except verifier.VerificationError:
-        return
-    raise AssertionError("expected tampered evidence to fail")
+    except verifier.VerificationError as exc:
+        assert "integrity hash mismatch" in str(exc)
+    else:
+        raise AssertionError("expected tampered evidence to fail integrity verification")

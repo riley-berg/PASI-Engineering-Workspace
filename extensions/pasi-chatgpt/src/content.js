@@ -554,9 +554,16 @@
 
   function snapshotUserMessages() {
     const nodes = userMessages();
+    const textCounts = new Map();
+    for (const node of nodes) {
+      const text = normalize(messageText(node));
+      if (!text) continue;
+      textCounts.set(text, (textCounts.get(text) || 0) + 1);
+    }
     return {
       keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
       nodes: new WeakSet(nodes),
+      text_counts: textCounts,
       count: nodes.length
     };
   }
@@ -581,13 +588,25 @@
   }
 
   function countNewUserMessages(nodes, snapshot) {
-    let count = 0;
+    // ChatGPT can replace the DOM nodes for existing messages during reload
+    // or recovery. Node identity alone therefore over-counts unchanged
+    // messages. Count normalized message text as a multiset so real duplicate
+    // submissions still increment the metric while DOM remounts do not.
+    const baselineCounts = snapshot?.text_counts instanceof Map
+      ? snapshot.text_counts
+      : new Map();
+    const currentCounts = new Map();
     for (const node of nodes) {
-      const key = node.getAttribute?.('data-message-id');
-      const known = key ? snapshot.keys.has(key) : snapshot.nodes.has(node);
-      if (!known) count += 1;
+      const text = normalize(messageText(node));
+      if (!text) continue;
+      currentCounts.set(text, (currentCounts.get(text) || 0) + 1);
     }
-    return count;
+
+    let added = 0;
+    for (const [text, count] of currentCounts.entries()) {
+      added += Math.max(0, count - (baselineCounts.get(text) || 0));
+    }
+    return added;
   }
 
   function snapshotAssistantMessages() {

@@ -66,6 +66,43 @@
     });
   }
 
+  function armM0RecoveryProbe(operation) {
+    if (operation?.m0_recovery_probe !== true) return;
+    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
+    try {
+      if (sessionStorage.getItem(key) === 'fired') return;
+    } catch (_) {}
+
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (extensionContextInvalidated || activeOperationId !== operation.operation_id) {
+        clearInterval(timer);
+        return;
+      }
+      if (Date.now() - started > TIMEOUTS.generation) {
+        clearInterval(timer);
+        return;
+      }
+      if (!generating()) return;
+      try {
+        if (sessionStorage.getItem(key) === 'fired') {
+          clearInterval(timer);
+          return;
+        }
+      } catch (_) {}
+
+      const trigger = globalThis.PASI_RECOVERY_PROBE?.triggerConnectionLoss;
+      if (typeof trigger !== 'function') return;
+
+      try {
+        sessionStorage.setItem(key, 'fired');
+      } catch (_) {}
+
+      clearInterval(timer);
+      void trigger(operation.operation_id, 'm0_controlled_live_probe');
+    }, 250);
+  }
+
   function scheduleImmediatePoll() {
     if (immediatePollQueued || extensionContextInvalidated) return;
     immediatePollQueued = true;
@@ -654,6 +691,45 @@
     } catch (_) {}
   }
 
+  function installRuntimeErrorTelemetry() {
+    if (globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ === true) return;
+    globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ = true;
+
+    const reportRuntimeError = (source, message, detail = {}) => {
+      const text = String(message || '').slice(0, 2000);
+      const stack = String(detail.stack || '').slice(0, 4000);
+      const sourceUrl = String(detail.sourceUrl || location.href || '').slice(0, 2000);
+      void reportObservation('chatgpt_runtime_error', {
+        chat_url: chatUrl(),
+        active_operation_id: activeOperationId,
+        source,
+        message: text,
+        stack,
+        source_url: sourceUrl,
+        line: Number.isFinite(Number(detail.line)) ? Number(detail.line) : null,
+        column: Number.isFinite(Number(detail.column)) ? Number(detail.column) : null,
+        recovery_defaults_match: /\\bRECOVERY_DEFAULTS\\b/.test(text + '\\n' + stack + '\\n' + sourceUrl),
+        native_controller: true
+      });
+    };
+
+    window.addEventListener('error', (event) => {
+      reportRuntimeError('window_error', event?.message || event?.error?.message, {
+        stack: event?.error?.stack,
+        sourceUrl: event?.filename,
+        line: event?.lineno,
+        column: event?.colno
+      });
+    }, true);
+
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      reportRuntimeError('unhandled_rejection', reason?.message || String(reason || 'Unhandled promise rejection'), {
+        stack: reason?.stack
+      });
+    }, true);
+  }
+
   function reportHealth() {
     if (healthReportInFlight) return healthReportInFlight;
     healthReportInFlight = (async () => {
@@ -696,6 +772,7 @@
         page_visible: document.visibilityState !== 'hidden',
         composer_present: composerPresent,
         native_controller: true,
+        runtime_error_telemetry: true,
         active_operation_id: activeOperationId
       }, 2000);
 
@@ -1295,7 +1372,19 @@
       const composerEmptied = !box || !composerContainsPrompt(box, expected);
       if ((attempt > 1 && composerEmptied) || generating() || newMessageState()) {
         via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
-        return { via: via || 'sent_unverified', attempt, verified: via === 'verified' };
+        const finalVia = via || 'sent_unverified';
+        return {
+          via: finalVia,
+          attempt,
+          verified: via === 'verified',
+          timing: {
+            injected_at_ms: null,
+            ack_at_ms: Date.now(),
+            user_messages_added: countNewUserMessages(userMessages(), snapshot),
+            ack_verified: via === 'verified',
+            submission_via: finalVia
+          }
+        };
       }
 
       let readyBox = box;
@@ -1497,6 +1586,9 @@
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
     }
+    // Response detection is already authoritative for this operation.
+    // Conversation signature/count telemetry is recorded independently for
+    // verification and diagnostics, but it must never block durable completion.
     const body = {
       operation_id: operationId,
       chat_url: chatUrl(),
@@ -1544,6 +1636,25 @@
                 payload.next_operation.__pasi_baseline_fingerprint = fingerprintFromText(responseText);
               }
             }
+            // Publish a fresh conversation signature before the completion
+            // acknowledgement returns to the acceptance runner. The periodic
+            // heartbeat can lag by several seconds, so this is verification
+            // telemetry only and never an acceptance gate.
+            await reportObservation('chatgpt_state', {
+              chat_url: chatUrl(),
+              conversation_context_exhausted: contextExhausted(),
+              chat_exhausted: contextExhausted(),
+              provider_usage_limited: usageLimited(),
+              github_attached: githubAttached,
+              reasoning_mode: reasoningMode,
+              reasoning_capability: reasoningMode === 'unavailable'
+                ? 'unavailable'
+                : (thinkingEnabled() === true ? 'available' : 'unknown'),
+              conversation_signature: conversationSignature(),
+              active_operation_id: operationId,
+              native_controller: true
+            }).catch(() => {});
+
             setTimeout(publishResponseTelemetry, RESPONSE_TELEMETRY_DEFER_MS);
             return payload;
           } catch (_) {
@@ -1673,7 +1784,9 @@
               browserTiming.injected_at_ms - previousCompletionAckAtMs
             );
           }
-          const previousResponseCompletedAtMs = Number(operation.__pasi_response_completed_at_ms);
+          const previousResponseCompletedAtMs = Number(
+            operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms
+          );
           if (
             Number.isFinite(previousResponseCompletedAtMs) &&
             typeof browserTiming.injected_at_ms === 'number' &&
@@ -1708,6 +1821,7 @@
             throw new Error('PASI_NATIVE: submission accepted but generation did not start');
           }
           browserTiming.generation_start_ms = generationStartMs;
+          armM0RecoveryProbe(operation);
           const response = await waitForResponse(
             baseline,
             Array.isArray(operation.completion_markers)
@@ -1716,7 +1830,12 @@
             { assistantSnapshot, prompt: promptText }
           );
           browserTiming.completed_at_ms = Date.now();
-          const completion = await finishOperation(operation.operation_id, response, true, browserTiming);
+          const completion = await finishOperation(
+            operation.operation_id,
+            response,
+            true,
+            browserTiming
+          );
           chainedOperation = completion?.next_operation || null;
           finalized = true;
           return;
@@ -1728,6 +1847,14 @@
       finalized = true;
     } catch (error) {
       const errorMessage = String(error?.message || error);
+      void reportObservation('chatgpt_controller_error', {
+        operation_id: operation.operation_id,
+        active_operation_id: operation.operation_id,
+        operation_type: operation.operation_type,
+        message: errorMessage.slice(0, 2000),
+        source: 'processOperation',
+        native_controller: true
+      });
       const contextRecoveryEligible =
         operation.operation_type === 'prompt' &&
         errorMessage.startsWith('CHAT_EXHAUSTED:') &&
@@ -1788,6 +1915,33 @@
         void reportHealth();
       }
     }
+  }
+
+  async function waitForConversationDomReady() {
+    let previousUsers = -1;
+    let previousAssistants = -1;
+    let stableSamples = 0;
+
+    await waitUntil(() => {
+      if (!chatUrl()) return null;
+
+      const users = userMessages().length;
+      const assistants = assistantMessages().length;
+      if (users === previousUsers && assistants === previousAssistants) {
+        stableSamples += 1;
+      } else {
+        previousUsers = users;
+        previousAssistants = assistants;
+        stableSamples = 0;
+      }
+
+      // Require several consecutive identical DOM samples so an existing
+      // conversation is not reported as 0:0 while ChatGPT is still hydrating.
+      return composer() && stableSamples >= 3;
+    }, 10000, DOM_POLL_MS);
+
+    // Give late React/streamed message nodes one additional render turn.
+    await sleep(100);
   }
 
   async function recoverInterruptedOperation() {
@@ -1899,11 +2053,16 @@
   }
 
   async function start() {
-    // Start health reporting before any recovery or queue work. Freshness must
-    // not depend on the duration of interrupted-operation reconciliation.
     pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
-    void reportHealth();
+
+    // Wait for the active conversation DOM to settle before the first state
+    // snapshot. Otherwise an already-populated chat can transiently report
+    // 0:0 and become the M1 baseline.
+    await waitForConversationDomReady();
+    if (extensionContextInvalidated) return;
+    lastStateReportAt = 0;
+    await reportHealth();
     if (extensionContextInvalidated) return;
 
     await recoverInterruptedOperation();
@@ -1933,6 +2092,8 @@
   document.addEventListener('visibilitychange', () => {
     if (!extensionContextInvalidated) void reportHealth();
   });
+
+  installRuntimeErrorTelemetry();
 
   if (globalThis.PASI_NATIVE_TEST_HOOKS === true) {
     globalThis.PASI_NATIVE_TEST_API = Object.freeze({

@@ -73,10 +73,20 @@ def is_engineering_workspace_bridge(bridge_token: str) -> bool:
     return bool(payload and payload.get("service") == EXPECTED_BRIDGE_SERVICE)
 
 
+def controller_source(root: Path) -> Path:
+    for candidate in (root / "src" / "content.js", root / "content.js"):
+        if candidate.is_file():
+            return candidate
+    raise SystemExit(
+        "PASI ChatGPT Handoff controller source not found: expected "
+        "src/content.js or content.js"
+    )
+
+
 def version(root: Path) -> str | None:
     match = re.search(
         r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
-        (root / "content.js").read_text(encoding="utf-8"),
+        controller_source(root).read_text(encoding="utf-8"),
     )
     return match.group(1).strip() if match else None
 
@@ -113,7 +123,13 @@ def main() -> None:
     root = args.extension_root.expanduser().resolve()
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("manifest_version") != 3:
-        raise SystemExit("Engineering Workspace ChatGPT controller must be MV3")
+        raise SystemExit("PASI ChatGPT Handoff must be MV3")
+    if manifest.get("name") != "PASI ChatGPT Handoff":
+        raise SystemExit(
+            f"unexpected browser extension: {manifest.get('name')!r}; "
+            "the canonical runtime uses PASI ChatGPT Handoff"
+        )
+    controller_source(root)
 
     bridge_token = token()
     runtime = Path(

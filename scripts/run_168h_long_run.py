@@ -691,6 +691,10 @@ class TelemetrySampler:
                 {"timestamp": utc_now(), "error": str(exc)}
             )
 
+    def capture(self) -> None:
+        self.capture_health()
+        self.capture_resource()
+
 
 def recovery_phases(operation_state: dict[str, Any]) -> list[str]:
     events = operation_state.get("recovery_events")

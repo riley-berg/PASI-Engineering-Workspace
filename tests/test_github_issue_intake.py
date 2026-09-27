@@ -104,3 +104,29 @@ def test_issue_intake_parses_checkbox_and_heading_variants():
         "Works end to end",
         "Has durable evidence",
     )
+
+
+def test_github_issue_source_metadata_survives_roadmap_round_trip():
+    intake = GitHubIssueTaskIntake()
+    proposal = intake.parse(
+        {
+            "number": 127,
+            "title": "Round-trip task",
+            "body": "## Acceptance Criteria\n- Reload preserves source identity",
+            "html_url": "https://github.com/example/issues/127",
+        },
+        phase_id="P2",
+    )
+    roadmap = Roadmap(
+        roadmap_id="pasi-main",
+        version=4,
+        revision=0,
+        phases=(RoadmapPhase("P2", "Planner", status=PhaseStatus.ACTIVE),),
+        tasks=(),
+    )
+    updated = intake.apply(roadmap, proposal)
+    reloaded = Roadmap.from_mapping(updated.to_dict())
+    task = reloaded.task("GH-127")
+    assert task.source_issue_number == 127
+    assert task.source_url == "https://github.com/example/issues/127"
+    assert task.source_title == "Round-trip task"

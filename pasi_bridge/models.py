@@ -76,6 +76,7 @@ class ChatOperation:
     idempotency_key: str | None = None
     completion_markers: list[str] | None = None
     m0_recovery_probe: bool = False
+    m2_recovery_probe: bool = False
 
     # Optional durable chain checkpoint metadata. These fields make an
     # explicit operation sequence authoritative without tying progression to

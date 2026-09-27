@@ -421,6 +421,7 @@ class BridgeState:
                         raise ValueError("predecessor_operation_id does not identify an operation in this chain")
                     if predecessor.get("status") != "completed":
                         raise ValueError("predecessor operation must be completed before the next operation is created")
+                    assert normalized_sequence_index is not None
                     if predecessor.get("sequence_index") != normalized_sequence_index - 1:
                         raise ValueError("predecessor operation must be the immediately previous sequence index")
 
@@ -1639,14 +1640,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
 
-        except ValueError as exc:
+        except InvalidOperationTransition as exc:
             self._send_json(
                 {
-                    "error": str(exc),
+                    "error": str(exc)
                 },
-                HTTPStatus.BAD_REQUEST,
+                HTTPStatus.CONFLICT,
             )
-        except InvalidOperationTransition as exc:
+        except ValueError as exc:
             self._send_json(
                 {
                     "error": str(exc)

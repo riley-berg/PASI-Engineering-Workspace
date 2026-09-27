@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "pasi-provider-benchmark-v1",
+  "cases": [
+    {
+      "case_id": "structured-json-contract",
+      "prompt": "Return JSON with keys status and result; status must be ok and result must be a short string.",
+      "checks": ["json_object", "status_ok", "key:result"],
+      "max_latency_ms": 30000
+    },
+    {
+      "case_id": "bounded-coding-response",
+      "prompt": "Return JSON with status ok and a result containing the exact text: ready.",
+      "checks": ["json_object", "status_ok", "contains:ready", "key:result"],
+      "max_latency_ms": 30000
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/provider-benchmark-v1.json",
+  "title":"PASI provider benchmark report v1",
+  "type":"object",
+  "required":["suite_version","provider","model","profile_name","profile_digest","registry_digest","case_count","passed_count","failed_count","partial_failure","passed","results","started_at","completed_at","report_digest"],
+  "properties":{
+    "suite_version":{"const":1},
+    "provider":{"type":"string","minLength":1},
+    "model":{"type":"string","minLength":1},
+    "profile_name":{"type":"string","minLength":1},
+    "profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "registry_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "case_count":{"type":"integer","minimum":1},
+    "passed_count":{"type":"integer","minimum":0},
+    "failed_count":{"type":"integer","minimum":0},
+    "partial_failure":{"type":"boolean"},
+    "passed":{"type":"boolean"},
+    "results":{"type":"array","items":{
+      "type":"object",
+      "required":["case_id","classification","passed","latency_ms","response_sha256","response_evidence","failure_reason"],
+      "properties":{
+        "case_id":{"type":"string","minLength":1},
+        "classification":{"enum":["pass","provider_error","latency_exceeded","contract_failure"]},
+        "passed":{"type":"boolean"},
+        "latency_ms":{"type":"number","minimum":0},
+        "response_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+        "response_evidence":{"type":"string"},
+        "failure_reason":{"type":"string"}
+      },
+      "additionalProperties":false
+    }},
+    "started_at":{"type":"string","format":"date-time"},
+    "completed_at":{"type":"string","format":"date-time"},
+    "report_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "additionalProperties":false
+}

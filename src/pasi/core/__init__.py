@@ -34,6 +34,24 @@ from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
 from .retrieval import ProvenanceAwareRetriever, RetrievedMemory, RetrievalError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
+from .dependency_graph import DependencyGraph, StaleDependencyGraph
+from .task_detail import TaskDetail, TaskDetailNotFound, TaskDetailReadModel
+from .ranking_explanation import RankingExplanation, RankingExplanationError, SQLiteRankingExplanationStore
+from .workspace_preferences import PreferenceError, StalePreferenceRevision, SQLiteWorkspacePreferenceStore, WorkspacePreference
+from .search_index import IndexedDocument, SearchError, SearchResult, SQLiteSearchIndex
+from .notifications import Notification, NotificationError, SQLiteNotificationStore
+from .projects_sync import (
+    GitHubProjectsRESTTransport,
+    GitHubProjectsSynchronizer,
+    ProjectAuthenticationError,
+    ProjectRateLimitError,
+    ProjectRemoteDataError,
+    ProjectSyncConflict,
+    ProjectSyncError,
+    ProjectSyncState,
+    RemoteProjectItem,
+    SQLiteProjectSyncStore,
+)
 from .runtime_api import RuntimeAPIService, make_handler
 from .runtime_controls import AuthorizationError, ControlError, IdempotencyConflict, RuntimeCommandStore, RuntimeControlService
 from .runtime_events import RuntimeEventFeed
@@ -48,6 +66,35 @@ from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 __all__ = [
     "BoundedChildTaskGenerator",
     "BoundedRepairController",
+    "DependencyGraph",
+    "StaleDependencyGraph",
+    "TaskDetail",
+    "TaskDetailNotFound",
+    "TaskDetailReadModel",
+    "RankingExplanation",
+    "RankingExplanationError",
+    "SQLiteRankingExplanationStore",
+    "PreferenceError",
+    "StalePreferenceRevision",
+    "SQLiteWorkspacePreferenceStore",
+    "WorkspacePreference",
+    "IndexedDocument",
+    "SearchError",
+    "SearchResult",
+    "SQLiteSearchIndex",
+    "Notification",
+    "NotificationError",
+    "SQLiteNotificationStore",
+    "GitHubProjectsRESTTransport",
+    "GitHubProjectsSynchronizer",
+    "ProjectAuthenticationError",
+    "ProjectRateLimitError",
+    "ProjectRemoteDataError",
+    "ProjectSyncConflict",
+    "ProjectSyncError",
+    "ProjectSyncState",
+    "RemoteProjectItem",
+    "SQLiteProjectSyncStore",
     "DeterministicRecoveryClassifier",
     "ChildTaskGenerationError",
     "CompiledContext",

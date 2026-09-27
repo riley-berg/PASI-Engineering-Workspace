@@ -621,6 +621,10 @@ async function loadMigrations(apiBase) {
   return getJson(`${apiBase}/v1/runtime/migrations`);
 }
 
+async function loadNotifications(apiBase) {
+  return getJson(`${apiBase}/v1/runtime/notifications?scope=runtime`);
+}
+
 async function loadHealth(apiBase) {
   return getJson(`${apiBase}/v1/runtime/health`);
 }
@@ -652,16 +656,18 @@ async function refresh() {
   banner.className = "banner loading";
   banner.textContent = "Refreshing authoritative runtime state…";
   try {
-    const [healthPayload, ledgerPayload, failurePayload, migrationPayload] = await Promise.all([
+    const [healthPayload, ledgerPayload, failurePayload, migrationPayload, notificationPayload] = await Promise.all([
       loadHealth(apiBase),
       loadLedger(apiBase),
       loadFailures(apiBase).catch(() => ({ signatures: [] })),
       loadMigrations(apiBase),
+      loadNotifications(apiBase).catch(() => ({ notifications: [] })),
     ]);
     renderHealth(healthPayload.health || {});
     renderLedger(ledgerPayload.entries || []);
     renderFailures(failurePayload.signatures || []);
     renderMigration(migrationPayload || {});
+    renderNotifications(notificationPayload.notifications || []);
 
     const operationId = qs("#operation-id").value.trim() ||
       new URLSearchParams(location.search).get("operation_id") || "";
@@ -724,6 +730,21 @@ function bindControls() {
 
 function boot() {
   qs("#refresh").addEventListener("click", refresh);
+
+  qs("#timeline-filter-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const operationId = qs("#operation-id").value.trim();
+    const source = qs("#timeline-source").value.trim();
+    const type = qs("#timeline-type").value.trim();
+    const url = new URL(location.href);
+    if (operationId) url.searchParams.set("operation_id", operationId);
+    if (source) url.searchParams.set("event_source", source);
+    else url.searchParams.delete("event_source");
+    if (type) url.searchParams.set("event_type", type);
+    else url.searchParams.delete("event_type");
+    history.replaceState({}, "", url);
+    refresh();
+  });
 
   qs("#ledger-form").addEventListener("submit", async (event) => {
     event.preventDefault();

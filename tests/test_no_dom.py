@@ -72,7 +72,7 @@ def test_p0_4_runtime_uses_canonical_extension_and_evolving_prompt():
     assert "PASI_TASK_PREVIOUS_CONTEXT" in acceptance_source
     assert "extensions" in timeout_source
     assert "PASI_DEPLOYMENT_ID" in chat_source
-    assert "PASI_DEPLOYMENT_ID" in executor_source or "deployment_id" in executor_source
+    assert "deployment_id" in guard_source or "deployment_id" in chat_source
     assert "automation/chromium/pasi-chatgpt" not in executor_source
     assert "automation/chromium/pasi-chatgpt" not in guard_source
     assert "automation/chromium/pasi-chatgpt" not in chat_source

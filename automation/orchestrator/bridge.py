@@ -817,7 +817,7 @@ class BridgeState:
             )
 
             return {
-                "service": "personal-ai-system-chatgpt-bridge",
+                "service": "pasi-engineering-workspace-chatgpt-bridge",
                 "host": HOST,
                 "port": PORT,
                 "queue_size": queue_size,
@@ -1128,8 +1128,8 @@ def _bridge_access_log_should_emit(message: str) -> bool:
 
 class BridgeRequestHandler(BaseHTTPRequestHandler):
     """
-    Small localhost HTTP API consumed by the Tampermonkey
-    ChatGPT controller.
+    Small localhost HTTP API consumed by the native MV3
+    PASI Engineering Workspace ChatGPT controller.
 
     CORS is intentionally restricted to ChatGPT origins.
     """
@@ -1159,7 +1159,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         token = supplied[len(prefix):].strip() if supplied.startswith(prefix) else ""
         return bool(expected) and bool(token) and hmac.compare_digest(token, expected)
 
-    server_version = "PersonalAIChatBridge/1.0"
+    server_version = "PASIEngineeringWorkspaceChatBridge/1.0"
     protocol_version = "HTTP/1.1"
 
     @property
@@ -1291,7 +1291,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {
                     "status": "ok",
-                    "service": "personal-ai-system-chatgpt-bridge",
+                    "service": "pasi-engineering-workspace-chatgpt-bridge",
                 }
             )
             return

@@ -34,11 +34,13 @@ def run(
     )
     payload = HumanTestRun(
         run_id=f"run-{index:03d}",
-        suite_id="suite",
+        suite_id="pasi-p0-qualification",
         suite_version=1,
         code_head=code_head or f"{index:040x}"[-40:],
         browser_name="Chromium",
         browser_version="136",
+        extension_version="0.1.0",
+        execution_source="mv3-human-test-extension",
         target_origin="http://127.0.0.1:3000",
         started_at=start.isoformat(),
         ended_at=end.isoformat(),

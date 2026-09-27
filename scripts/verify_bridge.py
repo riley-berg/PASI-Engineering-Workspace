@@ -66,6 +66,11 @@ def main() -> int:
             "running bridge is stale: expected M1 checkpoint schema 1; "
             "restart it from this checkout with scripts/run_bridge.sh"
         )
+    if payload.get("m2_recovery_schema_version") != 1:
+        raise SystemExit(
+            "running bridge is stale: expected M2 recovery schema 1; "
+            "restart it from this checkout with scripts/run_bridge.sh"
+        )
 
     print("PASI bridge verification PASSED")
     print(f"  source commit : {expected_sha}")

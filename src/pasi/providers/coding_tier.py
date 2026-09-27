@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from pasi.providers.ollama import OllamaProvider
+from pasi.providers.protocol import ChatMessage
 from pasi.providers.profiles import ModelProfile, ModelProfileError, ModelProfileManager
 from pasi.providers.registry import SQLiteProviderRegistry
 
@@ -120,7 +121,7 @@ class LocalCodingTier:
             )
 
         response = provider.generate(
-            [{"role": "user", "content": prompt}],
+            [ChatMessage(role="user", content=prompt)],
             model=profile.model,
         )
         try:

@@ -44,6 +44,7 @@ def test_dashboard_is_exercised_against_the_real_runtime_api(tmp_path):
     ledger = SQLiteOperationLedger(tmp_path / "ledger.db")
     health_store = RuntimeHealthStore(tmp_path / "health.db")
     command_store = RuntimeCommandStore(tmp_path / "commands.db")
+    notification_store = SQLiteNotificationStore(tmp_path / "notifications.db")
 
     health_store.create(
         RuntimeHealth.connected(
@@ -69,9 +70,9 @@ def test_dashboard_is_exercised_against_the_real_runtime_api(tmp_path):
             event_id="event-notification-1",
             event_type="runtime.recovery",
             source="runtime",
-            operation_id="op-failure-1",
-            task_id="P1.7",
-            run_id="run-1",
+            operation_id="op-fe-p0",
+            task_id="P0.5",
+            run_id="run-fe-p0",
             payload={"classification": "recoverable"},
         )
     )
@@ -81,7 +82,7 @@ def test_dashboard_is_exercised_against_the_real_runtime_api(tmp_path):
         severity="warning",
         message="Operation requires recovery.",
         entity_type="operation",
-        entity_id="op-failure-1",
+        entity_id="op-fe-p0",
     )
 
     service = RuntimeAPIService(

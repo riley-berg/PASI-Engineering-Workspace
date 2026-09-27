@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
-ROADMAP_SCHEMA_VERSION = 2
+ROADMAP_SCHEMA_VERSION = 3
+SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3})
 
 
 class RoadmapError(ValueError):
@@ -90,6 +91,7 @@ class RoadmapTask:
     depends_on: tuple[str, ...] = ()
     acceptance_requirements: tuple[str, ...] = ()
     evidence_requirements: tuple[str, ...] = ()
+    parent_task_id: str = ""
     status: TaskStatus = TaskStatus.PLANNED
     revision: int = 0
 
@@ -103,6 +105,8 @@ class RoadmapTask:
             raise RoadmapError(f"task {self.id} requires acceptance_requirements")
         if not self.evidence_requirements:
             raise RoadmapError(f"task {self.id} requires evidence_requirements")
+        if self.parent_task_id and self.parent_task_id == self.id:
+            raise RoadmapError("task cannot be its own parent")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -112,6 +116,7 @@ class RoadmapTask:
             "depends_on": list(self.depends_on),
             "acceptance_requirements": list(self.acceptance_requirements),
             "evidence_requirements": list(self.evidence_requirements),
+            "parent_task_id": self.parent_task_id,
             "status": self.status.value,
             "revision": self.revision,
         }
@@ -133,6 +138,7 @@ class RoadmapTask:
                 name="evidence_requirements",
                 item_limit=1024,
             ),
+            parent_task_id=str(value.get("parent_task_id", "")),
             status=TaskStatus(value.get("status", TaskStatus.PLANNED.value)),
             revision=int(value.get("revision", 0)),
         )
@@ -183,8 +189,10 @@ class Roadmap:
 
     def __post_init__(self) -> None:
         _nonempty(self.roadmap_id, name="roadmap id")
-        if self.version != ROADMAP_SCHEMA_VERSION:
+        if self.version not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
             raise RoadmapError(f"unsupported roadmap schema version: {self.version}")
+        if self.version == 2:
+            object.__setattr__(self, "version", ROADMAP_SCHEMA_VERSION)
         if self.revision < 0:
             raise RoadmapError("roadmap revision must be non-negative")
 
@@ -205,6 +213,10 @@ class Roadmap:
                     f"phase {phase.id} references missing phases: {sorted(missing)}"
                 )
         for task in self.tasks:
+            if task.parent_task_id and task.parent_task_id not in task_id_set:
+                raise RoadmapError(
+                    f"task {task.id} references missing parent task {task.parent_task_id}"
+                )
             if task.phase_id not in phase_id_set:
                 raise RoadmapError(
                     f"task {task.id} references missing phase {task.phase_id}"
@@ -275,6 +287,58 @@ class Roadmap:
             and all(dependency in completed for dependency in task.depends_on)
         ]
         return tuple(sorted(ready, key=lambda item: item.id))
+
+    def children_of(self, parent_task_id: str) -> tuple[RoadmapTask, ...]:
+        return tuple(
+            sorted(
+                (task for task in self.tasks if task.parent_task_id == parent_task_id),
+                key=lambda item: item.id,
+            )
+        )
+
+    def add_child_tasks(
+        self,
+        parent_task_id: str,
+        children: tuple[RoadmapTask, ...],
+    ) -> "Roadmap":
+        parent = self.task(parent_task_id)
+        if not children:
+            raise RoadmapError("at least one child task is required")
+
+        existing_ids = {task.id for task in self.tasks}
+        new_ids = {task.id for task in children}
+        if len(new_ids) != len(children) or existing_ids & new_ids:
+            raise RoadmapError("child task ids must be unique and new")
+
+        for child in children:
+            if child.parent_task_id != parent_task_id:
+                raise RoadmapError(
+                    f"child {child.id} does not preserve parent identity"
+                )
+            if child.phase_id != parent.phase_id:
+                raise RoadmapError(
+                    f"child {child.id} leaves parent roadmap phase"
+                )
+            if not set(parent.acceptance_requirements).issubset(
+                set(child.acceptance_requirements)
+            ):
+                raise RoadmapError(
+                    f"child {child.id} weakens parent acceptance requirements"
+                )
+            if not set(parent.evidence_requirements).issubset(
+                set(child.evidence_requirements)
+            ):
+                raise RoadmapError(
+                    f"child {child.id} weakens parent evidence requirements"
+                )
+
+        return Roadmap(
+            roadmap_id=self.roadmap_id,
+            version=ROADMAP_SCHEMA_VERSION,
+            revision=self.revision + 1,
+            phases=self.phases,
+            tasks=self.tasks + tuple(children),
+        )
 
     def blocked_tasks(self) -> tuple[RoadmapTask, ...]:
         completed = {

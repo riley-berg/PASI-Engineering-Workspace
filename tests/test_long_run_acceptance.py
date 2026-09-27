@@ -24,8 +24,8 @@ def _iso(start: datetime, seconds: int) -> str:
     return (start + timedelta(seconds=seconds)).isoformat()
 
 
-def _build_evidence():
-    verifier = load_verifier()
+def _build_evidence(verifier=None):
+    verifier = verifier or load_verifier()
     verifier.POLICY = copy.deepcopy(verifier.POLICY)
     verifier.POLICY.update(
         {
@@ -207,7 +207,7 @@ def test_clean_evidence_passes():
 
 def test_duplicate_operation_fails():
     verifier = load_verifier()
-    evidence = _build_evidence()
+    evidence = _build_evidence(verifier)
     evidence["operations"][1]["operation_id"] = evidence["operations"][0]["operation_id"]
     try:
         verifier.verify_evidence(evidence)

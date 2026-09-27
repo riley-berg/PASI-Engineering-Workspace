@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from pasi.core.recovery import (
     RecoveryClassification,
@@ -34,7 +35,7 @@ class BoundedRepairController:
         self,
         decision: RecoveryDecision,
         *,
-        action,
+        action: Callable[[str, int], bool],
         max_attempts_override: int | None = None,
     ) -> RepairResult:
         budget = (

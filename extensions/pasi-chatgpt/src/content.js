@@ -587,26 +587,32 @@
     return unmatched ? 'new_unmatched' : null;
   }
 
-  function countNewUserMessages(nodes, snapshot) {
+  function countNewUserMessages(nodes, snapshot, expectedPrompt = '') {
     // ChatGPT can replace the DOM nodes for existing messages during reload
     // or recovery. Node identity alone therefore over-counts unchanged
-    // messages. Count normalized message text as a multiset so real duplicate
-    // submissions still increment the metric while DOM remounts do not.
+    // messages, and counting every newly mounted message can also include
+    // unrelated hydration/remount artifacts. For submission telemetry, count
+    // only the newly observed user message that matches this operation's
+    // exact prompt fingerprint.
     const baselineCounts = snapshot?.text_counts instanceof Map
       ? snapshot.text_counts
       : new Map();
-    const currentCounts = new Map();
+    const { head, tail } = promptFingerprints(expectedPrompt);
+    let added = 0;
     for (const node of nodes) {
       const text = normalize(messageText(node));
       if (!text) continue;
-      currentCounts.set(text, (currentCounts.get(text) || 0) + 1);
+      const baselineCount = baselineCounts.get(text) || 0;
+      const currentCount = nodes.reduce(
+        (count, candidate) => count + (normalize(messageText(candidate)) === text ? 1 : 0),
+        0
+      );
+      if (currentCount <= baselineCount) continue;
+      if ((head && text.includes(head)) || (tail && text.includes(tail))) {
+        added += 1;
+      }
     }
-
-    let added = 0;
-    for (const [text, count] of currentCounts.entries()) {
-      added += Math.max(0, count - (baselineCounts.get(text) || 0));
-    }
-    return added;
+    return Math.min(added, 1);
   }
 
   function snapshotAssistantMessages() {
@@ -1374,7 +1380,7 @@
         timing: {
           injected_at_ms: null,
           ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
+          user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
           ack_verified: via === 'verified',
           submission_via: via
         }

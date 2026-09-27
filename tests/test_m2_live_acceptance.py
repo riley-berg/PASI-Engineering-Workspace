@@ -86,3 +86,4 @@ def test_m2_harness_carries_same_operation_and_idempotency_requirements():
     assert "idempotency replay created a different operation_id" in source
     assert "m2_recovery_probe" in source
     assert "controlled_probe_resume" in source
+    assert "queued operation did not retain the exact completion marker" in source

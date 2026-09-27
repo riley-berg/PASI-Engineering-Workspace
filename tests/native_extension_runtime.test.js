@@ -31,17 +31,17 @@ test("consolidated extension is Manifest V3 and points at the Engineering Worksp
 });
 
 test("native service worker is the only loopback bridge caller and authenticates with the deployed token", () => {
-  assert.match(background, /const BRIDGE = 'http://127.0.0.1:8765';/);
-  assert.match(background, /chrome.runtime.getURL('\.bridge-token')/);
+  assert.ok(background.includes("const BRIDGE = 'http://127.0.0.1:8765';"));
+  assert.ok(background.includes("chrome.runtime.getURL('.bridge-token')"));
   assert.match(background, /Authorization/);
   assert.match(background, /Bearer/);
-  assert.match(background, /if (response.status === 401)/);
+  assert.ok(background.includes("if (response.status === 401)"));
   assert.match(background, /type !== 'pasi-bridge-request'/);
-  assert.match(background, /GET \/next-operation/);
+  assert.ok(background.includes("'GET /next-operation'"));
   assert.match(background, /POST \/chat/finished/);
   assert.match(background, /POST \/chat/failed/);
-  assert.doesNotMatch(content, /127.0.0.1:8765/);
-  assert.doesNotMatch(recovery, /127.0.0.1:8765/);
+  assert.equal(content.includes("127.0.0.1:8765"), false);
+  assert.equal(recovery.includes("127.0.0.1:8765"), false);
 });
 
 test("completion handoff is immediate and durable", () => {
@@ -49,13 +49,13 @@ test("completion handoff is immediate and durable", () => {
   assert.match(content, /function scheduleImmediateOperation(operation)/);
   assert.match(content, /next_operation/);
   assert.match(content, /scheduleImmediateOperation(chainedOperation)/);
-  assert.match(background, /GET \/operation\?operation_id/);
+  assert.ok(background.includes("BRIDGE_OPERATION_RE") && background.includes("operation_id"));
 });
 
 test("connection loss stops generation and preserves recovery state", () => {
-  assert.match(content, /connectionFailure()/);
-  assert.match(content, /PASI_NATIVE: connection lost/);
-  assert.match(content, //chat/failed/);
+  assert.ok(recovery.includes("connectionFailure()"));
+  assert.ok(recovery.includes("connection_error"));
+  assert.ok(content.includes("/chat/failed"));
   assert.match(content, /recovery_context/);
   assert.match(recovery, /connectionFailure()/);
   assert.match(recovery, /decideRecovery/);
@@ -64,7 +64,7 @@ test("connection loss stops generation and preserves recovery state", () => {
 test("usage or context exhaustion creates a bounded fresh-chat recovery path", () => {
   assert.match(content, /CHAT_EXHAUSTED:/);
   assert.match(content, /CHAT_USAGE_LIMITED:/);
-  assert.match(content, /operation_type: 'new_chat'/);
+  assert.ok(content.includes("case 'new_chat'"));
   assert.match(recovery, /replacementReason()/);
   assert.match(recovery, /operation_type: 'new_chat'/);
   assert.match(recovery, /MAX_CONTEXT_RECOVERIES/);

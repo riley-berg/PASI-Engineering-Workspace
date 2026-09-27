@@ -1806,6 +1806,14 @@
       finalized = true;
     } catch (error) {
       const errorMessage = String(error?.message || error);
+      void reportObservation('chatgpt_controller_error', {
+        operation_id: operation.operation_id,
+        active_operation_id: operation.operation_id,
+        operation_type: operation.operation_type,
+        message: errorMessage.slice(0, 2000),
+        source: 'processOperation',
+        native_controller: true
+      });
       const contextRecoveryEligible =
         operation.operation_type === 'prompt' &&
         errorMessage.startsWith('CHAT_EXHAUSTED:') &&

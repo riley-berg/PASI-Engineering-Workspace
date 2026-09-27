@@ -1,0 +1,37 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/benchmark-report-v1.json",
+  "title":"PASI benchmark report v1",
+  "type":"object",
+  "required":["benchmark_version","provider","model","profile_digest","started_at","finished_at","passed","total_cases","passed_cases","failed_cases","results","report_digest"],
+  "properties":{
+    "benchmark_version":{"const":1},
+    "provider":{"type":"string","minLength":1},
+    "model":{"type":"string","minLength":1},
+    "profile_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "started_at":{"type":"string","format":"date-time"},
+    "finished_at":{"type":"string","format":"date-time"},
+    "passed":{"type":"boolean"},
+    "total_cases":{"type":"integer","minimum":1,"maximum":100},
+    "passed_cases":{"type":"integer","minimum":0},
+    "failed_cases":{"type":"integer","minimum":0},
+    "results":{
+      "type":"array",
+      "items":{
+        "type":"object",
+        "required":["case_id","passed","duration_ms","response_digest","reason","evidence"],
+        "properties":{
+          "case_id":{"type":"string","minLength":1},
+          "passed":{"type":"boolean"},
+          "duration_ms":{"type":"number","minimum":0},
+          "response_digest":{"type":"string","pattern":"^$|^[0-9a-f]{64}$"},
+          "reason":{"type":"string"},
+          "evidence":{"type":"object"}
+        },
+        "additionalProperties":false
+      }
+    },
+    "report_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "additionalProperties":false
+}

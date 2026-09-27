@@ -1,3 +1,4 @@
+from .child_tasks import BoundedChildTaskGenerator, ChildTaskGenerationError
 from .event_store import DuplicateEvent, EventNotFound, SQLiteEventStore
 from .events import DurableEvent, InvalidEvent
 from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature_key
@@ -29,8 +30,10 @@ from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
+    "BoundedChildTaskGenerator",
     "BoundedRepairController",
     "DeterministicRecoveryClassifier",
+    "ChildTaskGenerationError",
     "DuplicateEvent",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",

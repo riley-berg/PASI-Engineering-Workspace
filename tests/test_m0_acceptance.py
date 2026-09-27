@@ -160,6 +160,33 @@ class TestM0Acceptance(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_m0_evidence_file_is_valid_json(self) -> None:
+        payload = {
+            "gate": "M0",
+            "status": "PASS",
+            "provider": "chatgpt_browser",
+            "authenticated": True,
+            "chat_url": "https://chatgpt.com/c/abc123",
+            "task_id": "P0.1",
+            "summary": "Completed the task and produced direct evidence.",
+            "evidence": "canonical validation passed",
+            "commit": "abc123",
+            "branch": "pasi/m0-acceptance-test",
+            "proof_file": "acceptance/M0-LIVE-PROOF.txt",
+            "prompt_advance_rule": "advance only after verified completion",
+            "runtime_evidence": self.response().runtime_evidence.to_dict(),
+            "next_task_id": "",
+            "next_prompt": "",
+            "next_prompt_digest": "",
+            "prompt_advanced_after_verified_completion": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m0-live.json"
+            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(parsed["task_id"], "P0.1")
+        self.assertEqual(parsed["next_prompt"], "")
+
     def test_proof_artifact_expectation_uses_a_real_trailing_newline(self) -> None:
         default = inspect.signature(apply_validate_commit).parameters["expected_proof"].default
         self.assertEqual(default, "PASI M0 LIVE PROOF\n")

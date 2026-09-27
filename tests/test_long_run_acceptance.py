@@ -6,13 +6,14 @@ import importlib.util
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 VERIFIER = ROOT / "scripts" / "verify_168h_long_run.py"
 SCHEMA = ROOT / "schemas" / "long-run-168h-v1.json"
 
 
-def load_verifier():
+def load_verifier() -> Any:
     spec = importlib.util.spec_from_file_location("pasi_long_run_verifier", VERIFIER)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -37,7 +38,7 @@ def _rehash(evidence):
     ).hexdigest()
 
 
-def _build_evidence(verifier=None):
+def _build_evidence(verifier: Any = None) -> Any:
     verifier = verifier or load_verifier()
     verifier.POLICY = copy.deepcopy(verifier.POLICY)
     verifier.POLICY.update(

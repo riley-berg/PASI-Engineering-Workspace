@@ -73,16 +73,12 @@ try {
         built_at_utc = [DateTime]::UtcNow.ToString("o")
     }
 
-    $metadataPath = Join-Path $extensionRoot ".pasi-build.json"
-    $buildManifest | ConvertTo-Json -Depth 4 | Set-Content -Path $metadataPath -Encoding UTF8
-
     Write-Host "PASI extension build complete."
     Write-Host "  source commit : $gitSha"
     Write-Host "  extension     : $($manifest.name)"
     Write-Host "  version       : $($manifest.version)"
     Write-Host "  bridge        : http://127.0.0.1:8765"
     Write-Host "  source        : $extensionRoot"
-    Write-Host "  metadata      : $metadataPath"
 }
 finally {
     Pop-Location

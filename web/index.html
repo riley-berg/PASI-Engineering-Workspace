@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-api-base=".">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>PASI Runtime Dashboard</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PASI / Runtime</p>
+        <h1>Operator dashboard</h1>
+        <p class="subtitle">Authoritative runtime state, recovery, evidence, and controls.</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="refresh" class="button secondary">Refresh</button>
+        <label class="token-label">
+          Runtime token
+          <input id="token" type="password" autocomplete="off" placeholder="controls only">
+        </label>
+      </div>
+    </header>
+
+    <section id="banner" class="banner loading" role="status" aria-live="polite">
+      Loading runtime state…
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Health</p>
+            <h2 id="health-status">Unknown</h2>
+          </div>
+          <span id="health-pill" class="pill neutral">unknown</span>
+        </div>
+        <dl class="details">
+          <div><dt>Heartbeat</dt><dd id="health-heartbeat">—</dd></div>
+          <div><dt>Recovery phase</dt><dd id="health-recovery">—</dd></div>
+          <div><dt>Reason</dt><dd id="health-reason">—</dd></div>
+          <div><dt>Code head</dt><dd id="health-code">—</dd></div>
+          <div><dt>Controller</dt><dd id="health-controller">—</dd></div>
+          <div><dt>Runner</dt><dd id="health-runner">—</dd></div>
+          <div><dt>Provider</dt><dd id="health-provider">—</dd></div>
+          <div><dt>Revision</dt><dd id="health-revision">—</dd></div>
+        </dl>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Operation</p>
+            <h2 id="operation-title">No operation selected</h2>
+          </div>
+          <span id="operation-pill" class="pill neutral">unavailable</span>
+        </div>
+        <form id="operation-form" class="operation-form">
+          <label>
+            Operation ID
+            <input id="operation-id" name="operation_id" placeholder="op-…" autocomplete="off">
+          </label>
+          <button class="button primary" type="submit">Load operation</button>
+        </form>
+        <dl class="details">
+          <div><dt>Task</dt><dd id="operation-task">—</dd></div>
+          <div><dt>Run</dt><dd id="operation-run">—</dd></div>
+          <div><dt>Phase</dt><dd id="operation-phase">—</dd></div>
+          <div><dt>Provider</dt><dd id="operation-provider">—</dd></div>
+          <div><dt>Status</dt><dd id="operation-status">—</dd></div>
+          <div><dt>Revision</dt><dd id="operation-revision">—</dd></div>
+          <div><dt>Verification</dt><dd id="operation-verification">—</dd></div>
+          <div><dt>Failure</dt><dd id="operation-failure">—</dd></div>
+        </dl>
+      </article>
+    </section>
+
+    <section class="grid two">
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Acceptance</p>
+            <h2>Evidence-backed status</h2>
+          </div>
+        </div>
+        <div id="acceptance-grid" class="status-grid"></div>
+        <div class="subhead">Evidence references</div>
+        <ul id="evidence-list" class="list empty">
+          <li>No evidence references reported.</li>
+        </ul>
+        <div class="subhead">Recovery history</div>
+        <ul id="recovery-list" class="list empty">
+          <li>No recovery events reported.</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Controls</p>
+            <h2>Authoritative actions</h2>
+          </div>
+        </div>
+        <p class="muted">Controls require the runtime token and the operation's current revision.</p>
+        <div class="control-row">
+          <button class="button" data-action="start">Start</button>
+          <button class="button" data-action="retry">Retry</button>
+          <button class="button" data-action="recover">Recover</button>
+          <button class="button danger" data-action="stop">Stop</button>
+        </div>
+        <p id="control-result" class="control-result" aria-live="polite">No action submitted.</p>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Timeline</p>
+          <h2>Runtime events</h2>
+        </div>
+        <span id="event-count" class="muted">0 events</span>
+      </div>
+      <ol id="timeline" class="timeline">
+        <li class="empty">Select an operation to view its durable event history.</li>
+      </ol>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <p class="eyebrow">Long-run</p>
+          <h2>Progress</h2>
+        </div>
+      </div>
+      <div id="longrun-panel" class="longrun-panel">
+        <div class="progress-track" aria-hidden="true"><span id="longrun-progress"></span></div>
+        <div class="longrun-meta">
+          <span id="longrun-sequence">Sequence: unavailable</span>
+          <span id="longrun-target">Target: unavailable</span>
+        </div>
+        <p id="longrun-note" class="muted">Progress is shown only when the authoritative operation metadata reports long-run sequence data.</p>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>PASI runtime contract v1</span>
+      <span id="last-refresh">Not refreshed yet</span>
+    </footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

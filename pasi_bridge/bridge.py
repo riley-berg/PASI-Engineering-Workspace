@@ -325,6 +325,7 @@ class BridgeState:
         idempotency_key: str | None = None,
         completion_markers: list[str] | None = None,
         m0_recovery_probe: bool = False,
+        m2_recovery_probe: bool = False,
         chain_id: str | None = None,
         sequence_index: int | None = None,
         predecessor_operation_id: str | None = None,
@@ -358,6 +359,10 @@ class BridgeState:
             operation_type != "prompt" or "PASI TASK P0.1" not in prompt
         ):
             raise ValueError("m0_recovery_probe is only permitted for the P0.1 prompt operation")
+        if not isinstance(m2_recovery_probe, bool):
+            raise ValueError("m2_recovery_probe must be a boolean")
+        if m2_recovery_probe and operation_type != "prompt":
+            raise ValueError("m2_recovery_probe is only permitted for prompt operations")
 
         with self.lock:
             queue = self._load_queue()
@@ -460,6 +465,7 @@ class BridgeState:
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                m2_recovery_probe=m2_recovery_probe,
                 chain_id=normalized_chain_id,
                 sequence_index=normalized_sequence_index,
                 predecessor_operation_id=normalized_predecessor,
@@ -1838,6 +1844,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(m0_recovery_probe, bool):
             self._send_json({"error": "m0_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
             return
+        m2_recovery_probe = payload.get("m2_recovery_probe", False)
+        if not isinstance(m2_recovery_probe, bool):
+            self._send_json({"error": "m2_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
 
         if not isinstance(
             operation_type,
@@ -1882,6 +1892,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                m2_recovery_probe=m2_recovery_probe,
                 chain_id=chain_id,
                 sequence_index=sequence_index,
                 predecessor_operation_id=predecessor_operation_id,

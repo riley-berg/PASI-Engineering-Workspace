@@ -263,27 +263,33 @@ def wait_for_terminal(
     raise M1LiveError(f"operation {operation_id} did not reach terminal state within {timeout_seconds}s")
 
 
-def wait_for_next_claim(
+def wait_for_signature_delta(
     client: BridgeClient,
-    operation_id: str,
     *,
+    expected_user: int,
+    expected_assistant: int,
     timeout_seconds: float,
-    predecessor_completed_at: float,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], tuple[int, int]]:
+    """Wait for browser telemetry to publish the completed +1/+1 conversation delta."""
     deadline = time.monotonic() + timeout_seconds
+    latest: tuple[int, int] | None = None
     while time.monotonic() < deadline:
-        current = operation(client, operation_id)
-        status = str(current.get("status", ""))
-        if status in ACTIVE_STATUSES or status in TERMINAL_STATUSES:
-            claimed_at = current.get("claimed_at")
-            if isinstance(claimed_at, (int, float)) and claimed_at < predecessor_completed_at:
-                raise M1LiveError(
-                    f"operation {operation_id} was claimed at {claimed_at} before "
-                    f"predecessor completion at {predecessor_completed_at}"
-                )
-            return current
+        state = browser_state(client)
+        counts = signature_counts(state.get("conversation_signature"))
+        if counts is not None:
+            latest = counts
+            if (
+                counts[0] == expected_user + 1
+                and counts[1] == expected_assistant + 1
+            ):
+                return state, counts
         time.sleep(POLL_SECONDS)
-    raise M1LiveError(f"next operation {operation_id} was not claimed within {timeout_seconds}s")
+
+    raise M1LiveError(
+        "conversation signature did not reach exactly +1/+1 after the "
+        f"operation completed; last_counts={latest!r}, "
+        f"expected_next=({expected_user + 1}, {expected_assistant + 1})"
+    )
 
 
 def ensure_chat_ready(
@@ -494,211 +500,235 @@ def main() -> int:
     generated_fingerprints: dict[str, int] = {}
     session_marker = uuid.uuid4().hex[:10]
 
-    # Queue all 20 operations before the browser controller consumes them. The
-    # controller/bridge, not this harness, is responsible for claiming the next
-    # operation. The gate proves the next claim cannot occur before completion of
-    # the predecessor.
-    for index in range(1, DEFAULT_COUNT + 1):
-        marker = f"PASI_M1_CHAIN_{session_marker}_{index:02d}"
-        prompt = (
-            f"Reply with exactly this marker and no other text: {marker}. "
-            "This is a PASI M1 sequential handoff acceptance operation."
-        )
-        fingerprint = prompt_fingerprint(prompt)
-        if fingerprint in generated_fingerprints:
-            raise M1LiveError(f"generated repeated prompt at index {index}; first seen at {generated_fingerprints[fingerprint]}")
-        generated_fingerprints[fingerprint] = index
-
-        queued = queue_operation(
-            client,
-            "prompt",
-            prompt,
-            idempotency_key=f"{session_id}-{index:02d}",
-            completion_markers=[marker],
-        )
-        operation_id = str(queued["operation_id"])
-        operations.append(
-            {
-                "index": index,
-                "operation_id": operation_id,
-                "marker": marker,
-                "prompt": prompt,
-                "prompt_fingerprint": fingerprint,
-            }
-        )
-
     violations: list[str] = []
     duplicate_indices: list[int] = []
     skipped_indices: list[int] = []
     repeated_prompts: list[dict[str, Any]] = []
     terminal_chat_errors: list[dict[str, Any]] = []
     results: list[dict[str, Any]] = []
+    failure_error = ""
 
-    for position, expected in enumerate(operations):
-        index = int(expected["index"])
-        operation_id = str(expected["operation_id"])
+    # Queue exactly one prompt at a time. A later operation does not exist in
+    # the bridge queue until the predecessor has completed every acceptance
+    # check. This makes the chain conditional: any failure stops the chain and
+    # leaves no speculative future prompts queued.
+    try:
+        for index in range(1, DEFAULT_COUNT + 1):
+            marker = f"PASI_M1_CHAIN_{session_marker}_{index:02d}"
+            prompt = (
+                f"Reply with exactly this marker and no other text: {marker}. "
+                "This is a PASI M1 sequential handoff acceptance operation."
+            )
+            fingerprint = prompt_fingerprint(prompt)
+            if fingerprint in generated_fingerprints:
+                raise M1LiveError(
+                    f"generated repeated prompt at index {index}; "
+                    f"first seen at {generated_fingerprints[fingerprint]}"
+                )
+            generated_fingerprints[fingerprint] = index
 
-        if position > 0:
-            previous = results[-1]
-            previous_completed_at = float(previous["completed_at"])
-            current_claim = wait_for_next_claim(
+            previous = results[-1] if results else None
+            previous_completed_ms = (
+                int(previous["completed_at_ms"]) if previous is not None else None
+            )
+
+            queued = queue_operation(
+                client,
+                "prompt",
+                prompt,
+                idempotency_key=f"{session_id}-{index:02d}",
+                completion_markers=[marker],
+            )
+            operation_id = str(queued["operation_id"])
+            expected = {
+                "index": index,
+                "operation_id": operation_id,
+                "marker": marker,
+                "prompt": prompt,
+                "prompt_fingerprint": fingerprint,
+            }
+            operations.append(expected)
+
+            result = wait_for_terminal(
                 client,
                 operation_id,
                 timeout_seconds=args.timeout,
-                predecessor_completed_at=previous_completed_at,
+                later_operation_ids=[],
+                violation_log=violations,
             )
-            if current_claim.get("operation_id") != operation_id:
+
+            if result.get("operation_id") != operation_id:
                 skipped_indices.append(index)
-                raise M1LiveError(f"unexpected operation claimed at index {index}: {current_claim!r}")
+                raise M1LiveError(f"operation identity mismatch at index {index}")
 
-        result = wait_for_terminal(
-            client,
-            operation_id,
-            timeout_seconds=args.timeout,
-            later_operation_ids=[
-                str(item["operation_id"])
-                for item in operations[position + 1 :]
-            ],
-            violation_log=violations,
-        )
-
-        if result.get("operation_id") != operation_id:
-            skipped_indices.append(index)
-            raise M1LiveError(f"operation identity mismatch at index {index}")
-
-        if result.get("status") != "completed":
-            error = str(result.get("error") or "")
-            if error.startswith("CHAT_"):
-                terminal_chat_errors.append({"index": index, "operation_id": operation_id, "error": error})
-            raise M1LiveError(
-                f"operation {index} did not complete: status={result.get('status')!r} error={error!r}"
-            )
-
-        response_text = str(result.get("response_text") or "")
-        if str(expected["marker"]) not in response_text:
-            raise M1LiveError(
-                f"operation {index} completed without its unique response marker"
-            )
-
-        timing = result.get("timing")
-        if not isinstance(timing, dict):
-            raise M1LiveError(f"operation {index} completed without browser timing evidence")
-
-        if timing.get("user_messages_added") != 1:
-            duplicate_indices.append(index)
-
-        if timing.get("ack_verified") is not True:
-            raise M1LiveError(f"operation {index} lacked verified prompt-submission acknowledgement")
-
-        submission_via = str(timing.get("submission_via") or "")
-        if submission_via == "sent_unverified":
-            raise M1LiveError(f"operation {index} used an unverified submission path")
-
-        if position > 0:
-            previous = results[-1]
-            previous_completed_ms = int(previous["completed_at_ms"])
-            injected_at_ms = timing.get("injected_at_ms")
-            response_completed_to_injection = timing.get("response_completed_to_prompt_injected_ms")
-
-            if not isinstance(injected_at_ms, (int, float)):
+            if result.get("status") != "completed":
+                error = str(result.get("error") or "")
+                if error.startswith("CHAT_"):
+                    terminal_chat_errors.append(
+                        {
+                            "index": index,
+                            "operation_id": operation_id,
+                            "error": error,
+                        }
+                    )
                 raise M1LiveError(
-                    f"operation {index} lacks injected_at_ms timing for predecessor-gated handoff"
+                    f"operation {index} did not complete: "
+                    f"status={result.get('status')!r} error={error!r}"
                 )
-            if injected_at_ms < previous_completed_ms:
+
+            response_text = str(result.get("response_text") or "")
+            if str(expected["marker"]) not in response_text:
+                raise M1LiveError(
+                    f"operation {index} completed without its unique response marker"
+                )
+
+            timing = result.get("timing")
+            if not isinstance(timing, dict):
+                raise M1LiveError(
+                    f"operation {index} completed without browser timing evidence"
+                )
+
+            if timing.get("user_messages_added") != 1:
+                duplicate_indices.append(index)
+
+            if timing.get("ack_verified") is not True:
+                raise M1LiveError(
+                    f"operation {index} lacked verified prompt-submission acknowledgement"
+                )
+
+            submission_via = str(timing.get("submission_via") or "")
+            if submission_via == "sent_unverified":
+                raise M1LiveError(
+                    f"operation {index} used an unverified submission path"
+                )
+
+            injected_at_ms = timing.get("injected_at_ms")
+            if previous_completed_ms is not None:
+                if not isinstance(injected_at_ms, (int, float)):
+                    raise M1LiveError(
+                        f"operation {index} lacks injected_at_ms timing for "
+                        "predecessor-gated handoff"
+                    )
+                if injected_at_ms < previous_completed_ms:
+                    violation = (
+                        f"operation {index} injection occurred before predecessor "
+                        f"completion: injected_at_ms={injected_at_ms}, "
+                        f"previous_completed_at_ms={previous_completed_ms}"
+                    )
+                    violations.append(violation)
+                    raise M1LiveError(violation)
+
+                response_completed_to_injection = timing.get(
+                    "response_completed_to_prompt_injected_ms"
+                )
+                if not isinstance(response_completed_to_injection, (int, float)):
+                    raise M1LiveError(
+                        f"operation {index} lacks "
+                        "response_completed_to_prompt_injected_ms"
+                    )
+                if response_completed_to_injection < 0:
+                    raise M1LiveError(
+                        f"operation {index} reported a negative "
+                        "completion-to-injection latency"
+                    )
+
+            state, counts = wait_for_signature_delta(
+                client,
+                expected_user=expected_user,
+                expected_assistant=expected_assistant,
+                timeout_seconds=30.0,
+            )
+            user_delta = counts[0] - expected_user
+            assistant_delta = counts[1] - expected_assistant
+            if user_delta != 1 or assistant_delta != 1:
+                duplicate_indices.append(index)
                 violation = (
-                    f"operation {index} injection occurred before predecessor "
-                    f"completion: injected_at_ms={injected_at_ms}, "
-                    f"previous_completed_at_ms={previous_completed_ms}"
+                    f"operation {index} conversation delta was +{user_delta}/+{assistant_delta}; "
+                    "expected exactly +1/+1"
                 )
                 violations.append(violation)
                 raise M1LiveError(violation)
-            if not isinstance(response_completed_to_injection, (int, float)):
-                raise M1LiveError(
-                    f"operation {index} lacks response_completed_to_prompt_injected_ms"
+            expected_user, expected_assistant = counts
+
+            prior_index = next(
+                (
+                    item["index"]
+                    for item in operations[:-1]
+                    if item["prompt_fingerprint"] == fingerprint
+                ),
+                None,
+            )
+            if prior_index is not None:
+                repeated_prompts.append(
+                    {
+                        "index": index,
+                        "repeated_from_index": prior_index,
+                        "fingerprint": fingerprint,
+                    }
                 )
-            if response_completed_to_injection < 0:
+
+            claimed_at = result.get("claimed_at")
+            completed_at_ms = timing.get("completed_at_ms")
+            if not isinstance(completed_at_ms, (int, float)):
+                raise M1LiveError(f"operation {index} lacks completed_at_ms timing")
+            completed_at_epoch = float(completed_at_ms) / 1000.0
+
+            observed_chat_url = str(
+                result.get("chat_url") or state.get("chat_url") or ""
+            )
+            if observed_chat_url and observed_chat_url != chat_url:
                 raise M1LiveError(
-                    f"operation {index} reported a negative completion-to-injection latency"
+                    f"operation {index} moved away from the dedicated automation chat: "
+                    f"{observed_chat_url!r}"
                 )
 
-        state = browser_state(client)
-        counts = signature_counts(state.get("conversation_signature"))
-        if counts is None:
-            raise M1LiveError(f"operation {index} lacked conversation_signature evidence")
-
-        user_delta = counts[0] - expected_user
-        assistant_delta = counts[1] - expected_assistant
-        if user_delta != 1 or assistant_delta != 1:
-            duplicate_indices.append(index)
-            violation = (
-                f"operation {index} conversation delta was +{user_delta}/+{assistant_delta}; "
-                "expected exactly +1/+1"
-            )
-            violations.append(violation)
-            raise M1LiveError(violation)
-        expected_user, expected_assistant = counts
-
-        fingerprint = str(expected["prompt_fingerprint"])
-        prior_index = next(
-            (item["index"] for item in operations[:position] if item["prompt_fingerprint"] == fingerprint),
-            None,
-        )
-        if prior_index is not None:
-            repeated_prompts.append(
-                {"index": index, "repeated_from_index": prior_index, "fingerprint": fingerprint}
-            )
-
-        claimed_at = result.get("claimed_at")
-        completed_at_ms = timing.get("completed_at_ms")
-        if not isinstance(completed_at_ms, (int, float)):
-            raise M1LiveError(f"operation {index} lacks completed_at_ms timing")
-        completed_at_epoch = float(completed_at_ms) / 1000.0
-
-        observed_chat_url = str(result.get("chat_url") or state.get("chat_url") or "")
-        if observed_chat_url and observed_chat_url != chat_url:
-            raise M1LiveError(
-                f"operation {index} moved away from the dedicated automation chat: {observed_chat_url!r}"
-            )
-
-        results.append(
-            {
-                "index": index,
-                "operation_id": operation_id,
-                "marker": expected["marker"],
-                "prompt_fingerprint": fingerprint,
-                "status": result.get("status"),
-                "claimed_at": claimed_at,
-                "completed_at": completed_at_epoch,
-                "completed_at_ms": completed_at_ms,
-                "timing": timing,
-                "user_delta": user_delta,
-                "assistant_delta": assistant_delta,
-                "chat_url": observed_chat_url or chat_url,
-                "retry_count": result.get("retry_count", 0),
-                "recovery_event_count": len(result.get("recovery_events") or []),
-            }
-        )
-
-        print(
-            json.dumps(
+            results.append(
                 {
                     "index": index,
                     "operation_id": operation_id,
-                    "status": result.get("status"),
                     "marker": expected["marker"],
+                    "prompt_fingerprint": fingerprint,
+                    "status": result.get("status"),
+                    "claimed_at": claimed_at,
+                    "completed_at": completed_at_epoch,
+                    "completed_at_ms": completed_at_ms,
                     "timing": timing,
                     "user_delta": user_delta,
                     "assistant_delta": assistant_delta,
-                },
-                ensure_ascii=False,
-            ),
-            flush=True,
-        )
+                    "chat_url": observed_chat_url or chat_url,
+                    "retry_count": result.get("retry_count", 0),
+                    "recovery_event_count": len(result.get("recovery_events") or []),
+                }
+            )
+
+            print(
+                json.dumps(
+                    {
+                        "index": index,
+                        "operation_id": operation_id,
+                        "status": result.get("status"),
+                        "marker": expected["marker"],
+                        "timing": timing,
+                        "user_delta": user_delta,
+                        "assistant_delta": assistant_delta,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+    except M1LiveError as exc:
+        failure_error = str(exc)
 
     payload = {
         "gate": "M1",
         "status": "PASS"
-        if not violations and not duplicate_indices and not skipped_indices and not repeated_prompts and not terminal_chat_errors
+        if not failure_error
+        and not violations
+        and not duplicate_indices
+        and not skipped_indices
+        and not repeated_prompts
+        and not terminal_chat_errors
+        and len(results) == DEFAULT_COUNT
         else "FAIL",
         "count": DEFAULT_COUNT,
         "session_id": session_id,
@@ -717,6 +747,9 @@ def main() -> int:
         "terminal_chat_errors": terminal_chat_errors,
         "prompt_fingerprints": [item["prompt_fingerprint"] for item in operations],
         "results": results,
+        "attempted_count": len(operations),
+        "completed_count": len(results),
+        "failure_error": failure_error,
         "completed_at": time.time(),
     }
     evidence_path.write_text(
@@ -725,7 +758,10 @@ def main() -> int:
     )
 
     if payload["status"] != "PASS":
-        raise M1LiveError(f"M1 failed; evidence written to {evidence_path}")
+        raise M1LiveError(
+            f"M1 failed after {len(results)} completed operation(s); "
+            f"evidence written to {evidence_path}: {failure_error or 'acceptance criteria not met'}"
+        )
 
     print(
         "M1 PASS: 20 sequential tasks; "

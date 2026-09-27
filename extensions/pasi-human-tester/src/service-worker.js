@@ -142,6 +142,9 @@ async function runStep(tabId, step, allowedOrigins, targetOrigin) {
         );
         if (value === undefined) throw new Error("json_path was not found");
         observed.json_path_value = value;
+        if (step.value !== undefined && String(value) !== String(step.value)) {
+          throw new Error("json_path value did not match expected value");
+        }
       }
     } else {
       const response = await runContentStep(tabId, step);

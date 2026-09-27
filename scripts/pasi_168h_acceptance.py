@@ -194,8 +194,10 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
     )
     before = git(worktree, "rev-parse", "HEAD")
     env = os.environ.copy()
+    previous = load_run_state().get("previous_task_context", "")
     env.update({
         "PASI_ACCEPTANCE_RUN_ID": run_id,
+        "PASI_TASK_PREVIOUS_CONTEXT": str(previous),
         "PASI_TASK_ID": task.task_id,
         "PASI_TASK_PHASE": task.phase.id,
         "PASI_TASK_TITLE": task.title,
@@ -218,6 +220,7 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
         raise RuntimeError(f"executor completed {task.task_id} without a new commit")
     if os.environ.get("PASI_PUSH", "").strip() == "1":
         git(worktree, "push", "--set-upstream", "origin", branch, timeout=180)
+    pr = ensure_evidence_pr(branch, run_id)
     mark_checked(task)
     evidence = {
         "event": "task_completed",
@@ -228,6 +231,7 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
         "commit_before": before,
         "commit_after": after,
         "branch": branch,
+        "evidence_pr": pr,
     }
     emit(evidence)
     return evidence

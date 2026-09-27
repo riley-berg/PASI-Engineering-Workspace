@@ -386,6 +386,45 @@
     };
   }
 
+  async function triggerConnectionLoss(operationId, source = 'controlled_probe') {
+    const current = readRecoveryState();
+    if (current?.operation_id && current.operation_id !== operationId) return false;
+    const now = Date.now();
+    const state = {
+      ...(current || {
+        operation_id: operationId,
+        operation_type: 'prompt',
+        started_at: new Date(now).toISOString(),
+        started_ms: now,
+        baseline: fingerprint(),
+        chat_url: location.href,
+        reload_count: 0,
+        phase: 'monitoring'
+      }),
+      operation_id: operationId,
+      phase: 'reloaded',
+      reload_at: new Date(now).toISOString(),
+      recovery_reason: 'connection_error',
+      recovery_started_at_ms: now,
+      recovery_source: source,
+      checkpoint_preserved: true,
+      response_stopped_on_loss: true
+    };
+    writeRecoveryState(state);
+    await report('chatgpt_recovery', {
+      phase: 'connection_lost',
+      operation_id: operationId,
+      recovery_action: 'stop_generation',
+      recovery_reason: 'connection_error',
+      recovery_source: source,
+      response_stopped_on_loss: true,
+      checkpoint_preserved: true,
+      resume_phase: 'response_generation'
+    });
+    location.reload();
+    return true;
+  }
+
   async function operation(operationId) {
     try {
       const response = await bridge(`/operation?operation_id=${encodeURIComponent(operationId)}`);
@@ -658,9 +697,10 @@
       return;
     }
 
-    const response = latestAssistant();
-    const currentFingerprint = fingerprint();
-    if (!generating() && response && currentFingerprint !== String(state.baseline || '')) {
+    if (state.recovery_reason !== 'connection_error') {
+      const response = latestAssistant();
+      const currentFingerprint = fingerprint();
+      if (!generating() && response && currentFingerprint !== String(state.baseline || '')) {
       if (await finishExisting(operationId, response)) {
         clearRecoveryState();
         return true;
@@ -747,6 +787,8 @@
       }
     }
 
+    }
+
     const reloadAt = Date.parse(String(state.reload_at || ''));
     if (Number.isFinite(reloadAt) && Date.now() - reloadAt < RECOVERY_GRACE_MS) {
       await report('chatgpt_recovery', { phase: 'grace_wait', operation_id: operationId, recovery_action: 'wait_after_reload', grace_remaining_ms: RECOVERY_GRACE_MS - (Date.now() - reloadAt) });
@@ -754,6 +796,20 @@
     }
 
     const recoveryContext = state.recovery_context || recoveryContextFromActiveState();
+    if (state.recovery_reason === 'connection_error') {
+      await report('chatgpt_recovery', {
+        phase: 'connection_restored',
+        operation_id: operationId,
+        recovery_action: 'resume_same_operation',
+        recovery_reason: 'connection_error',
+        recovery_source: state.recovery_source || 'browser_recovery',
+        resumed_after_reconnect: true,
+        same_operation_resumed: true,
+        response_stopped_on_loss: true,
+        checkpoint_preserved: state.checkpoint_preserved === true,
+        resume_phase: 'response_generation'
+      });
+    }
     const reason = replacementReason();
     if (!reason) {
       await report('chatgpt_recovery', {
@@ -1014,6 +1070,10 @@
     setInterval(() => { runInspection().catch(() => {}); }, POLL_MS);
     await runInspection();
   }
+
+  globalThis.PASI_RECOVERY_PROBE = Object.freeze({
+    triggerConnectionLoss
+  });
 
   start().catch(() => {});
 })();

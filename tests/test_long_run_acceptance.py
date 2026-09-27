@@ -45,7 +45,7 @@ def _build_evidence(verifier: Any = None) -> Any:
         {
             "target_duration_seconds": 600,
             "health_sample_interval_seconds": 60,
-            "expected_logical_operations": 3,
+            "minimum_logical_operations": 3,
             "planned_recovery_count": 1,
             "recovery_schedule_seconds": [120],
             "recovery_schedule_tolerance_seconds": 30,
@@ -56,7 +56,7 @@ def _build_evidence(verifier: Any = None) -> Any:
     end = start + timedelta(seconds=verifier.POLICY["target_duration_seconds"])
 
     operations = []
-    for index in range(1, verifier.POLICY["expected_logical_operations"] + 1):
+    for index in range(1, verifier.POLICY["minimum_logical_operations"] + 1):
         operations.append(
             {
                 "operation_id": f"op-{index}",
@@ -178,7 +178,7 @@ def _build_evidence(verifier: Any = None) -> Any:
             "wrong_conversation_events": 0,
         },
         "summary": {
-            "logical_operations_completed": verifier.POLICY["expected_logical_operations"],
+            "logical_operations_completed": len(operations),
             "duplicate_logical_operations": 0,
             "skipped_operations": 0,
             "terminal_chat_errors": 0,

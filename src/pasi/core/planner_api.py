@@ -373,3 +373,38 @@ class PlannerConsoleService:
                 for roadmap in self.roadmap_store.list()
             ]
         return []
+
+
+class DashboardAPIService:
+    """Compose the runtime and planner APIs without duplicating domain state."""
+
+    def __init__(
+        self,
+        *,
+        runtime: Any,
+        planner: PlannerConsoleService,
+    ) -> None:
+        self.runtime = runtime
+        self.planner = planner
+
+    def request(
+        self,
+        *,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+        body: dict[str, Any] | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        if path.startswith("/v1/planner"):
+            return self.planner.request(
+                method=method,
+                path=path,
+                headers=headers,
+                body=body,
+            )
+        return self.runtime.request(
+            method=method,
+            path=path,
+            headers=headers,
+            body=body,
+        )

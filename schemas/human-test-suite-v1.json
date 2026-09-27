@@ -1,0 +1,32 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/human-test-suite-v1.json",
+  "title":"PASI Human Test Suite v1",
+  "type":"object",
+  "required":["schema_version","suite_id","suite_version","allowed_origins","steps"],
+  "properties":{
+    "schema_version":{"const":1},
+    "suite_id":{"type":"string","minLength":1,"maxLength":128},
+    "suite_version":{"type":"integer","minimum":1},
+    "allowed_origins":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+    "steps":{"type":"array","minItems":1,"items":{
+      "type":"object",
+      "required":["id","action"],
+      "properties":{
+        "id":{"type":"string","pattern":"^[A-Za-z][A-Za-z0-9._-]{0,80}$"},
+        "action":{"enum":["navigate","click","fill","assert_visible","assert_text","wait_for_text","assert_url_contains","wait_ms","reload","screenshot","api_get_json"]},
+        "url":{"type":"string"},
+        "selector":{"type":"string","maxLength":1000},
+        "value":{"type":"string","maxLength":10000},"expected_value":{"type":"string","maxLength":10000},"control_action":{"enum":["start","stop","retry","recover"]},"operation_id":{"type":"string","maxLength":256},
+        "text":{"type":"string","maxLength":10000},
+        "contains":{"type":"boolean"},
+        "timeout_ms":{"type":"integer","minimum":100,"maximum":120000},
+        "expected_status":{"type":"integer","minimum":100,"maximum":599},
+        "json_path":{"type":"string","maxLength":500}
+      },
+      "additionalProperties":false
+    }},
+    "negative_control":{"type":"boolean"},"expected_failure_step_id":{"type":"string","maxLength":80}
+  },
+  "additionalProperties":false
+}

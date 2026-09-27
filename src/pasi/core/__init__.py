@@ -31,6 +31,8 @@ from .events import DurableEvent, InvalidEvent
 from .failure_registry import FailureSignature, SQLiteFailureRegistry, signature_key
 from .ledger import InvalidLedgerEntry, OperationLedgerEntry
 from .ledger_store import DuplicateLedgerEntry, LedgerEntryNotFound, LineageConflict, SQLiteOperationLedger
+from .human_testing import CodeChangeCandidate, HumanTestRun, HumanTestStepResult, HumanTestTrustCertificate, HumanTestTrustEvaluator, HumanTestTrustPolicy, SelfImprovementDecision, SelfImprovementGate, TrustStatus
+from .human_test_store import DuplicateHumanTestRun, HumanTestRunNotFound, HumanTestStore
 from .migrations import MigrationError, migrate_operation_state_database
 from .operation_state import (
     InvalidOperationState,
@@ -158,7 +160,9 @@ __all__ = [
     "CompactionError",
     "CompactionGroup",
     "MemoryCompactor",
+    "CodeChangeCandidate",
     "DuplicateEvent",
+    "DuplicateHumanTestRun",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",
     "DurableEvent",
@@ -168,6 +172,13 @@ __all__ = [
     "InvalidLedgerEntry",
     "InvalidOperationState",
     "InvalidOperationTransition",
+    "HumanTestRun",
+    "HumanTestRunNotFound",
+    "HumanTestStepResult",
+    "HumanTestStore",
+    "HumanTestTrustCertificate",
+    "HumanTestTrustEvaluator",
+    "HumanTestTrustPolicy",
     "LineageConflict",
     "LedgerEntryNotFound",
     "MigrationError",
@@ -221,6 +232,9 @@ __all__ = [
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",
+    "SelfImprovementDecision",
+    "SelfImprovementGate",
+    "TrustStatus",
     "EvidenceAwareTaskSelector",
     "EvidenceSnapshot",
     "StaleSelection",

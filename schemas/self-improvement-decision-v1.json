@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/self-improvement-decision-v1.json",
+  "title":"PASI self-improvement gate decision v1",
+  "type":"object",
+  "required":["schema_version","status","candidate_sha","reasons","trust_status","evaluated_at"],
+  "properties":{
+    "schema_version":{"const":1},
+    "status":{"enum":["PASS","BLOCKED"]},
+    "candidate_sha":{"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "reasons":{"type":"array","items":{"type":"string"}},
+    "trust_status":{"enum":["pending","trusted","revoked"]},
+    "evaluated_at":{"type":"string","format":"date-time"}
+  },
+  "additionalProperties":false
+}

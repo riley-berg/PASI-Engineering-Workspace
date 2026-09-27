@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "PASI Human Test Harness",
+  "version": "0.1.0",
+  "description": "Typed, evidence-producing browser test harness for PASI human-acceptance automation.",
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "src/service-worker.js"
+  },
+  "action": {
+    "default_title": "PASI Human Test Harness",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [],
+  "minimum_chrome_version": "120"
+}

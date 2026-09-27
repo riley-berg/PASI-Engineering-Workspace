@@ -29,7 +29,7 @@ The native PASI ChatGPT Handoff extension lives under extensions/pasi-chatgpt, w
 
 Browser preflight:
 
-    python scripts/pasi_engineering_browser_preflight.py --extension-root "$PWD/automation/chromium/pasi-chatgpt"
+    python scripts/pasi_engineering_browser_preflight.py --extension-root "$PWD/extensions/pasi-chatgpt"
 
 Executor command:
 

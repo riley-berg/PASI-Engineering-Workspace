@@ -6,9 +6,14 @@ from .protocol import ChatMessage, ModelProvider, ProviderResponse
 from .selection import DeterministicProviderSelector, ProviderRequirements, ProviderSelection, ProviderSelectionError, StaleProviderSelection
 from .selection_store import ProviderSelectionNotFound, SQLiteProviderSelectionStore
 from .health import HealthClassification, ProviderHealthError, ProviderHealthMonitor, ProviderHealthSnapshot, SQLiteProviderHealthStore
+from .benchmark import BenchmarkCase, BenchmarkError, BenchmarkReport, BenchmarkRunner
 
 __all__ = [
     "ChatMessage",
+    "BenchmarkCase",
+    "BenchmarkError",
+    "BenchmarkReport",
+    "BenchmarkRunner",
     "HealthClassification",
     "ProviderHealthError",
     "ProviderHealthMonitor",

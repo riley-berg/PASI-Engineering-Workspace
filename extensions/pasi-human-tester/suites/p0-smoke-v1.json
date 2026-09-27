@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "suite_id": "pasi-p0-runtime-smoke",
+  "suite_version": 1,
+  "allowed_origins": ["http://127.0.0.1:*", "http://localhost:*"],
+  "steps": [
+    {
+      "id": "backend-health",
+      "action": "api_get_json",
+      "url": "/healthz",
+      "expected_status": 200,
+      "json_path": "status",
+      "value": "ok",
+      "timeout_ms": 5000
+    },
+    {
+      "id": "open-app",
+      "action": "navigate",
+      "url": "/",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "body-visible",
+      "action": "assert_visible",
+      "selector": "body",
+      "timeout_ms": 10000
+    },
+    {
+      "id": "capture-baseline",
+      "action": "screenshot"
+    }
+  ]
+}

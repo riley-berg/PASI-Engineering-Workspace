@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "PASI ChatGPT Handoff",
+  "version": "0.2.0",
+  "description": "Self-contained PASI browser automation boundary and ChatGPT handoff extension.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "contextMenus",
+    "notifications",
+    "downloads",
+    "scripting",
+    "webRequest",
+    "declarativeNetRequest",
+    "userScripts",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "http://127.0.0.1:8765/*",
+    "https://www.chatgpt.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://www.chatgpt.com/*"
+      ],
+      "js": [
+        "src/protocol.js",
+        "src/api_contract.js",
+        "src/api_v2.js",
+        "src/api_v3.js",
+        "src/api_v4.js",
+        "src/copy-api.js",
+        "src/chatgpt.js",
+        "src/timeout-config.js",
+        "src/detectors.js",
+        "src/recovery_progress.js",
+        "src/content.js",
+        "src/recovery.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "PASI ChatGPT Handoff",
+    "default_popup": "popup.html"
+  },
+  "minimum_chrome_version": "120",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "timeout-policy.json"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://www.chatgpt.com/*"
+      ]
+    }
+  ]
+}

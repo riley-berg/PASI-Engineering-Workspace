@@ -1,0 +1,11 @@
+:root { color-scheme: light dark; }
+body{width:420px;margin:0;padding:18px;font:13px system-ui,sans-serif;background:Canvas;color:CanvasText}
+header{display:flex;justify-content:space-between;gap:14px;align-items:start}
+.eyebrow{margin:0 0 4px;letter-spacing:.15em;text-transform:uppercase;opacity:.55;font-size:10px}
+h1{margin:0;font-size:20px}.muted{opacity:.65;max-width:310px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a{color:inherit}.status{min-height:20px;margin:10px 0;opacity:.75}
+.card{border:1px solid color-mix(in srgb,CanvasText 14%,transparent);border-radius:10px;padding:12px;margin:10px 0}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}.name{font-weight:650}.meta{font-size:11px;opacity:.65}
+.actions{display:flex;gap:8px;margin-top:10px}.actions button{font:inherit;padding:6px 9px}
+.hosts{margin-top:10px;display:grid;gap:6px}.host{display:flex;gap:7px;align-items:center;font-size:11px}
+.warn{margin-top:8px;font-size:11px;color:#b45309}

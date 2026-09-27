@@ -71,7 +71,13 @@ def git_clean() -> bool:
     return result.returncode == 0 and not result.stdout.strip()
 
 
-def queue_operation(operation_type: str, prompt: str, key: str, markers: list[str] | None = None) -> dict:
+def queue_operation(
+    operation_type: str,
+    prompt: str,
+    key: str,
+    markers: list[str] | None = None,
+    m0_recovery_probe: bool = False,
+) -> dict:
     body = {
         "operation_type": operation_type,
         "prompt": prompt,
@@ -79,6 +85,8 @@ def queue_operation(operation_type: str, prompt: str, key: str, markers: list[st
     }
     if markers:
         body["completion_markers"] = markers
+    if m0_recovery_probe:
+        body["m0_recovery_probe"] = True
     return request("/queue", "POST", body)
 
 
@@ -146,7 +154,7 @@ def build_runtime_evidence(
             event
             for event in events
             if isinstance(event, dict)
-            and event.get("phase") == "reloading"
+            and event.get("phase") == "connection_lost"
             and event.get("recovery_reason") == "connection_error"
         ),
         None,
@@ -156,7 +164,7 @@ def build_runtime_evidence(
             event
             for event in reversed(events)
             if isinstance(event, dict)
-            and event.get("phase") in {"ready_for_retry", "retry_resumed"}
+            and event.get("phase") in {"connection_restored", "ready_for_retry", "retry_resumed"}
         ),
         None,
     )
@@ -181,7 +189,8 @@ def build_runtime_evidence(
             ),
             "operation_id": recovered_operation_id,
             "resume_phase": str(
-                (connection_error_event or {}).get("recovery_reason")
+                (connection_error_event or {}).get("resume_phase")
+                or (connection_error_event or {}).get("recovery_reason")
                 or "connection_recovery"
             ),
         },
@@ -310,6 +319,7 @@ def main() -> int:
             prompt,
             f"m0-live:{run_id}:prompt",
             ["PASI_RESULT_STATUS: complete"],
+            m0_recovery_probe=True,
         )
         operation_id = str(
             ((prompt_result.get("operation") or {}).get("operation_id") or "")
@@ -325,6 +335,7 @@ def main() -> int:
         result["operation_id"] = operation_id
         result["fresh_chat_created_after_usage"] = create_fresh_chat
         result["thinking_enabled"] = health_data.get("thinking_enabled") is True
+        result["controlled_recovery_probe"] = True
         if runtime_error is not None:
             result["recovery_defaults_error"] = True
             result["recovery_defaults_observation"] = runtime_error

@@ -169,6 +169,22 @@ def main() -> int:
             raise RuntimeError(
                 f"refusing to add M0 operations while bridge queue is not empty: {status!r}"
             )
+        if int(status.get("runtime_error_observation_priority", 0)) < 200:
+            raise RuntimeError(
+                "bridge is stale: restart the Engineering Workspace bridge so runtime errors cannot be overwritten"
+            )
+
+        health_deadline = time.monotonic() + 30
+        while time.monotonic() < health_deadline:
+            health_observation = request("/browser/health").get("observation") or {}
+            health_data = health_observation.get("data") if isinstance(health_observation, dict) else {}
+            if isinstance(health_data, dict) and health_data.get("runtime_error_telemetry") is True:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError(
+                "updated PASI ChatGPT extension runtime error telemetry was not observed; redeploy/reload the extension first"
+            )
 
         prompt = current_prompt()
         run_id = uuid.uuid4().hex

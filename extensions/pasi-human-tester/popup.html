@@ -15,7 +15,8 @@
 <body>
   <h3>PASI Human Test Harness</h3>
   <div class="muted">Typed browser actions only. Trust is granted elsewhere.</div>
-  <label>Target origin<input id="origin" placeholder="http://127.0.0.1:3000"></label>
+  <label>Target origin<input id="origin" placeholder="http://127.0.0.1:8790"></label>
+  <label>Suite<select id="suite"><option value="p0-smoke-v1.json">P0 smoke</option><option value="p0-runtime-controls-v1.json">P0 runtime controls</option><option value="p0-negative-control-v1.json">P0 negative control</option></select></label>
   <label>Code head<input id="code-head" placeholder="40-char git SHA"></label>
   <label>Backend token<input id="token" type="password" placeholder="human-test ingest token"></label>
   <label>Runtime control token<input id="control-token" type="password" placeholder="runtime control token"></label>

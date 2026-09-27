@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -30,6 +31,9 @@ RETRY_BUDGETS = {"controller": 3, "response": 2, "context": 1}
 MAX_ERROR_CHARS = 2_000
 MAX_RECOVERY_CONTEXT_REPOSITORY_CHARS = 200
 MAX_IDEMPOTENCY_KEY_CHARS = 128
+MAX_CHAIN_ID_CHARS = 128
+MAX_PREDECESSOR_OPERATION_ID_CHARS = 200
+MAX_SEQUENCE_INDEX = 1_000_000
 MAX_RECOVERY_EVENTS_PER_OPERATION = 64
 MAX_TIMING_KEYS = frozenset({
     "injected_at_ms",
@@ -244,6 +248,75 @@ class BridgeState:
             item["response_text_available"] = True
         return item
 
+    @staticmethod
+    def _normalize_chain_metadata(
+        chain_id: object,
+        sequence_index: object,
+        predecessor_operation_id: object,
+    ) -> tuple[str | None, int | None, str | None]:
+        values_present = any(
+            value is not None
+            for value in (chain_id, sequence_index, predecessor_operation_id)
+        )
+        if not values_present:
+            return None, None, None
+
+        if not isinstance(chain_id, str) or not chain_id.strip() or len(chain_id.strip()) > MAX_CHAIN_ID_CHARS:
+            raise ValueError("chain_id must be a nonblank bounded string")
+        if (
+            isinstance(sequence_index, bool)
+            or not isinstance(sequence_index, int)
+            or sequence_index < 1
+            or sequence_index > MAX_SEQUENCE_INDEX
+        ):
+            raise ValueError("sequence_index must be a positive bounded integer")
+        if predecessor_operation_id is not None and (
+            not isinstance(predecessor_operation_id, str)
+            or not predecessor_operation_id.strip()
+            or len(predecessor_operation_id.strip()) > MAX_PREDECESSOR_OPERATION_ID_CHARS
+        ):
+            raise ValueError("predecessor_operation_id must be a bounded string when present")
+
+        predecessor = predecessor_operation_id.strip() if predecessor_operation_id is not None else None
+        if sequence_index == 1 and predecessor is not None:
+            raise ValueError("sequence_index 1 cannot have a predecessor_operation_id")
+        if sequence_index > 1 and predecessor is None:
+            raise ValueError("sequence_index greater than 1 requires a predecessor_operation_id")
+
+        return chain_id.strip(), sequence_index, predecessor
+
+    @staticmethod
+    def _chain_item_claimable(
+        item: dict[str, Any],
+        queue: list[dict[str, Any]],
+    ) -> bool:
+        predecessor_id = item.get("predecessor_operation_id")
+        if predecessor_id is None:
+            return True
+        if not isinstance(predecessor_id, str) or not predecessor_id.strip():
+            return False
+
+        predecessor = next(
+            (
+                candidate
+                for candidate in queue
+                if candidate.get("operation_id") == predecessor_id
+            ),
+            None,
+        )
+        if predecessor is None or predecessor.get("status") != "completed":
+            return False
+        if predecessor.get("chain_id") != item.get("chain_id"):
+            return False
+
+        previous_index = predecessor.get("sequence_index")
+        current_index = item.get("sequence_index")
+        return (
+            isinstance(previous_index, int)
+            and isinstance(current_index, int)
+            and current_index == previous_index + 1
+        )
+
     def queue_operation(
         self,
         operation_type: str,
@@ -251,6 +324,9 @@ class BridgeState:
         idempotency_key: str | None = None,
         completion_markers: list[str] | None = None,
         m0_recovery_probe: bool = False,
+        chain_id: str | None = None,
+        sequence_index: int | None = None,
+        predecessor_operation_id: str | None = None,
     ) -> ChatOperation:
         if completion_markers is not None:
             if (
@@ -284,16 +360,69 @@ class BridgeState:
 
         with self.lock:
             queue = self._load_queue()
+            normalized_chain_id, normalized_sequence_index, normalized_predecessor = (
+                self._normalize_chain_metadata(
+                    chain_id,
+                    sequence_index,
+                    predecessor_operation_id,
+                )
+            )
+            prompt_fingerprint = hashlib.sha256(
+                " ".join(prompt.split()).strip().encode("utf-8")
+            ).hexdigest()
+
             if idempotency_key is not None:
                 for item in queue:
-                    if (
-                        item.get("idempotency_key") == idempotency_key
-                        and item.get("operation_type") == operation_type
+                    if item.get("idempotency_key") != idempotency_key:
+                        continue
+                    same_request = (
+                        item.get("operation_type") == operation_type
                         and item.get("prompt") == prompt
-                        and item.get("status") not in {"completed", "failed", "cancelled"}
-                    ):
-                        fields = ChatOperation.__dataclass_fields__
-                        return ChatOperation(**{key: item[key] for key in fields if key in item})
+                        and item.get("chain_id") == normalized_chain_id
+                        and item.get("sequence_index") == normalized_sequence_index
+                        and item.get("predecessor_operation_id") == normalized_predecessor
+                    )
+                    if not same_request:
+                        raise ValueError(
+                            "idempotency_key is already bound to a different operation"
+                        )
+                    fields = ChatOperation.__dataclass_fields__
+                    return ChatOperation(**{key: item[key] for key in fields if key in item})
+
+            if normalized_chain_id is not None:
+                chain_items = [
+                    item
+                    for item in queue
+                    if item.get("chain_id") == normalized_chain_id
+                ]
+                if any(
+                    item.get("sequence_index") == normalized_sequence_index
+                    for item in chain_items
+                ):
+                    raise ValueError(
+                        f"sequence_index {normalized_sequence_index} already exists in chain {normalized_chain_id}"
+                    )
+
+                if normalized_sequence_index == 1:
+                    if chain_items:
+                        raise ValueError(
+                            "sequence_index 1 can only be created for a new chain"
+                        )
+                else:
+                    predecessor = next(
+                        (
+                            item
+                            for item in chain_items
+                            if item.get("operation_id") == normalized_predecessor
+                        ),
+                        None,
+                    )
+                    if predecessor is None:
+                        raise ValueError("predecessor_operation_id does not identify an operation in this chain")
+                    if predecessor.get("status") != "completed":
+                        raise ValueError("predecessor operation must be completed before the next operation is created")
+                    if predecessor.get("sequence_index") != normalized_sequence_index - 1:
+                        raise ValueError("predecessor operation must be the immediately previous sequence index")
 
             operation = ChatOperation(
                 operation_id=self._new_operation_id(),
@@ -308,6 +437,10 @@ class BridgeState:
             now = time.time()
             item["retry_count"] = 0
             item["retry_counts"] = {"controller": 0, "response": 0, "context": 0}
+            item["prompt_fingerprint"] = prompt_fingerprint
+            item["chain_id"] = normalized_chain_id
+            item["sequence_index"] = normalized_sequence_index
+            item["predecessor_operation_id"] = normalized_predecessor
             item["expires_at"] = now + QUEUE_TTL_SECONDS
             item["updated_at"] = now
             queue.append(item)
@@ -372,6 +505,8 @@ class BridgeState:
                     continue
                 if item.get("status") != "queued":
                     return None
+                if not self._chain_item_claimable(item, queue):
+                    return None
 
                 claimed = self._mark_claimed(item)
                 self._save_queue(queue)
@@ -386,6 +521,8 @@ class BridgeState:
 
             for item in queue:
                 if item.get("status") != "queued":
+                    continue
+                if not self._chain_item_claimable(item, queue):
                     continue
 
                 claimed = self._mark_claimed(item)
@@ -479,6 +616,12 @@ class BridgeState:
             chained = None
             for item in queue:
                 if item is current or item.get("status") != "queued":
+                    continue
+                if item.get("predecessor_operation_id") != operation_id:
+                    continue
+                if item.get("chain_id") != current.get("chain_id"):
+                    continue
+                if not self._chain_item_claimable(item, queue):
                     continue
                 chained = dict(self._mark_claimed(item))
                 current["next_operation_id"] = item.get("operation_id")
@@ -1492,6 +1635,13 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
 
+        except ValueError as exc:
+            self._send_json(
+                {
+                    "error": str(exc),
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
         except InvalidOperationTransition as exc:
             self._send_json(
                 {
@@ -1621,6 +1771,33 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json({"error": "idempotency_key must be a nonblank bounded string."}, HTTPStatus.BAD_REQUEST)
             return
 
+        chain_id = payload.get("chain_id")
+        sequence_index = payload.get("sequence_index")
+        predecessor_operation_id = payload.get("predecessor_operation_id")
+
+        if chain_id is not None and (
+            not isinstance(chain_id, str)
+            or not chain_id.strip()
+            or len(chain_id.strip()) > MAX_CHAIN_ID_CHARS
+        ):
+            self._send_json({"error": "chain_id must be a nonblank bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+        if sequence_index is not None and (
+            isinstance(sequence_index, bool)
+            or not isinstance(sequence_index, int)
+            or sequence_index < 1
+            or sequence_index > MAX_SEQUENCE_INDEX
+        ):
+            self._send_json({"error": "sequence_index must be a positive bounded integer."}, HTTPStatus.BAD_REQUEST)
+            return
+        if predecessor_operation_id is not None and (
+            not isinstance(predecessor_operation_id, str)
+            or not predecessor_operation_id.strip()
+            or len(predecessor_operation_id.strip()) > MAX_PREDECESSOR_OPERATION_ID_CHARS
+        ):
+            self._send_json({"error": "predecessor_operation_id must be a bounded string when present."}, HTTPStatus.BAD_REQUEST)
+            return
+
         m0_recovery_probe = payload.get("m0_recovery_probe", False)
         if not isinstance(m0_recovery_probe, bool):
             self._send_json({"error": "m0_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
@@ -1669,6 +1846,9 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                chain_id=chain_id,
+                sequence_index=sequence_index,
+                predecessor_operation_id=predecessor_operation_id,
             )
         )
 

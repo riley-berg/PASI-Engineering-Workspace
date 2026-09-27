@@ -208,6 +208,7 @@ def main() -> None:
                 "authorized": True,
                 "extension_root": str(root),
                 "controller_version": expected,
+                "deployment_id": expected_deployment,
                 "browser": data,
             },
             indent=2,

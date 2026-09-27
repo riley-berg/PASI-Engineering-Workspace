@@ -68,11 +68,11 @@ try {
         throw "Extension background does not reference the canonical bridge http://127.0.0.1:8765"
     }
 
-    $gitShaOutput = & git -C $RepoRoot rev-parse HEAD
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$gitShaOutput)) {
-        throw "Unable to determine source commit SHA for repository: $RepoRoot"
+    $resolveGitShaScript = Join-Path $RepoRoot "scripts\\resolve_source_commit.ps1"
+    if (-not (Test-Path $resolveGitShaScript)) {
+        throw "Missing source commit resolver: $resolveGitShaScript"
     }
-    $gitSha = ([string]$gitShaOutput).Trim()
+    $gitSha = (& $resolveGitShaScript -RepoRoot $RepoRoot).Trim()
 
     $buildManifest = [ordered]@{
         source_commit = $gitSha

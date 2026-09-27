@@ -181,3 +181,9 @@ def test_m1_runner_requires_checkpoint_aware_bridge_before_queueing():
     assert "the running bridge is stale" in source
     gate = source[source.index('bridge_health = client.get("/health")'):source.index('status = client.get("/status")')]
     assert "M1_CHECKPOINT_SCHEMA_VERSION" in gate
+
+
+def test_m1_harness_derives_missing_predecessor_injection_latency():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "authoritative_predecessor_completed_at_ms" in source
+    assert "response_completed_to_prompt_injected_ms" in source

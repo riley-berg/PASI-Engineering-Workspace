@@ -66,9 +66,13 @@
     });
   }
 
-  function armM0RecoveryProbe(operation) {
-    if (operation?.m0_recovery_probe !== true) return;
-    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
+  function armRecoveryProbe(operation) {
+    const m2Probe = operation?.m2_recovery_probe === true;
+    const m0Probe = operation?.m0_recovery_probe === true;
+    if (!m2Probe && !m0Probe) return;
+    const prefix = m2Probe ? 'm2' : 'm0';
+    const key = `pasi:${prefix}-recovery-probe:${String(operation.operation_id || '')}`;
+    const source = m2Probe ? 'm2_controlled_live_probe' : 'm0_controlled_live_probe';
     try {
       if (sessionStorage.getItem(key) === 'fired') return;
     } catch (_) {}
@@ -99,7 +103,7 @@
       } catch (_) {}
 
       clearInterval(timer);
-      void trigger(operation.operation_id, 'm0_controlled_live_probe');
+      void trigger(operation.operation_id, source);
     }, 250);
   }
 
@@ -1821,7 +1825,7 @@
             throw new Error('PASI_NATIVE: submission accepted but generation did not start');
           }
           browserTiming.generation_start_ms = generationStartMs;
-          armM0RecoveryProbe(operation);
+          armRecoveryProbe(operation);
           const response = await waitForResponse(
             baseline,
             Array.isArray(operation.completion_markers)

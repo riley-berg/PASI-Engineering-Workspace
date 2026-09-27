@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
-ROADMAP_SCHEMA_VERSION = 3
-SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3})
+ROADMAP_SCHEMA_VERSION = 4
+SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3, 4})
 
 
 class RoadmapError(ValueError):
@@ -115,6 +115,17 @@ class RoadmapTask:
                 raise RoadmapError("source_issue_number must be a positive integer or null")
             if not self.source_url.strip() or not self.source_title.strip():
                 raise RoadmapError(
+                    f"task {self.id} source metadata requires URL and title"
+                )
+        elif self.source_url.strip() or self.source_title.strip():
+            raise RoadmapError(
+                f"task {self.id} cannot have source URL/title without source_issue_number"
+            )
+        if self.source_issue_number is not None:
+            if not isinstance(self.source_issue_number, int) or self.source_issue_number <= 0:
+                raise RoadmapError("source_issue_number must be a positive integer or null")
+            if not self.source_url.strip() or not self.source_title.strip():
+                raise RoadmapError(
                     f"task {self.id} source metadata requires source_url and source_title"
                 )
         if self.source_url and not self.source_title:
@@ -213,7 +224,7 @@ class Roadmap:
         _nonempty(self.roadmap_id, name="roadmap id")
         if self.version not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
             raise RoadmapError(f"unsupported roadmap schema version: {self.version}")
-        if self.version == 2:
+        if self.version in {2, 3}:
             object.__setattr__(self, "version", ROADMAP_SCHEMA_VERSION)
         if self.revision < 0:
             raise RoadmapError("roadmap revision must be non-negative")
@@ -362,6 +373,44 @@ class Roadmap:
             tasks=self.tasks + tuple(children),
         )
 
+    def add_tasks(self, tasks: tuple[RoadmapTask, ...]) -> "Roadmap":
+        if not tasks:
+            raise RoadmapError("at least one task is required")
+        existing_ids = {task.id for task in self.tasks}
+        new_ids = {task.id for task in tasks}
+        if len(new_ids) != len(tasks) or existing_ids & new_ids:
+            raise RoadmapError("task ids must be unique and new")
+
+        all_task_ids = existing_ids | new_ids
+        phase_ids = {phase.id for phase in self.phases}
+        for task in tasks:
+            if task.phase_id not in phase_ids:
+                raise RoadmapError(
+                    f"task {task.id} references missing phase {task.phase_id}"
+                )
+            if task.parent_task_id and task.parent_task_id not in all_task_ids:
+                raise RoadmapError(
+                    f"task {task.id} references missing parent task {task.parent_task_id}"
+                )
+            missing = set(task.depends_on) - all_task_ids
+            if missing:
+                raise RoadmapError(
+                    f"task {task.id} references missing tasks: {sorted(missing)}"
+                )
+
+        candidate_tasks = self.tasks + tuple(tasks)
+        _assert_acyclic(
+            {task.id: task.depends_on for task in candidate_tasks},
+            label="task",
+        )
+        return Roadmap(
+            roadmap_id=self.roadmap_id,
+            version=ROADMAP_SCHEMA_VERSION,
+            revision=self.revision + 1,
+            phases=self.phases,
+            tasks=candidate_tasks,
+        )
+
     def blocked_tasks(self) -> tuple[RoadmapTask, ...]:
         completed = {
             task.id for task in self.tasks
@@ -457,6 +506,10 @@ class Roadmap:
             depends_on=task.depends_on,
             acceptance_requirements=task.acceptance_requirements,
             evidence_requirements=task.evidence_requirements,
+            parent_task_id=task.parent_task_id,
+            source_issue_number=task.source_issue_number,
+            source_url=task.source_url,
+            source_title=task.source_title,
             status=status,
             revision=task.revision + 1,
         )

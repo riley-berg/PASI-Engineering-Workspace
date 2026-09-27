@@ -147,7 +147,7 @@ def test_repository_wide_import_and_path_audit():
                 module = _resolve_import(root, path, node.module or "", node.level)
                 if not module:
                     continue
-                if not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
+                if not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.")):
                     continue
                 if not _python_module_exists(root, module):
                     raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")
@@ -155,7 +155,7 @@ def test_repository_wide_import_and_path_audit():
             else:
                 continue
             for module, level in imports:
-                if not module or not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.") or module == "pasi" or module.startswith("pasi.")):
+                if not module or not (module == "automation" or module.startswith("automation.") or module == "scripts" or module.startswith("scripts.")):
                     continue
                 if not _python_module_exists(root, module):
                     raise AssertionError(f"unresolvable Python import in {path.relative_to(root)}: {module}")

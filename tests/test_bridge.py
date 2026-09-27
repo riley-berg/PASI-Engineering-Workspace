@@ -88,6 +88,30 @@ def test_bridge_module_resolves_from_repository() -> None:
     assert module_path.parent.name == "pasi_bridge"
 
 
+def test_health_exposes_m1_checkpoint_schema(tmp_path: Path) -> None:
+    bridge = make_bridge(tmp_path)
+    server = BridgeHTTPServer(("127.0.0.1", 0), BridgeRequestHandler)
+    server.bridge_state = bridge
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = HTTPConnection("127.0.0.1", server.server_address[1], timeout=2)
+        connection.request(
+            "GET",
+            "/health",
+        )
+        response = connection.getresponse()
+        body = json.loads(response.read().decode("utf-8"))
+        connection.close()
+        assert response.status == 200
+        assert body["status"] == "ok"
+        assert body["m1_checkpoint_schema_version"] == bridge_module.M1_CHECKPOINT_SCHEMA_VERSION
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_http_rejects_missing_bridge_token(tmp_path: Path) -> None:
     bridge = make_bridge(tmp_path)
     server = BridgeHTTPServer(("127.0.0.1", 0), BridgeRequestHandler)

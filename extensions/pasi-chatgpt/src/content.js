@@ -735,6 +735,7 @@
         page_visible: document.visibilityState !== 'hidden',
         composer_present: composerPresent,
         native_controller: true,
+        runtime_error_telemetry: true,
         active_operation_id: activeOperationId
       }, 2000);
 

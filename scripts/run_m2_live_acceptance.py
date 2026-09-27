@@ -205,7 +205,7 @@ def validate_m2_terminal_contract(
     }
     if event_operation_ids and event_operation_ids != {operation_id}:
         raise M2LiveError(
-            f"M2 recovery events changed operation identity: {sorted(event_operation_ids)!r}"
+            f"M2 recovery events changed operation identity: {sorted(event_operation_ids, key=str)!r}"
         )
 
     chat_errors = []

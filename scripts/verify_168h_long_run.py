@@ -144,6 +144,10 @@ def verify_health(evidence: dict[str, Any], start: datetime, end: datetime) -> N
         parsed.append(captured)
 
     parsed.sort()
+    if abs((parsed[0] - start).total_seconds()) > 60:
+        raise VerificationError("first health sample is more than 60s after run start")
+    if abs((end - parsed[-1]).total_seconds()) > 60:
+        raise VerificationError("last health sample is more than 60s before run end")
     gaps = [
         (later - earlier).total_seconds()
         for earlier, later in zip(parsed, parsed[1:])
@@ -272,6 +276,14 @@ def verify_resources(evidence: dict[str, Any]) -> None:
     samples = as_list(resources.get("samples"), "resources.samples")
     if not samples:
         raise VerificationError("no resource samples")
+    expected_resource_samples = math.ceil(
+        POLICY["target_duration_seconds"] / 60
+    ) + 1
+    if len(samples) < expected_resource_samples:
+        raise VerificationError(
+            f"resource sample count {len(samples)} below required "
+            f"{expected_resource_samples}"
+        )
 
     baseline_rss = int(baseline["rss_bytes"])
     baseline_fds = int(baseline["fd_count"])
@@ -282,6 +294,17 @@ def verify_resources(evidence: dict[str, Any]) -> None:
     fds = [int(as_dict(item, "resource sample")["fd_count"]) for item in samples]
     free = [int(as_dict(item, "resource sample")["free_disk_bytes"]) for item in samples]
     disk = [int(as_dict(item, "resource sample")["runtime_disk_bytes"]) for item in samples]
+    resource_times = [
+        timestamp(as_dict(item, "resource sample").get("timestamp"), "resource.timestamp").timestamp()
+        for item in samples
+    ]
+    resource_gaps = [
+        later - earlier
+        for earlier, later in zip(resource_times, resource_times[1:])
+    ]
+    if resource_gaps and max(resource_gaps) > 90:
+        raise VerificationError("resource sample gap exceeds 90 seconds")
+
     cpu_samples = [
         (
             timestamp(as_dict(item, "resource sample").get("timestamp"), "resource.timestamp").timestamp(),

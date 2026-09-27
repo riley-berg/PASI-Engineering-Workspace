@@ -52,6 +52,7 @@ def healthy() -> bool:
 
 
 EXPECTED_BRIDGE_SERVICE = "pasi-engineering-workspace-chatgpt-bridge"
+EXPECTED_DEPLOYMENT_ID = "pasi-engineering-workspace-handoff-v1"
 
 
 def bridge_status(bridge_token: str) -> dict | None:
@@ -86,6 +87,13 @@ def controller_source(root: Path) -> Path:
 def version(root: Path) -> str | None:
     match = re.search(
         r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
+        controller_source(root).read_text(encoding="utf-8"),
+    )
+    return match.group(1).strip() if match else None
+
+def deployment_id(root: Path) -> str | None:
+    match = re.search(
+        r"\bPASI_DEPLOYMENT_ID\s*=\s*['\"]([^'\"]+)['\"]",
         controller_source(root).read_text(encoding="utf-8"),
     )
     return match.group(1).strip() if match else None
@@ -176,6 +184,7 @@ def main() -> None:
     observation = observation.get("observation", {})
     data = observation.get("data", {}) if isinstance(observation, dict) else {}
     expected = version(root)
+    expected_deployment = deployment_id(root)
     if data.get("kind") not in {"chatgpt_health", "chatgpt_state"}:
         raise SystemExit(
             "Engineering Workspace ChatGPT controller is not reporting a usable health state"
@@ -184,6 +193,12 @@ def main() -> None:
         raise SystemExit(
             f"controller version mismatch: extension={expected!r}, "
             f"browser={data.get('controller_version')!r}"
+        )
+    if expected_deployment and data.get("deployment_id") != expected_deployment:
+        raise SystemExit(
+            f"browser deployment mismatch: extension={expected_deployment!r}, "
+            f"browser={data.get('deployment_id')!r}; load the canonical "
+            "PASI ChatGPT Handoff deployment before running P0.4"
         )
 
     print(

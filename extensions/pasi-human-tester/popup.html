@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>PASI Human Test Harness</title>
+  <style>
+    body { font: 13px system-ui, sans-serif; min-width: 360px; margin: 16px; }
+    input, textarea, button { width: 100%; box-sizing: border-box; margin-top: 6px; }
+    textarea { min-height: 80px; font-family: monospace; }
+    button { padding: 9px; }
+    pre { white-space: pre-wrap; max-height: 260px; overflow: auto; }
+    .muted { color: #666; }
+  </style>
+</head>
+<body>
+  <h3>PASI Human Test Harness</h3>
+  <div class="muted">Typed browser actions only. Trust is granted elsewhere.</div>
+  <label>Target origin<input id="origin" placeholder="http://127.0.0.1:3000"></label>
+  <label>Code head<input id="code-head" placeholder="40-char git SHA"></label>
+  <label>Backend token<input id="token" type="password" placeholder="human-test ingest token"></label>
+  <button id="run">Run P0 smoke suite</button>
+  <pre id="result">Ready.</pre>
+  <script src="popup.js"></script>
+</body>
+</html>

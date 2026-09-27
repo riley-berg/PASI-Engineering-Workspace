@@ -221,6 +221,8 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
       browser_name: "Chromium",
       browser_version: navigator.userAgent,
       target_origin: targetOrigin,
+      extension_version: chrome.runtime.getManifest().version,
+      execution_source: "mv3-human-test-extension",
       started_at: startedAt,
       ended_at: finishedAt,
       status,

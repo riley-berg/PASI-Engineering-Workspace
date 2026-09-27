@@ -39,7 +39,7 @@ Every task must satisfy the requirements that apply to its scope:
 7. **Human-effort gate**
    - A task is considered functionally ready only when a human can use the documented entry point with little or no code modification, data repair, or manual orchestration.
    - Human exploratory testing may add confidence, but a missing manual click-through is not the primary evidence of correctness when an equivalent deterministic vertical proof exists.
-   - The 168-hour Long-run human soak was explicitly waived by project decision after sustained operation-path proof.
+   - Long-run human execution may be automated by the trusted PASI human-test extension, but the extension itself must first pass its qualification gate and the live acceptance run must still execute on the current code head.
 
 8. **Documentation and handoff**
    - The acceptance command and expected success/failure signals are documented.
@@ -54,6 +54,8 @@ Every task must satisfy the requirements that apply to its scope:
 **Computer capability work:** prove typed capability invocation, bounded permissions, failure handling, and separation from model inference. DOM extraction cannot substitute for the provider boundary.
 
 **Frontend:** connect to the real contract/API, cover loading/empty/unavailable/error/recovery states, preserve deep links, provide keyboard/accessibility behavior, and exercise the vertical slice against the backend capability. Hard-coded success fixtures are not completion evidence.
+
+**Human-test automation:** use a typed, declarative action protocol with explicit target-origin permissions. The harness must emit durable evidence bound to code head and suite version, capture failures rather than silently retrying them away, and remain unable to grant its own trust state.
 
 **Performance/optimization:** correctness gates must pass first; performance claims require measured benchmark evidence with reproducible workload and environment metadata.
 

@@ -77,6 +77,14 @@ class ChatOperation:
     completion_markers: list[str] | None = None
     m0_recovery_probe: bool = False
 
+    # Optional durable chain checkpoint metadata. These fields make an
+    # explicit operation sequence authoritative without tying progression to
+    # volatile ChatGPT transcript counts.
+    chain_id: str | None = None
+    sequence_index: int | None = None
+    predecessor_operation_id: str | None = None
+    prompt_fingerprint: str | None = None
+
     status: str = "queued"
 
     chat_url: str | None = None

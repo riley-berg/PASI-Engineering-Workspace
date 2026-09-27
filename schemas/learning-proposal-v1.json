@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/learning-proposal-v1.json",
+  "title":"PASI cross-run learning proposal v1",
+  "type":"object",
+  "required":["source_memory_ids","target_scope","reusable_kind","content","minimum_confidence"],
+  "properties":{
+    "source_memory_ids":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},
+    "target_scope":{"type":"string","minLength":1},
+    "reusable_kind":{"type":"string","minLength":1},
+    "content":{"type":"string","minLength":1},
+    "minimum_confidence":{"type":"number","minimum":0,"maximum":1}
+  },
+  "additionalProperties":false
+}

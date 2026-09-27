@@ -100,6 +100,22 @@ def current_prompt() -> str:
     return progression.current_prompt()
 
 
+def extract_marker(text: str, marker: str) -> str:
+    prefix = marker + ":"
+    for line in text.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix):].strip()
+    return ""
+
+
+def extract_block(text: str, start: str, end: str) -> str:
+    begin = text.find(start)
+    finish = text.find(end)
+    if begin < 0 or finish < 0 or finish <= begin:
+        return ""
+    return text[begin + len(start):finish].strip("\n ")
+
+
 def wait_for_real_operation(started_at: float) -> tuple[dict, dict | None]:
     deadline = time.monotonic() + TIMEOUT_SECONDS
     recovery_defaults_error: dict | None = None
@@ -175,6 +191,12 @@ def main() -> int:
             result["recovery_defaults_observation"] = runtime_error
 
         data = response["data"]
+        response_text = str(data.get("response_text") or "")
+        task_id = extract_marker(response_text, "PASI_TASK_ID")
+        status = extract_marker(response_text, "PASI_RESULT_STATUS")
+        summary = extract_marker(response_text, "PASI_SUMMARY")
+        evidence = extract_marker(response_text, "PASI_EVIDENCE")
+        patch = extract_block(response_text, "PASI_PATCH_START", "PASI_PATCH_END")
         RESPONSE.parent.mkdir(parents=True, exist_ok=True)
         RESPONSE.write_text(
             json.dumps(
@@ -182,11 +204,11 @@ def main() -> int:
                     "provider": "chatgpt_browser",
                     "authenticated": True,
                     "chat_url": data.get("chat_url"),
-                    "task_id": data.get("task_id") or "P0.1",
-                    "status": "complete",
-                    "summary": data.get("summary") or "Live PASI response captured.",
-                    "evidence": data.get("evidence") or "Live browser response captured by the M0 runner.",
-                    "patch": data.get("patch") or "",
+                    "task_id": task_id,
+                    "status": status,
+                    "summary": summary,
+                    "evidence": evidence,
+                    "patch": patch,
                     "runtime_evidence": data.get("runtime_evidence") or {},
                 },
                 indent=2,

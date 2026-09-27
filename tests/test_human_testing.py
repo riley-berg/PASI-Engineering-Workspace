@@ -119,6 +119,7 @@ def test_human_test_store_persists_runs_and_trust(tmp_path):
     for i in range(3):
         store.record_run(run(i, negative=i == 0, code_head=f"{i+1:040x}"))
     certificate = store.evaluate_and_store_trust(
+        issuer_secret="test-secret",
         policy=HumanTestTrustPolicy(
             minimum_successful_runs=3,
             minimum_distinct_code_heads=3,
@@ -128,9 +129,12 @@ def test_human_test_store_persists_runs_and_trust(tmp_path):
     )
     assert certificate.status is TrustStatus.TRUSTED
 
+    import os
+    os.environ["PASI_HUMAN_TEST_TRUST_SECRET"] = "test-secret"
     restarted = HumanTestStore(tmp_path / "human-tests.db")
     assert restarted.get_run("run-2").status is HumanTestStatus.PASS
     assert restarted.get_trust().status is TrustStatus.TRUSTED
+    del os.environ["PASI_HUMAN_TEST_TRUST_SECRET"]
 
 
 def test_human_test_evidence_tampering_is_rejected():

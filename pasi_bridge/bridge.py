@@ -700,6 +700,11 @@ class BridgeState:
         data = observation.get("data")
         kind = data.get("kind") if isinstance(data, dict) else None
 
+        if schema_version == "pasi-native-chromium-v2" and kind == "chatgpt_runtime_error":
+            # Runtime errors must remain the current browser observation until
+            # the acceptance runner records them; otherwise the health heartbeat
+            # can overwrite the failure before a local test can observe it.
+            return 200
         if schema_version == "pasi-native-chromium-v2" and kind in {
             "chatgpt_health",
             "chatgpt_state",

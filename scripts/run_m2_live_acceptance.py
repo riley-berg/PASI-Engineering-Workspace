@@ -308,6 +308,11 @@ def main() -> int:
                 "bridge checkpoint schema mismatch; expected "
                 f"{M2_CHECKPOINT_SCHEMA_VERSION}"
             )
+        if health.get("m2_recovery_schema_version") != M2_CHECKPOINT_SCHEMA_VERSION:
+            raise M2LiveError(
+                "bridge recovery schema mismatch; expected "
+                f"{M2_CHECKPOINT_SCHEMA_VERSION}"
+            )
         evidence["bridge_health"] = health
         evidence["browser_health_before"] = browser_health(client)
 

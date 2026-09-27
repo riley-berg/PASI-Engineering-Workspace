@@ -25,6 +25,7 @@ from .recovery import (
 )
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
+from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
@@ -54,9 +55,12 @@ __all__ = [
     "RecoveryInput",
     "RepairAttempt",
     "RepairResult",
+    "DuplicateRoadmap",
     "Roadmap",
+    "RoadmapNotFound",
     "RoadmapPhase",
     "SQLiteEventStore",
+    "SQLiteRoadmapStore",
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",

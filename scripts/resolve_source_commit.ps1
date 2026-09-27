@@ -17,12 +17,20 @@ if ($null -eq $wslCommand) {
     throw "WSL is required to resolve the source commit for this checkout: $resolvedRoot"
 }
 
-$wslRootOutput = & wsl.exe wslpath -a -u -- "$resolvedRoot" 2>$null
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslRootOutput)) {
-    throw "Unable to convert repository path to WSL form: $resolvedRoot"
+if ($resolvedRoot -notmatch '^(?<drive>[A-Za-z]):\\(?<path>.+)
+$wslShaOutput = & wsl.exe -e git -C "$wslRoot" rev-parse HEAD 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslShaOutput)) {
+    throw "Unable to determine source commit SHA through WSL Git for repository: $resolvedRoot"
 }
 
-$wslRoot = ([string]$wslRootOutput).Trim()
+Write-Output ([string]$wslShaOutput).Trim()
+) {
+    throw "Repository path is not a Windows drive path that can be mapped into WSL: $resolvedRoot"
+}
+
+$drive = $Matches.drive.ToLowerInvariant()
+$relative = $Matches.path -replace '\\', '/'
+$wslRoot = "/mnt/$drive/$relative"
 $wslShaOutput = & wsl.exe -e git -C "$wslRoot" rev-parse HEAD 2>$null
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$wslShaOutput)) {
     throw "Unable to determine source commit SHA through WSL Git for repository: $resolvedRoot"

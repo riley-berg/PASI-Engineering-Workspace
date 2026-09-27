@@ -173,3 +173,11 @@ def test_m1_harness_does_not_gate_progression_on_exact_conversation_count_delta(
     assert "expected_next=(" not in source
     assert "conversation_signature_is_verification_only" in source
     assert "conversation_verification" in source
+
+
+def test_m1_runner_requires_checkpoint_aware_bridge_before_queueing():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '"m1_checkpoint_schema_version"' in source
+    assert "the running bridge is stale" in source
+    gate = source[source.index('bridge_health = client.get("/health")'):source.index('status = client.get("/status")')]
+    assert "M1_CHECKPOINT_SCHEMA_VERSION" in gate

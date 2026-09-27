@@ -90,12 +90,27 @@ async function runContentStep(tabId, step) {
   });
 }
 
-async function runStep(tabId, step, allowedOrigins) {
+function canonicalize(value) {
+  if (Array.isArray(value)) return "[" + value.map(canonicalize).join(",") + "]";
+  if (value && typeof value === "object") {
+    return "{" + Object.keys(value).sort().map((key) => JSON.stringify(key) + ":" + canonicalize(value[key])).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+
+function resolveTarget(rawUrl, baseOrigin) {
+  const value = String(rawUrl || "");
+  return new URL(value, baseOrigin + "/").toString();
+}
+
+async function runStep(tabId, step, allowedOrigins, targetOrigin) {
   const startedAt = now();
+
   try {
     let observed = {};
     if (step.action === "navigate") {
-      const url = new URL(String(step.url || location.href));
+      const tab = await chrome.tabs.get(tabId);
+      const url = new URL(String(step.url || tab.url || targetOrigin + "/"), targetOrigin + "/");
       await navigate(tabId, url.toString(), allowedOrigins);
       await injectRunner(tabId);
       observed = {url: url.toString()};
@@ -110,7 +125,7 @@ async function runStep(tabId, step, allowedOrigins) {
     } else if (step.action === "screenshot") {
       observed = await captureEvidenceScreenshot(tabId, false);
     } else if (step.action === "api_get_json") {
-      const target = String(step.url || "");
+      const target = resolveTarget(step.url, targetOrigin);
       if (!PASIHumanTestProtocol.originAllowed(target, allowedOrigins)) {
         throw new Error("API target is outside suite allowlist");
       }
@@ -200,7 +215,7 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
       evidence_sha256: ""
     };
     const canonical = {...evidence, evidence_sha256: ""};
-    evidence.evidence_sha256 = await sha256Text(JSON.stringify(canonical, Object.keys(canonical).sort()));
+    evidence.evidence_sha256 = await sha256Text(canonicalize(canonical));
     try {
       await backendRequest("/v1/human-tests/runs", "POST", evidence, backendToken);
     } catch (error) {

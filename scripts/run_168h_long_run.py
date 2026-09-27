@@ -24,8 +24,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 DEFAULT_DURATION_SECONDS = 604_800
-DEFAULT_INTERVAL_SECONDS = 3_600
-DEFAULT_OPERATION_COUNT = 168
+MIN_OPERATION_COUNT = 168
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 900.0
 POLL_SECONDS = 2.0
 HEALTH_INTERVAL_SECONDS = 300
@@ -799,7 +798,7 @@ def build_policy() -> dict[str, Any]:
         "health_sample_interval_seconds": HEALTH_INTERVAL_SECONDS,
         "max_health_gap_seconds": 360,
         "max_heartbeat_age_seconds": 60,
-        "expected_logical_operations": DEFAULT_OPERATION_COUNT,
+        "minimum_logical_operations": MIN_OPERATION_COUNT,
         "max_duplicate_logical_operations": 0,
         "max_skipped_operations": 0,
         "max_terminal_chat_errors": 0,
@@ -908,8 +907,10 @@ def validate_finished_evidence(
     if duration < DEFAULT_DURATION_SECONDS:
         raise LongRunError("168-hour duration requirement not satisfied")
 
-    if evidence["summary"]["logical_operations_completed"] != DEFAULT_OPERATION_COUNT:
-        raise LongRunError("logical operation count is not exactly 168")
+    if evidence["summary"]["logical_operations_completed"] < MIN_OPERATION_COUNT:
+        raise LongRunError(
+            f"logical operation count is below the minimum of {MIN_OPERATION_COUNT}"
+        )
 
     if evidence["summary"]["duplicate_logical_operations"] != 0:
         raise LongRunError("duplicate logical execution detected")
@@ -1032,7 +1033,7 @@ def main() -> int:
 
     print(
         "LONG-RUN START: "
-        f"run_id={run_id} target=168h operations=168 "
+        f"run_id={run_id} target=168h continuous_workload minimum_operations={MIN_OPERATION_COUNT} "
         f"commit={evidence['git_commit']} evidence={FINAL_EVIDENCE}"
     )
     status = client.get("/status")
@@ -1076,12 +1077,10 @@ def main() -> int:
 
     try:
         monotonic_start = time.monotonic()
-        for sequence_index in range(1, DEFAULT_OPERATION_COUNT + 1):
-            target_offset = (sequence_index - 1) * DEFAULT_INTERVAL_SECONDS
-            wait_until = monotonic_start + target_offset
-            while time.monotonic() < wait_until:
-                time.sleep(min(5.0, max(0.1, wait_until - time.monotonic())))
+        sequence_index = 1
+        planned_recovery_index = 0
 
+        while time.monotonic() - monotonic_start < DEFAULT_DURATION_SECONDS:
             elapsed_before_queue = time.monotonic() - monotonic_start
             ensure_chat_ready(
                 client,
@@ -1090,24 +1089,34 @@ def main() -> int:
                 evidence=evidence,
             )
 
-            marker = f"PASI_LONGRUN_168H_{run_id[-10:]}_{sequence_index:03d}"
+            elapsed_before_queue = time.monotonic() - monotonic_start
+            planned_recovery = False
+            if planned_recovery_index < len(PLANNED_RECOVERY_OFFSETS):
+                expected_offset = PLANNED_RECOVERY_OFFSETS[planned_recovery_index]
+                if elapsed_before_queue > expected_offset + RECOVERY_TOLERANCE_SECONDS:
+                    raise LongRunError(
+                        f"planned recovery {planned_recovery_index + 1} was not "
+                        f"started within {RECOVERY_TOLERANCE_SECONDS}s of its "
+                        f"{expected_offset}s schedule"
+                    )
+                if elapsed_before_queue >= expected_offset - RECOVERY_TOLERANCE_SECONDS:
+                    planned_recovery = True
+                    planned_recovery_index += 1
+
+            marker = f"PASI_LONGRUN_168H_{run_id[-10:]}_{sequence_index:06d}"
             prompt = (
                 f"Reply with exactly this marker and no other text: {marker}. "
                 "This is a PASI 168-hour unattended Long-run acceptance operation."
             )
             fingerprint = prompt_fingerprint(prompt)
-            idempotency_key = f"{run_id}-{sequence_index:03d}"
-            planned_recovery = any(
-                abs(elapsed_before_queue - offset) <= RECOVERY_TOLERANCE_SECONDS
-                for offset in PLANNED_RECOVERY_OFFSETS
-            )
+            idempotency_key = f"{run_id}-{sequence_index:06d}"
 
             if sequence_index > 1 and previous_operation_id is None:
                 evidence["summary"]["skipped_operations"] += 1
                 raise LongRunError("missing predecessor operation id")
 
             print(
-                f"LONG-RUN QUEUE: sequence={sequence_index}/168 "
+                f"LONG-RUN QUEUE: sequence={sequence_index} "
                 f"planned_recovery={planned_recovery} "
                 f"elapsed={elapsed_before_queue:.1f}s"
             )
@@ -1207,7 +1216,7 @@ def main() -> int:
                 evidence["summary"]["duplicate_logical_operations"] += 1
                 raise LongRunError(
                     f"idempotency replay created operation "
-                    f"{replay.get('operation_id')!r} instead of {operation_id!r}"
+                    f"{replay.get('operation_id')!r} instead of {operation_id}"
                 )
 
             recovery_record: dict[str, Any] | None = None
@@ -1227,10 +1236,7 @@ def main() -> int:
                 recovery_record["scheduled_offset_seconds"] = round(elapsed_before_queue)
 
                 if planned_recovery:
-                    planned_seen = len(
-                        [item for item in evidence["recoveries"] if item.get("planned") is True]
-                    )
-                    expected_offset = PLANNED_RECOVERY_OFFSETS[planned_seen]
+                    expected_offset = PLANNED_RECOVERY_OFFSETS[planned_recovery_index - 1]
                     if abs(
                         recovery_record["scheduled_offset_seconds"] - expected_offset
                     ) > RECOVERY_TOLERANCE_SECONDS:
@@ -1291,6 +1297,7 @@ def main() -> int:
                     evidence["summary"]["unplanned_recoveries"] += 1
                     if evidence["summary"]["unplanned_recoveries"] > MAX_UNPLANNED_RECOVERIES:
                         raise LongRunError("unplanned recovery count exceeded acceptance limit")
+
             state = browser_state(client)
             signature = state.get("conversation_signature")
             if not isinstance(signature, str):
@@ -1310,7 +1317,7 @@ def main() -> int:
                     "duplicate_execution_count": 0,
                     "terminal_chat_error": None,
                     "recovery_event_ids": (
-                        [item["recovery_id"] for item in [recovery_record]]
+                        [recovery_record["recovery_id"]]
                         if recovery_record is not None
                         else []
                     ),
@@ -1331,23 +1338,11 @@ def main() -> int:
 
             persist_partial(evidence)
             print(
-                f"LONG-RUN COMPLETE: sequence={sequence_index}/168 "
+                f"LONG-RUN COMPLETE: sequence={sequence_index} "
                 f"operation_id={operation_id} "
                 f"elapsed={time.monotonic() - monotonic_start:.1f}s"
             )
-
-        remaining = DEFAULT_DURATION_SECONDS - (
-            time.monotonic() - monotonic_start
-        )
-        print(
-            "LONG-RUN DURABILITY WINDOW: all 168 operations complete; "
-            f"remaining={max(0.0, remaining):.1f}s"
-        )
-        while remaining > 0:
-            time.sleep(min(30.0, remaining))
-            remaining = DEFAULT_DURATION_SECONDS - (
-                time.monotonic() - monotonic_start
-            )
+            sequence_index += 1
 
         telemetry.stop()
         telemetry.capture()
@@ -1403,7 +1398,7 @@ def main() -> int:
         PARTIAL_EVIDENCE.unlink(missing_ok=True)
 
         print(
-            "LONG-RUN PASS: 168 hours elapsed; "
+            "LONG-RUN PASS: 168-hour continuous workload elapsed; "
             f"{evidence['summary']['logical_operations_completed']} operations completed; "
             f"{evidence['summary']['successful_planned_recoveries']} planned recoveries succeeded"
         )

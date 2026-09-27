@@ -1413,7 +1413,7 @@
           timing: {
             injected_at_ms: null,
             ack_at_ms: Date.now(),
-            user_messages_added: countNewUserMessages(userMessages(), snapshot),
+            user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
             ack_verified: via === 'verified',
             submission_via: finalVia
           }
@@ -1463,7 +1463,7 @@
         timing: {
           injected_at_ms: injectedAtMs,
           ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
+          user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
           ack_verified: via === 'verified',
           submission_via: finalVia
         }

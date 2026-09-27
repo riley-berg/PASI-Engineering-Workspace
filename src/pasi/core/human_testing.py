@@ -61,6 +61,8 @@ class HumanTestRun:
     browser_name: str
     browser_version: str
     target_origin: str
+    extension_version: str
+    execution_source: str
     started_at: str
     ended_at: str
     status: HumanTestStatus
@@ -79,6 +81,8 @@ class HumanTestRun:
             "browser_name": self.browser_name,
             "browser_version": self.browser_version,
             "target_origin": self.target_origin,
+            "extension_version": self.extension_version,
+            "execution_source": self.execution_source,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "status": self.status.value,
@@ -152,6 +156,8 @@ class HumanTestTrustPolicy:
     minimum_negative_controls: int = 3
     maximum_policy_violations: int = 0
     required_trailing_successes: int = 5
+    required_execution_source: str = "mv3-human-test-extension"
+    required_suite_prefix: str = "pasi-p0-"
 
     def __post_init__(self) -> None:
         if (
@@ -159,6 +165,8 @@ class HumanTestTrustPolicy:
             or self.minimum_distinct_code_heads <= 0
             or self.minimum_negative_controls <= 0
             or self.required_trailing_successes <= 0
+            or not self.required_execution_source.strip()
+            or not self.required_suite_prefix.strip()
         ):
             raise ValueError("trust thresholds must be positive")
         if self.maximum_policy_violations < 0:
@@ -215,10 +223,14 @@ class HumanTestTrustEvaluator:
     ) -> HumanTestTrustCertificate:
         trust_policy = policy or HumanTestTrustPolicy()
         ordered = sorted(runs, key=lambda item: (item.ended_at, item.run_id))
-        successful = [run for run in ordered if run.status is HumanTestStatus.PASS]
-        negative_controls = [
-            run for run in successful if run.negative_control
+        qualifying = [
+            run for run in ordered
+            if run.execution_source == trust_policy.required_execution_source
+            and run.suite_id.startswith(trust_policy.required_suite_prefix)
+            and run.extension_version.strip()
         ]
+        successful = [run for run in qualifying if run.status is HumanTestStatus.PASS]
+        negative_controls = [run for run in successful if run.negative_control]
         policy_violations = sum(len(run.policy_violations) for run in ordered)
         distinct_heads = {
             run.code_head for run in successful if run.code_head
@@ -247,6 +259,8 @@ class HumanTestTrustEvaluator:
                 "minimum_negative_controls": trust_policy.minimum_negative_controls,
                 "maximum_policy_violations": trust_policy.maximum_policy_violations,
                 "required_trailing_successes": trust_policy.required_trailing_successes,
+                "required_execution_source": trust_policy.required_execution_source,
+                "required_suite_prefix": trust_policy.required_suite_prefix,
             },
             "successful_runs": len(successful),
             "distinct_code_heads": len(distinct_heads),

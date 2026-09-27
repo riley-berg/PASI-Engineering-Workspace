@@ -253,6 +253,8 @@ def verify_recoveries(evidence: dict[str, Any]) -> None:
             raise VerificationError("recovery caused duplicate logical execution")
         if item.get("terminal_chat_errors") != 0:
             raise VerificationError("recovery produced terminal CHAT_* errors")
+        if item.get("controlled_probe") is not True:
+            raise VerificationError("planned recovery was not a controlled probe")
         latency = item.get("recovery_latency_seconds")
         if not isinstance(latency, (int, float)) or latency > POLICY["max_recovery_latency_seconds"]:
             raise VerificationError("recovery exceeded the 300-second bound")
@@ -268,6 +270,8 @@ def verify_recoveries(evidence: dict[str, Any]) -> None:
         }
         if not required.issubset(set(phases)):
             raise VerificationError("recovery phase chain is incomplete")
+        if item.get("planned") is False and item.get("controlled_probe") not in {False, None}:
+            raise VerificationError("unplanned recovery is incorrectly marked as controlled")
 
 
 def verify_resources(evidence: dict[str, Any]) -> None:

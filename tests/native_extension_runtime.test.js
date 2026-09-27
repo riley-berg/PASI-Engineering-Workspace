@@ -9,6 +9,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(extensionRoot, "manifest.j
 const background = fs.readFileSync(path.join(extensionRoot, "src", "background.js"), "utf8");
 const content = fs.readFileSync(path.join(extensionRoot, "src", "content.js"), "utf8");
 const recovery = fs.readFileSync(path.join(extensionRoot, "src", "recovery.js"), "utf8");
+const recoveryProgress = fs.readFileSync(path.join(extensionRoot, "src", "recovery_progress.js"), "utf8");
 const timeoutConfig = fs.readFileSync(path.join(extensionRoot, "src", "timeout-config.js"), "utf8");
 const detectors = fs.readFileSync(path.join(extensionRoot, "src", "detectors.js"), "utf8");
 
@@ -74,7 +75,7 @@ test("native controller uses bounded timeouts and progress-based recovery", () =
   assert.ok(timeoutConfig.includes("staleMs: 45 * 1000"));
   assert.ok(recovery.includes("RECOVERY_HARD_CEILING_MS"));
   assert.ok(recovery.includes("RECOVERY_STALL_MS"));
-  assert.ok(recovery.includes("no_progress"));
+  assert.ok(recoveryProgress.includes("no_progress"));
   assert.ok(detectors.includes("usage_limited"));
   assert.ok(detectors.includes("context_exhausted"));
 });

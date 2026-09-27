@@ -226,3 +226,19 @@ def test_userscript_compiler_and_toolchain_versions():
     assert package["devDependencies"]["typescript"] == "7.0.2"
     assert package["devDependencies"]["eslint"] == "10.11.0"
     assert "typescript@7.0.2" in workflow
+
+
+def test_opera_extension_loading_and_ui_contracts():
+    background = (EXT / "src" / "background.js").read_text(encoding="utf-8")
+    assert 'importScripts("vendor/typescript.js");' in background
+    assert 'importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js"' in background
+    assert 'importScripts("src/api_contract.js"' not in background
+    assert 'importScripts("src/vendor/typescript.js")' not in background
+
+    options = (EXT / "options.js").read_text(encoding="utf-8")
+    assert "chrome.tabs.create" in options
+    assert 'window.open("editor.html' not in options
+
+    for stylesheet in ["popup.css", "options.css", "editor.css"]:
+        css = (EXT / stylesheet).read_text(encoding="utf-8")
+        assert "color-scheme: light dark" in css

@@ -132,7 +132,7 @@ def executor() -> list[str]:
 
 def mark_checked(task: Task) -> None:
     if not token():
-        return
+        raise RuntimeError("a GitHub token is required so canonical issue checkboxes remain authoritative")
     url = f"https://api.github.com/repos/{REPO}/issues/{task.phase.issue}"
     issue = github(url)
     body = str(issue.get("body", ""))
@@ -141,8 +141,9 @@ def mark_checked(task: Task) -> None:
         re.MULTILINE,
     )
     updated, count = pattern.subn(r"\1x\2", body, count=1)
-    if count == 1 and updated != body:
-        github(url, method="PATCH", body=json.dumps({"body": updated}))
+    if count != 1 or updated == body:
+        raise RuntimeError(f"could not mark canonical GitHub task {task.task_id} complete")
+    github(url, method="PATCH", body=json.dumps({"body": updated}))
 
 
 def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
@@ -214,6 +215,11 @@ def main() -> int:
 
     if args.hours != HOURS:
         parser.error("the acceptance supervisor is fixed to exactly 168 hours")
+    if not args.smoke:
+        if not token():
+            parser.error("a GitHub token is required for a real 168-hour run; use PASI_GITHUB_TOKEN or GITHUB_TOKEN")
+        if os.environ.get("PASI_PUSH", "").strip() != "1":
+            parser.error("PASI_PUSH=1 is required for a real 168-hour run so branch evidence is durable")
 
     root = Path.cwd().resolve()
     run_id = f"ew-168h-{uuid.uuid4().hex}"

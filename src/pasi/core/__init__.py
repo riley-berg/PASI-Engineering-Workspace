@@ -31,6 +31,8 @@ from .planner import Planner, PlannerDecision
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .selection_store import SelectionNotFound, SQLiteSelectionStore
 from .task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot, SelectionDecision, SelectionError, StaleSelection
+from .schedule_store import ScheduleNotFound, SQLiteScheduleStore
+from .scheduling import CostAwareScheduler, ResourceEstimate, ScheduleDecision, ScheduleError, SchedulerCapacity, ScheduledTask, StaleSchedule
 from .roadmap import Roadmap, RoadmapPhase, load_roadmap
 
 __all__ = [
@@ -67,6 +69,9 @@ __all__ = [
     "RecoveryInput",
     "RepairAttempt",
     "RepairResult",
+    "ScheduleDecision",
+    "ScheduleError",
+    "ScheduleNotFound",
     "DuplicateRoadmap",
     "Roadmap",
     "RoadmapNotFound",
@@ -78,12 +83,18 @@ __all__ = [
     "SQLiteRoadmapStore",
     "SQLiteMemoryStore",
     "SQLiteSelectionStore",
+    "SQLiteScheduleStore",
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",
     "EvidenceAwareTaskSelector",
     "EvidenceSnapshot",
     "StaleSelection",
+    "CostAwareScheduler",
+    "ResourceEstimate",
+    "SchedulerCapacity",
+    "ScheduledTask",
+    "StaleSchedule",
     "digest_text",
     "load_roadmap",
     "migrate_operation_state_database",

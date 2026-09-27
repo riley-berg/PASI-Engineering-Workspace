@@ -242,3 +242,7 @@ def test_opera_extension_loading_and_ui_contracts():
     for stylesheet in ["popup.css", "options.css", "editor.css"]:
         css = (EXT / stylesheet).read_text(encoding="utf-8")
         assert "color-scheme: light dark" in css
+
+    notifications = (EXT / "src/background-userscripts.js").read_text(encoding="utf-8") + (EXT / "src/background-api.js").read_text(encoding="utf-8")
+    assert "PASI_NOTIFICATION_ICON" in notifications
+    assert "icons/icon128.png" not in notifications

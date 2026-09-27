@@ -32,5 +32,6 @@ def test_ensure_worktree_creates_missing_branch(monkeypatch, tmp_path):
     branch = "pasi/p0-4-test-missing-branch"
     acceptance.ensure_worktree(root, worktree, branch)
 
+    assert ("checkout", "--detach", "origin/main") in calls
     assert ("checkout", "-b", branch) in calls
     assert ("checkout", branch) not in calls

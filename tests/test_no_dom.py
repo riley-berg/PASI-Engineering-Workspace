@@ -180,7 +180,7 @@ def test_p0_4_worktree_and_runtime_paths_are_canonical():
     executor = (root / "scripts" / "pasi_engineering_executor.py").read_text(encoding="utf-8")
     launcher = (root / "scripts" / "run_p0_4_168h.sh").read_text(encoding="utf-8")
     assert 'REPO = "th3-st0v3/PASI-Engineering-Workspace"' in acceptance
-    assert 'git", "worktree", "add", "-B", branch' in acceptance
+    assert '"worktree", "add", "-B", branch' in acceptance
     assert '"origin/main"' in acceptance
     assert "PASI_ACCEPTANCE_WORKTREE" in executor
     assert 'root/"src"' in executor

@@ -1,33 +1,14 @@
-"""Provider-independent computer-use control-plane contracts."""
+"""Provider-independent computer-use control-plane package.
 
-from .browser_challenge import (
-    BrowserChallenge,
-    ChallengeKind,
-    ChallengeState,
-    detect_browser_challenge,
-    mark_cleared,
-    mark_waiting_human,
-)
-from .browser_recovery import (
-    BrowserFallbackResolver,
-    BrowserRecoveryResult,
-    ResearchFallbackResolver,
-)
-from .browser_use_adapter import (
-    BrowserRunResult,
-    BrowserUseAdapterError,
-    BrowserUseTaskAdapter,
-    BrowserUseUnavailable,
-)
+Only modules that are part of the canonical Engineering Workspace runtime are
+imported here. Optional browser/research adapters from historical source
+material are intentionally not imported as package side effects.
+"""
+
+from .adapters import AIAdapter
+from .capability_gateway import CapabilityGateway
 from .chatgpt import ChatGPTAdapter, ChatGPTAdapterError, UrllibBridgeTransport
 from .completion import ChatGPTCompletionDetector
-from .context import (
-    ConditionalPromptEngine,
-    ContextEngineError,
-    EvidenceContextCollector,
-    FollowUpDecision,
-    TaskState,
-)
 from .contracts import (
     ActionKind,
     ActionProposal,
@@ -40,29 +21,19 @@ from .contracts import (
     Observation,
     Session,
 )
-from .github import (
-    GitHubAdapterError,
-    GitHubControlAdapter,
-    GitHubTransport,
-    UrllibGitHubTransport,
-)
-from .research import (
-    DuckDuckGoHTMLSearchProvider,
-    HTTPSResearchAdapter,
-    ResearchAdapterError,
-    ResearchSource,
-)
-from .review import (
-    IndependentReviewer,
-    ReviewError,
-    ReviewRequest,
-    ReviewResult,
-    ReviewTransport,
-    TransportBackedReviewer,
-)
-from .vscode import Diagnostic, VSCodeEvidenceAdapter, VSCodeEvidenceError
+from .ide_state import VSCodeStateReader
+from .local_access import CapabilitySpec, LocalAccessBroker, LocalAccessError
+from .obstacles import Obstacle, ObstacleRegistry
+from .preapproval import AcquisitionEngine, AcquisitionError
+from .workspace_search import WorkspaceSearch
 
 __all__ = [
+    "AIAdapter",
+    "CapabilityGateway",
+    "ChatGPTAdapter",
+    "ChatGPTAdapterError",
+    "UrllibBridgeTransport",
+    "ChatGPTCompletionDetector",
     "ActionKind",
     "ActionProposal",
     "ActionRisk",
@@ -73,43 +44,13 @@ __all__ = [
     "ContextPackage",
     "Observation",
     "Session",
-    "Diagnostic",
-    "VSCodeEvidenceAdapter",
-    "VSCodeEvidenceError",
-    "ChatGPTAdapter",
-    "ChatGPTAdapterError",
-    "UrllibBridgeTransport",
-    "ChatGPTCompletionDetector",
-    "ConditionalPromptEngine",
-    "ContextEngineError",
-    "EvidenceContextCollector",
-    "FollowUpDecision",
-    "TaskState",
-    "HTTPSResearchAdapter",
-    "DuckDuckGoHTMLSearchProvider",
-    "ResearchAdapterError",
-    "ResearchSource",
-    "IndependentReviewer",
-    "ReviewError",
-    "ReviewRequest",
-    "ReviewResult",
-    "ReviewTransport",
-    "TransportBackedReviewer",
-    "BrowserChallenge",
-    "ChallengeKind",
-    "ChallengeState",
-    "detect_browser_challenge",
-    "mark_cleared",
-    "mark_waiting_human",
-    "BrowserRunResult",
-    "BrowserUseAdapterError",
-    "BrowserUseTaskAdapter",
-    "BrowserUseUnavailable",
-    "GitHubAdapterError",
-    "GitHubControlAdapter",
-    "GitHubTransport",
-    "UrllibGitHubTransport",
-    "BrowserFallbackResolver",
-    "BrowserRecoveryResult",
-    "ResearchFallbackResolver",
+    "VSCodeStateReader",
+    "CapabilitySpec",
+    "LocalAccessBroker",
+    "LocalAccessError",
+    "Obstacle",
+    "ObstacleRegistry",
+    "AcquisitionEngine",
+    "AcquisitionError",
+    "WorkspaceSearch",
 ]

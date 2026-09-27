@@ -9,6 +9,7 @@ from pasi.core.human_testing import (
     HumanTestTrustCertificate,
     HumanTestTrustEvaluator,
     HumanTestTrustPolicy,
+    TrustStatus,
 )
 
 
@@ -158,7 +159,7 @@ class HumanTestStore:
         payload = json.loads(row["certificate_json"])
         policy = HumanTestTrustPolicy(**payload["policy"])
         return HumanTestTrustCertificate(
-            status=payload["status"],
+            status=TrustStatus(payload["status"]),
             issued_at=payload["issued_at"],
             policy=policy,
             successful_runs=payload["successful_runs"],

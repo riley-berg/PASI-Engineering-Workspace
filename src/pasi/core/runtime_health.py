@@ -38,14 +38,12 @@ class RuntimeHealth:
     def __post_init__(self) -> None:
         if self.revision < 0:
             raise HealthError("health revision must be non-negative")
-        for name, value in (
-            ("heartbeat_at", self.heartbeat_at),
-            ("updated_at", self.updated_at),
-        ):
-            if not value or not isinstance(value, str):
-                raise HealthError(f"{name} must be a non-empty string")
+        if not self.heartbeat_at or not isinstance(self.heartbeat_at, str):
+            raise HealthError("heartbeat_at must be a non-empty string")
         if not self.updated_at:
             object.__setattr__(self, "updated_at", utc_now())
+        elif not isinstance(self.updated_at, str):
+            raise HealthError("updated_at must be a string")
 
     def to_dict(self) -> dict[str, object]:
         return {

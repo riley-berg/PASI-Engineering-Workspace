@@ -282,11 +282,29 @@ def main() -> int:
         task = pending[0]
         try:
             evidence = run_task(task, worktree, args.branch, run_id)
+            remaining = [next_task for next_task in all_tasks() if not next_task.checked]
+            if remaining:
+                next_task = remaining[0]
+                emit({
+                    "event": "next_task_ready",
+                    "at": utcnow().isoformat(),
+                    "completed_task_id": task.task_id,
+                    "next_task_id": next_task.task_id,
+                    "next_phase": next_task.phase.id,
+                })
+                next_state = {
+                    "task_id": next_task.task_id,
+                    "phase": next_task.phase.id,
+                    "title": next_task.title,
+                }
+            else:
+                next_state = None
             write_state({
                 "run_id": run_id, "repo": REPO, "branch": args.branch,
                 "worktree": str(worktree), "deadline_at": deadline.isoformat(),
                 "status": "running", "current_task": task.task_id,
                 "current_phase": task.phase.id, "last_commit": evidence["commit_after"],
+                "next_task": next_state,
                 "updated_at": utcnow().isoformat(),
             })
         except subprocess.TimeoutExpired:

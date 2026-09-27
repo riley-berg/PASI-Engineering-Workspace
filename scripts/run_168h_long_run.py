@@ -226,9 +226,8 @@ def chat_limit_reason(health: dict[str, Any]) -> str:
     if (
         health.get("conversation_context_exhausted") is True
         or health.get("chat_exhausted") is True
+        or health.get("provider_usage_limited") is True
     ):
-        return "context_limit"
-    if health.get("provider_usage_limited") is True:
         return "usage_limit"
     return ""
 
@@ -822,7 +821,7 @@ def build_policy() -> dict[str, Any]:
         "min_free_disk_fraction_of_start": MIN_FREE_DISK_FRACTION,
         "max_fd_multiplier_peak": MAX_FD_MULTIPLIER,
         "min_fd_peak_floor": MIN_FD_PEAK,
-        "fresh_chat_allowed_reasons": ["usage_limit", "context_limit"],
+        "fresh_chat_allowed_reasons": ["usage_limit"],
     }
 
 
@@ -1031,6 +1030,11 @@ def main() -> int:
         or "unknown"
     )
 
+    print(
+        "LONG-RUN START: "
+        f"run_id={run_id} target=168h operations=168 "
+        f"commit={evidence['git_commit']} evidence={FINAL_EVIDENCE}"
+    )
     status = client.get("/status")
     if int(status.get("queue_size", 0) or 0) != 0:
         raise LongRunError(
@@ -1102,6 +1106,11 @@ def main() -> int:
                 evidence["summary"]["skipped_operations"] += 1
                 raise LongRunError("missing predecessor operation id")
 
+            print(
+                f"LONG-RUN QUEUE: sequence={sequence_index}/168 "
+                f"planned_recovery={planned_recovery} "
+                f"elapsed={elapsed_before_queue:.1f}s"
+            )
             queued = queue_operation(
                 client,
                 prompt,
@@ -1271,6 +1280,11 @@ def main() -> int:
                     )
 
                 evidence["recoveries"].append(recovery_record)
+                print(
+                    "LONG-RUN RECOVERY: "
+                    f"sequence={sequence_index} planned={planned_recovery} "
+                    f"latency={recovery_latency:.1f}s operation_id={operation_id}"
+                )
                 if planned_recovery:
                     evidence["summary"]["successful_planned_recoveries"] += 1
                 else:
@@ -1316,9 +1330,18 @@ def main() -> int:
                 current_operation_id = None
 
             persist_partial(evidence)
+            print(
+                f"LONG-RUN COMPLETE: sequence={sequence_index}/168 "
+                f"operation_id={operation_id} "
+                f"elapsed={time.monotonic() - monotonic_start:.1f}s"
+            )
 
         remaining = DEFAULT_DURATION_SECONDS - (
             time.monotonic() - monotonic_start
+        )
+        print(
+            "LONG-RUN DURABILITY WINDOW: all 168 operations complete; "
+            f"remaining={max(0.0, remaining):.1f}s"
         )
         while remaining > 0:
             time.sleep(min(30.0, remaining))

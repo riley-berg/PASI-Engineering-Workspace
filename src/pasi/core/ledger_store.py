@@ -166,6 +166,47 @@ class SQLiteOperationLedger:
             ).fetchall()
         return tuple(self._row_to_entry(row) for row in rows)
 
+    def list(
+        self,
+        *,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        provider: str | None = None,
+        branch: str | None = None,
+        pr_number: int | None = None,
+        outcome: str | None = None,
+        limit: int = 100,
+    ) -> tuple[OperationLedgerEntry, ...]:
+        if limit <= 0 or limit > 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+
+        clauses: list[str] = []
+        params: list[object] = []
+        for column, value in (
+            ("task_id", task_id),
+            ("run_id", run_id),
+            ("provider", provider),
+            ("branch", branch),
+            ("pr_number", pr_number),
+            ("outcome", outcome),
+        ):
+            if value is not None:
+                clauses.append(f"{column} = ?")
+                params.append(value)
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        query = f"""
+            SELECT *
+            FROM operation_ledger
+            {where}
+            ORDER BY created_at DESC, operation_id ASC
+            LIMIT ?
+        """
+        params.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return tuple(self._row_to_entry(row) for row in rows)
+
     def children(self, operation_id: str) -> tuple[OperationLedgerEntry, ...]:
         with self._connect() as connection:
             rows = connection.execute(

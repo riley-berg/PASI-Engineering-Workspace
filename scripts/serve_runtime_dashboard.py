@@ -6,7 +6,9 @@ import subprocess
 from pathlib import Path
 
 from pasi.core.event_store import SQLiteEventStore
+from pasi.core.failure_registry import SQLiteFailureRegistry
 from pasi.core.ledger_store import SQLiteOperationLedger
+from pasi.core.notifications import SQLiteNotificationStore
 from pasi.core.operation_store import SQLiteOperationStateStore
 from pasi.core.runtime_api import RuntimeAPIService, serve
 from pasi.core.runtime_controls import RuntimeCommandStore, RuntimeControlService
@@ -50,6 +52,8 @@ def main() -> None:
     ledger = SQLiteOperationLedger(state_dir / "ledger.db")
     health_store = RuntimeHealthStore(state_dir / "health.db")
     command_store = RuntimeCommandStore(state_dir / "commands.db")
+    failure_registry = SQLiteFailureRegistry(state_dir / "failures.db")
+    notification_store = SQLiteNotificationStore(state_dir / "notifications.db")
 
     try:
         health_store.get()
@@ -87,6 +91,9 @@ def main() -> None:
         event_feed=RuntimeEventFeed(event_store),
         health_store=health_store,
         controls=controls,
+        failure_registry=failure_registry,
+        notification_store=notification_store,
+        notification_scope="runtime",
     )
 
     print("PASI runtime dashboard: http://127.0.0.1:8790/")

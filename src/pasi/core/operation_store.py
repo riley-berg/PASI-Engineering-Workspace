@@ -106,6 +106,69 @@ class SQLiteOperationStateStore:
             ) from exc
         return OperationState.from_mapping(payload)
 
+    def list(
+        self,
+        *,
+        status: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+        provider: str | None = None,
+        failure_signature: str | None = None,
+        limit: int = 100,
+    ) -> tuple[OperationState, ...]:
+        if limit <= 0 or limit > 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json
+                FROM operation_state
+                ORDER BY updated_at DESC, operation_id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        result: list[OperationState] = []
+        for row in rows:
+            try:
+                state = OperationState.from_mapping(json.loads(row["payload_json"]))
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise InvalidOperationState(
+                    "stored operation state is not valid JSON"
+                ) from exc
+            if status is not None and state.status != status:
+                continue
+            if task_id is not None and state.task_id != task_id:
+                continue
+            if run_id is not None and state.run_id != run_id:
+                continue
+            if provider is not None and state.provider != provider:
+                continue
+            if failure_signature is not None and state.failure_signature != failure_signature:
+                continue
+            result.append(state)
+        return tuple(result)
+
+    def migration_status(self) -> dict[str, object]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT version, updated_at
+                FROM pasi_schema_version
+                WHERE component = 'operation_state'
+                """
+            ).fetchone()
+        return {
+            "component": "operation_state",
+            "current_version": 2,
+            "stored_version": int(row["version"]) if row is not None else 0,
+            "updated_at": row["updated_at"] if row is not None else "",
+            "migration_required": row is None or int(row["version"]) < 2,
+            "migration_safe": row is not None and int(row["version"]) <= 2,
+        }
+
     def transition(
         self,
         operation_id: str,

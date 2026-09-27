@@ -129,6 +129,7 @@ def _prompt_for(task: RoadmapTask) -> str:
         "- Reuse the durable PASI automation chat; do not create a new chat because a task completed or the chat already contains messages.\n"
         "- Create a fresh chat only when ChatGPT explicitly reports a usage or context limit.\n"
         "- If the browser is on another chat, switch back to the durable automation chat rather than creating one.\n"
+        "- Before sending this task, verify Thinking: if Thinking is off, enable it; if Thinking is already on, leave it on and send the prompt.\n"
         "- Keep this task prompt immutable until authoritative acceptance verifies completion; the next prompt is derived only after that verification."
     )
 

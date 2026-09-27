@@ -350,6 +350,18 @@ def main() -> int:
         canonical["integrity"]["canonical_sha256"] = ""
         evidence["integrity"]["canonical_sha256"] = sha256_json(canonical)
         write_json(args.output, evidence)
+        verifier = ROOT / "scripts" / "verify_168h_live_smoke.py"
+        verification = subprocess.run(
+            [sys.executable, str(verifier), str(args.output)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if verification.returncode != 0:
+            raise LongRunError(
+                "independent smoke verifier rejected evidence: "
+                + (verification.stdout.strip() or verification.stderr.strip())
+            )
 
         print(
             "LONG-RUN SMOKE PASS: "

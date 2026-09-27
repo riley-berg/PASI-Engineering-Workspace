@@ -60,3 +60,42 @@ def test_v1_operation_state_is_migrated_to_v2_on_store_open(tmp_path: Path):
     ).fetchone()[0]
     connection.close()
     assert version == CURRENT_OPERATION_STATE_DB_VERSION
+
+
+def test_failed_migration_rolls_back_without_mutating_legacy_payload(tmp_path: Path):
+    path = tmp_path / "broken.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE operation_state (
+            operation_id TEXT PRIMARY KEY,
+            state_revision INTEGER NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO operation_state(
+            operation_id, state_revision, payload_json, created_at, updated_at
+        ) VALUES ('op-broken', 0, '{not-json}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    try:
+        SQLiteOperationStateStore(path)
+    except Exception as exc:
+        assert "invalid JSON" in str(exc)
+    else:
+        raise AssertionError("broken legacy payload unexpectedly migrated")
+
+    connection = sqlite3.connect(path)
+    payload = connection.execute(
+        "SELECT payload_json FROM operation_state WHERE operation_id = 'op-broken'"
+    ).fetchone()[0]
+    connection.close()
+    assert payload == "{not-json}"

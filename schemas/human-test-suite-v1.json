@@ -26,7 +26,7 @@
       },
       "additionalProperties":false
     }},
-    "negative_control":{"type":"boolean"}
+    "negative_control":{"type":"boolean"},"expected_failure_step_id":{"type":"string","maxLength":80}
   },
   "additionalProperties":false
 }

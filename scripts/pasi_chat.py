@@ -22,10 +22,12 @@ def save(v:Mapping[str,Any])->None:
     tmp.write_text(json.dumps(dict(v),indent=2,ensure_ascii=False)+"\n",encoding="utf-8"); tmp.replace(STATE_PATH)
 
 def expected_version(root:Path)->str|None:
-    try: text=(root/"content.js").read_text(encoding="utf-8")
-    except OSError: return None
-    m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",text)
-    return m.group(1).strip() if m else None
+    for candidate in (root/"src"/"content.js", root/"content.js"):
+        try: text=candidate.read_text(encoding="utf-8")
+        except OSError: continue
+        m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",text)
+        if m: return m.group(1).strip()
+    return None
 
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->None:
     deadline=time.monotonic()+timeout; expected=expected_version(ext)
@@ -88,7 +90,7 @@ def main()->int:
     p.add_argument("--task-id",default=os.environ.get("PASI_TASK_ID",""))
     p.add_argument("--issue",default=os.environ.get("PASI_TASK_SOURCE_ISSUE",""))
     p.add_argument("--timeout",type=float,default=float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")))
-    p.add_argument("--extension-root",type=Path,default=Path(os.environ.get("PASI_ENGINEERING_EXTENSION_ROOT",str(Path(__file__).resolve().parents[1]/"automation"/"chromium"/"pasi-chatgpt"))))
+    p.add_argument("--extension-root",type=Path,default=Path(os.environ.get("PASI_ENGINEERING_EXTENSION_ROOT",str(Path(__file__).resolve().parents[1]/"extensions"/"pasi-chatgpt"))))
     a=p.parse_args(); a.repo=a.repo.expanduser().resolve(); a.extension_root=a.extension_root.expanduser().resolve()
     task=a.task.strip()
     adapter=ChatGPTAdapter(transport=UrllibBridgeTransport(timeout_seconds=10.0),session_id=f"engineering-{uuid.uuid4().hex}",poll_interval_seconds=.25,max_wait_seconds=a.timeout)

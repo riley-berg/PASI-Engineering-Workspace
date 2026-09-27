@@ -1,6 +1,6 @@
 importScripts("protocol.js");
 
-const BACKEND_DEFAULT = "http://127.0.0.1:8765";
+const BACKEND_DEFAULT = "http://127.0.0.1:8790";
 let running = false;
 
 function now() { return new Date().toISOString(); }
@@ -191,7 +191,7 @@ async function runSuite({suite, targetOrigin, codeHead, backendToken}) {
   try {
     let tabId = tabs[0].id;
     for (const step of suite.steps) {
-      const result = await runStep(tabId, step, suite.allowed_origins);
+      const result = await runStep(tabId, step, suite.allowed_origins, targetOrigin);
       steps.push(result);
       if (result.status === "FAIL") break;
       const current = await chrome.tabs.get(tabId);

@@ -302,6 +302,9 @@ class CodeChangeCandidate:
     human_test_run_id: str
     human_test_status: HumanTestStatus
     human_test_code_head: str
+    human_test_execution_source: str
+    human_test_suite_id: str
+    human_test_extension_version: str
     policy_violations: tuple[str, ...] = ()
 
 
@@ -345,6 +348,12 @@ class SelfImprovementGate:
             reasons.append("human-test-suite-failed")
         if candidate.human_test_code_head != candidate.candidate_sha:
             reasons.append("human-test-code-head-does-not-match-candidate")
+        if candidate.human_test_execution_source != certificate.policy.required_execution_source:
+            reasons.append("human-test-execution-source-not-qualified")
+        if not candidate.human_test_suite_id.startswith(certificate.policy.required_suite_prefix):
+            reasons.append("human-test-suite-not-qualified")
+        if not candidate.human_test_extension_version.strip():
+            reasons.append("human-test-extension-version-missing")
         if candidate.policy_violations:
             reasons.append("human-test-policy-violations-present")
 

@@ -454,7 +454,7 @@ class Roadmap:
     def from_mapping(cls, value: dict[str, Any]) -> "Roadmap":
         if not isinstance(value, dict):
             raise RoadmapError("roadmap must be an object")
-        if int(value.get("version", -1)) != ROADMAP_SCHEMA_VERSION:
+        if int(value.get("version", -1)) not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
             raise RoadmapError("unsupported roadmap schema version")
         phases_raw = value.get("phases", [])
         tasks_raw = value.get("tasks", [])

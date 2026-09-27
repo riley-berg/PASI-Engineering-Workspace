@@ -84,7 +84,7 @@ def main():
     task_phase=os.environ.get("PASI_TASK_PHASE","")
     task_issue=os.environ.get("PASI_TASK_SOURCE_ISSUE","")
     task=os.environ["PASI_TASK_TITLE"]+f"\n\nCanonical task {task_id}; phase {task_phase}; source issue #{task_issue}. Work only in PASI Engineering Workspace.\n\nCANONICAL ISSUE CONTEXT:\n{canonical_issue_context()}"
-    code,out=run([sys.executable,str(Path(__file__).with_name("pasi_chat_guard.py")),task,"--repo",str(root),"--timeout",os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")],Path(__file__).resolve().parents[1],float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800"))+60);(runtime/"last-executor-output.txt").write_text(out+"\n",encoding="utf-8")
+    code,out=run([sys.executable,"-m","scripts.pasi_chat_guard",task,"--repo",str(root),"--timeout",os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")],Path(__file__).resolve().parents[1],float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800"))+60);(runtime/"last-executor-output.txt").write_text(out+"\n",encoding="utf-8")
     if code:print(out,file=sys.stderr);return code
     response=out.split("=== CHATGPT RESPONSE ===",1)[1] if "=== CHATGPT RESPONSE ===" in out else out
     status,vals,patch=parse(response);vals["status"]=status;validate(vals);validate_paths(root,patch)

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/operation-state-v1.json",
+  "title": "PASI canonical operation state v1",
+  "type": "object",
+  "required": [
+    "operation_id",
+    "operation_type",
+    "status",
+    "schema_version",
+    "state_revision",
+    "run_id",
+    "task_id",
+    "provider",
+    "phase",
+    "attempt",
+    "prompt_digest",
+    "response_digest",
+    "verification_status",
+    "commit_sha",
+    "pr_number",
+    "failure_signature",
+    "recovery_count",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "operation_id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "operation_type": {"type": "string", "minLength": 1, "maxLength": 256},
+    "status": {
+      "enum": ["queued", "claimed", "generating", "completed", "failed"]
+    },
+    "schema_version": {"const": 1},
+    "state_revision": {"type": "integer", "minimum": 0},
+    "run_id": {"type": "string", "maxLength": 256},
+    "task_id": {"type": "string", "maxLength": 256},
+    "provider": {"type": "string", "maxLength": 128},
+    "phase": {"type": "string", "maxLength": 128},
+    "attempt": {"type": "integer", "minimum": 0},
+    "prompt_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "response_digest": {
+      "type": "string",
+      "pattern": "^$|^[0-9a-f]{64}$"
+    },
+    "verification_status": {"type": "string", "maxLength": 64},
+    "commit_sha": {"type": "string", "maxLength": 128},
+    "pr_number": {"type": ["integer", "null"], "minimum": 1},
+    "failure_signature": {"type": "string", "maxLength": 512},
+    "recovery_count": {"type": "integer", "minimum": 0},
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"}
+  },
+  "additionalProperties": false
+}

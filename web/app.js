@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE = window.location.origin;
+const DEFAULT_API_BASE = typeof window !== "undefined" ? window.location.origin : "";
 
 export function healthTone(status) {
   switch (status) {
@@ -42,6 +42,7 @@ export function buildViewModel(projection) {
       m2: milestoneState("m2"),
       longrun: milestoneState("longrun"),
     },
+    recoveryEvents: events.filter((event) => /recovery|reconnect|connection_lost|retry/i.test(String(event.event_type || "")) || Boolean(event.payload?.recovery_phase)),
     longRun: {
       available: Number.isFinite(sequence) && sequence > 0,
       sequence: sequence > 0 ? sequence : null,
@@ -183,6 +184,29 @@ function renderTimeline(vm) {
   }
 }
 
+function renderRecovery(vm) {
+  const list = qs("#recovery-list");
+  if (!list) return;
+  list.replaceChildren();
+  if (!vm.recoveryEvents.length) {
+    list.className = "list empty";
+    const item = document.createElement("li");
+    item.textContent = "No recovery events reported.";
+    list.append(item);
+    return;
+  }
+  list.className = "list";
+  for (const event of vm.recoveryEvents) {
+    const item = document.createElement("li");
+    item.textContent = [
+      event.event_type || "recovery",
+      event.payload?.phase || event.payload?.recovery_phase || event.payload?.status || "",
+      event.payload?.result || "",
+    ].filter(Boolean).join(" · ");
+    list.append(item);
+  }
+}
+
 function renderLongRun(vm) {
   const progress = qs("#longrun-progress");
   const sequence = qs("#longrun-sequence");
@@ -253,6 +277,7 @@ async function refresh() {
       renderOperation(buildViewModel({}));
       renderAcceptance(buildViewModel({}));
       renderTimeline(buildViewModel({}));
+      renderRecovery(buildViewModel({}));
       renderLongRun(buildViewModel({}));
       banner.className = "banner ready";
       banner.textContent = "Runtime API is healthy. Select an operation to inspect.";
@@ -264,6 +289,7 @@ async function refresh() {
     renderOperation(vm);
     renderAcceptance(vm);
     renderTimeline(vm);
+    renderRecovery(vm);
     renderLongRun(vm);
     banner.className = "banner ready";
     banner.textContent = "Authoritative runtime state loaded.";

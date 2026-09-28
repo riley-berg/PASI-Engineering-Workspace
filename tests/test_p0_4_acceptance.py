@@ -148,3 +148,64 @@ def test_executor_repair_prompt_requires_resolution_not_explanation():
     assert feedback in rendered
     assert "Resolve the reported failure in the next attempt" in rendered
     assert "do not merely explain it" in rendered
+
+
+def test_p0_4_task_discovery_cache_avoids_repeated_github_reads(monkeypatch):
+    bodies = {
+        108: "- [ ] **P0.1 — M0 live task acceptance** — prove M0\n",
+        109: "- [ ] **P1.1 — Unified operation state** — prove P1 state\n",
+    }
+    phases = (
+        acceptance.Phase("P0", 108, "Q3-2026", "2026-09-22", "2026-10-04"),
+        acceptance.Phase("P1", 109, "Q4-2026", "2026-10-04", "2026-10-12"),
+    )
+    calls = []
+    monkeypatch.setattr(acceptance, "schedule", lambda: phases)
+    def fake_github(url, *, method="GET", body=None):
+        calls.append((url, method))
+        if method == "PATCH":
+            return {}
+        issue = int(url.rstrip("/").split("/")[-1])
+        return {"body": bodies[issue]}
+    monkeypatch.setattr(acceptance, "github", fake_github)
+    acceptance._TASK_CACHE = acceptance.TaskDiscoveryCache()
+
+    first = acceptance.all_tasks()
+    second = acceptance.all_tasks()
+
+    assert first == second
+    assert len([item for item in calls if item[1] == "GET"]) == 2
+
+    acceptance.mark_checked(first[0])
+    third = acceptance.all_tasks()
+    assert any(task.task_id == "P0.1" and task.checked for task in third)
+    assert len([item for item in calls if item[1] == "GET"]) == 3
+
+
+def test_p0_4_cached_evidence_pr_avoids_repeat_lookup(tmp_path, monkeypatch):
+    monkeypatch.setattr(acceptance, "state_dir", lambda: tmp_path)
+    (tmp_path / "state.json").write_text(
+        '{"evidence_pr":{"number":142,"url":"https://github.com/th3-st0v3/PASI-Engineering-Workspace/pull/142"}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(acceptance, "token", lambda: "test-token")
+    monkeypatch.setattr(
+        acceptance,
+        "github",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GitHub lookup should be skipped")),
+    )
+
+    assert acceptance.ensure_evidence_pr("pasi/test", "run-1")["number"] == 142
+
+
+def test_p0_4_commit_reconciliation_uses_argv_not_shell():
+    source = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert "subprocess.getstatusoutput(" not in source
+    executor = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
+    assert executor.splitlines().count("import subprocess") == 0
+
+
+def test_extension_background_has_one_side_panel_initializer():
+    background = Path(acceptance.__file__).parents[1] / "extensions" / "pasi-chatgpt" / "src" / "background.js"
+    source = background.read_text(encoding="utf-8")
+    assert source.count("setPanelBehavior({ openPanelOnActionClick: true })") == 1

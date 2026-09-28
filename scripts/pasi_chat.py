@@ -321,6 +321,11 @@ def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None, pu
                 expected_head=previous_hash if values else NEW_CHAT_CHAIN_GENESIS
                 if anchored_head!=expected_head:
                     errors.append("chain anchor head does not match replayed chain tip")
+            anchored_key_id=anchor.get("new_chat_decision_signature_key_id")
+            if anchored_key_id is not None and public_key is not None:
+                actual_key_id=_public_key_id(public_key)
+                if anchored_key_id!=actual_key_id:
+                    errors.append("chain anchor signature key id does not match verification key")
 
     return {
         "path":str(target),

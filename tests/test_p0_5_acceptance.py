@@ -172,6 +172,7 @@ def test_registry_rejects_artifacts_outside_trusted_roots(tmp_path):
             branch="main",
             artifact_kind="run-start",
             artifact_refs=[outside],
+            code_head="deadbeef",
             state_root=state,
         )
 

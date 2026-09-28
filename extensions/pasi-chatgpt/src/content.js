@@ -66,9 +66,13 @@
     });
   }
 
-  function armM0RecoveryProbe(operation) {
-    if (operation?.m0_recovery_probe !== true) return;
-    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
+  function armRecoveryProbe(operation) {
+    const m2Probe = operation?.m2_recovery_probe === true;
+    const m0Probe = operation?.m0_recovery_probe === true;
+    if (!m2Probe && !m0Probe) return;
+    const prefix = m2Probe ? 'm2' : 'm0';
+    const key = `pasi:${prefix}-recovery-probe:${String(operation.operation_id || '')}`;
+    const source = m2Probe ? 'm2_controlled_live_probe' : 'm0_controlled_live_probe';
     try {
       if (sessionStorage.getItem(key) === 'fired') return;
     } catch (_) {}
@@ -99,7 +103,7 @@
       } catch (_) {}
 
       clearInterval(timer);
-      void trigger(operation.operation_id, 'm0_controlled_live_probe');
+      void trigger(operation.operation_id, source);
     }, 250);
   }
 
@@ -550,9 +554,16 @@
 
   function snapshotUserMessages() {
     const nodes = userMessages();
+    const textCounts = new Map();
+    for (const node of nodes) {
+      const text = normalize(messageText(node));
+      if (!text) continue;
+      textCounts.set(text, (textCounts.get(text) || 0) + 1);
+    }
     return {
       keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
       nodes: new WeakSet(nodes),
+      text_counts: textCounts,
       count: nodes.length
     };
   }
@@ -576,16 +587,38 @@
     return unmatched ? 'new_unmatched' : null;
   }
 
-  function countNewUserMessages(nodes, snapshot) {
-    let count = 0;
+  function countNewUserMessages(nodes, snapshot, expectedPrompt = '') {
+    // ChatGPT can replace the DOM nodes for existing messages during reload
+    // or recovery. Node identity alone therefore over-counts unchanged
+    // messages, and counting every newly mounted message can also include
+    // unrelated hydration/remount artifacts. For submission telemetry, count
+    // only the delta for user messages matching this operation's prompt.
+    const baselineCounts = snapshot?.text_counts instanceof Map
+      ? snapshot.text_counts
+      : new Map();
+    const currentCounts = new Map();
     for (const node of nodes) {
-      const key = node.getAttribute?.('data-message-id');
-      const known = key ? snapshot.keys.has(key) : snapshot.nodes.has(node);
-      if (!known) count += 1;
+      const text = normalize(messageText(node));
+      if (!text) continue;
+      currentCounts.set(text, (currentCounts.get(text) || 0) + 1);
     }
-    return count;
-  }
 
+    const { head, tail } = promptFingerprints(expectedPrompt);
+    const matchesPrompt = (text) =>
+      Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
+
+    let baselineMatched = 0;
+    for (const [text, count] of baselineCounts.entries()) {
+      if (matchesPrompt(text)) baselineMatched += count;
+    }
+
+    let currentMatched = 0;
+    for (const [text, count] of currentCounts.entries()) {
+      if (matchesPrompt(text)) currentMatched += count;
+    }
+
+    return Math.max(0, currentMatched - baselineMatched);
+  }
   function snapshotAssistantMessages() {
     const nodes = assistantMessages();
     return {
@@ -1351,7 +1384,7 @@
         timing: {
           injected_at_ms: null,
           ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
+          user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
           ack_verified: via === 'verified',
           submission_via: via
         }
@@ -1380,7 +1413,7 @@
           timing: {
             injected_at_ms: null,
             ack_at_ms: Date.now(),
-            user_messages_added: countNewUserMessages(userMessages(), snapshot),
+            user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
             ack_verified: via === 'verified',
             submission_via: finalVia
           }
@@ -1430,7 +1463,7 @@
         timing: {
           injected_at_ms: injectedAtMs,
           ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
+          user_messages_added: countNewUserMessages(userMessages(), snapshot, expected),
           ack_verified: via === 'verified',
           submission_via: finalVia
         }
@@ -1710,14 +1743,26 @@
         controllerClaimedAt = 0;
       });
     }, 3000);
+    let persistedRecoveryState = null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+      if (stored?.operation_id === operation.operation_id && typeof stored === 'object') {
+        persistedRecoveryState = stored;
+      }
+    } catch (_) {}
+
     activeRecoveryState = {
+      ...(persistedRecoveryState || {}),
       operation_id: operation.operation_id,
       operation_type: operation.operation_type,
-      started_at: new Date().toISOString(),
-      chat_url: chatUrl(),
+      started_at: persistedRecoveryState?.started_at || new Date().toISOString(),
+      chat_url: persistedRecoveryState?.chat_url || chatUrl(),
       reasoning_mode: reasoningMode,
       github_attached: githubAttached,
-      github_repository: githubRepository
+      github_repository: githubRepository,
+      logical_user_messages_added: Number.isInteger(persistedRecoveryState?.logical_user_messages_added)
+        ? persistedRecoveryState.logical_user_messages_added
+        : 0
     };
     localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
     let finalized = false;
@@ -1772,7 +1817,25 @@
             fastPath: fastHandoff,
             readyBox: box
           });
-          const browserTiming = { ...(submission.timing || {}) };
+          const submissionUserMessagesAdded = Number.isInteger(submission.timing?.user_messages_added)
+            ? submission.timing.user_messages_added
+            : 0;
+          const previousLogicalUserMessagesAdded = Number.isInteger(activeRecoveryState?.logical_user_messages_added)
+            ? activeRecoveryState.logical_user_messages_added
+            : 0;
+          const logicalUserMessagesAdded =
+            previousLogicalUserMessagesAdded + submissionUserMessagesAdded;
+          if (logicalUserMessagesAdded > 100) {
+            throw new Error('PASI_NATIVE: logical user-message submission count exceeded bounded recovery telemetry');
+          }
+          if (activeRecoveryState && activeRecoveryState.operation_id === operation.operation_id) {
+            activeRecoveryState.logical_user_messages_added = logicalUserMessagesAdded;
+            localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
+          }
+          const browserTiming = {
+            ...(submission.timing || {}),
+            user_messages_added: logicalUserMessagesAdded
+          };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
           if (
             Number.isFinite(previousCompletionAckAtMs) &&
@@ -1821,7 +1884,7 @@
             throw new Error('PASI_NATIVE: submission accepted but generation did not start');
           }
           browserTiming.generation_start_ms = generationStartMs;
-          armM0RecoveryProbe(operation);
+          armRecoveryProbe(operation);
           const response = await waitForResponse(
             baseline,
             Array.isArray(operation.completion_markers)
@@ -1920,23 +1983,37 @@
   async function waitForConversationDomReady() {
     let previousUsers = -1;
     let previousAssistants = -1;
+    let previousUserTextSignature = null;
     let stableSamples = 0;
 
     await waitUntil(() => {
       if (!chatUrl()) return null;
 
-      const users = userMessages().length;
+      const userNodes = userMessages();
+      const users = userNodes.length;
       const assistants = assistantMessages().length;
-      if (users === previousUsers && assistants === previousAssistants) {
+      const userTextSignature = userNodes
+        .map((node) => normalize(messageText(node)))
+        .join('\u001f');
+      const userTextReady = userNodes.every((node) => Boolean(normalize(messageText(node))));
+
+      if (
+        users === previousUsers &&
+        assistants === previousAssistants &&
+        userTextSignature === previousUserTextSignature &&
+        userTextReady
+      ) {
         stableSamples += 1;
       } else {
         previousUsers = users;
         previousAssistants = assistants;
+        previousUserTextSignature = userTextSignature;
         stableSamples = 0;
       }
 
-      // Require several consecutive identical DOM samples so an existing
-      // conversation is not reported as 0:0 while ChatGPT is still hydrating.
+      // Require several consecutive identical DOM/text samples so an existing
+      // conversation is not reported ready while ChatGPT is still hydrating
+      // or replacing message nodes.
       return composer() && stableSamples >= 3;
     }, 10000, DOM_POLL_MS);
 

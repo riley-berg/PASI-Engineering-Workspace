@@ -189,3 +189,82 @@ def test_chain_persists_predecessor_completion_timing_for_next_operation(tmp_pat
     queued = state.get_operation(second.operation_id)
     assert queued is not None
     assert queued["predecessor_completed_at_ms"] == 1500
+
+
+def test_m2_recovery_probe_is_only_valid_for_prompt_operations(tmp_path):
+    state = make_state(tmp_path)
+
+    with pytest.raises(ValueError, match="m2_recovery_probe is only permitted"):
+        state.queue_operation(
+            "new_chat",
+            "",
+            idempotency_key="m2-new-chat",
+            m2_recovery_probe=True,
+        )
+
+    operation = state.queue_operation(
+        "prompt",
+        "reply with marker",
+        idempotency_key="m2-prompt",
+        m2_recovery_probe=True,
+    )
+    assert operation.m2_recovery_probe is True
+    persisted = state.get_operation(operation.operation_id)
+    assert persisted is not None
+    assert persisted["m2_recovery_probe"] is True
+
+
+def test_m2_controlled_connection_loss_is_retryable():
+    from pasi_bridge.bridge import BridgeState
+
+    assert BridgeState._is_transient_browser_error(
+        "PASI_NATIVE: controlled/observed connection loss interrupted generation; current chat preserved for bounded retry."
+    )
+
+
+def test_marker_bound_response_requires_matching_marker():
+    from pasi_bridge.bridge import BridgeState
+
+    assert BridgeState._completion_markers_satisfied(
+        "PASI_M2_RECOVERY_test_01",
+        ["PASI_M2_RECOVERY_test_01"],
+    )
+    assert BridgeState._completion_markers_satisfied(
+        "PASI_M2_RECOVERY_test_01: acknowledged",
+        ["PASI_M2_RECOVERY_test_01"],
+    )
+    assert not BridgeState._completion_markers_satisfied(
+        "stale previous assistant response",
+        ["PASI_M2_RECOVERY_test_01"],
+    )
+
+
+def test_transient_retry_does_not_complete_from_nonmatching_stale_response(tmp_path):
+    from pasi_bridge.bridge import BridgeState
+
+    state = make_state(tmp_path)
+    operation = state.queue_operation(
+        "prompt",
+        "reply with marker",
+        idempotency_key="m2-stale-response",
+        completion_markers=["PASI_M2_RECOVERY_test_03"],
+        m2_recovery_probe=True,
+    )
+    claimed = state.claim_operation(operation.operation_id)
+    assert claimed is not None
+
+    with state.lock:
+        queue = state._load_queue()
+        item = next(item for item in queue if item["operation_id"] == operation.operation_id)
+        item["response_text"] = "stale previous assistant response"
+        item["response_text_available"] = True
+        state._save_queue(queue)
+
+    retried = state.fail_operation(
+        operation.operation_id,
+        "PASI_NATIVE: controlled/observed connection loss interrupted generation; current chat preserved for bounded retry.",
+    )
+    assert retried is not None
+    assert retried["status"] == "queued"
+    assert retried["retry_count"] == 1
+    assert retried["retry_counts"] == {"controller": 1, "response": 0, "context": 0}

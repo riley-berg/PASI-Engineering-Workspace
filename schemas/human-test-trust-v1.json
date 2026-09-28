@@ -1,0 +1,21 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/human-test-trust-v1.json",
+  "title":"PASI Human Test Trust Certificate v1",
+  "type":"object",
+  "required":["schema_version","status","issued_at","policy","successful_runs","distinct_code_heads","negative_controls","policy_violations","trailing_successes","source_run_ids","certificate_sha256","issuer_signature"],
+  "properties":{
+    "schema_version":{"const":1},
+    "status":{"enum":["pending","trusted","revoked"]},
+    "issued_at":{"type":"string","format":"date-time"},
+    "policy":{"type":"object"},
+    "successful_runs":{"type":"integer","minimum":0},
+    "distinct_code_heads":{"type":"integer","minimum":0},
+    "negative_controls":{"type":"integer","minimum":0},
+    "policy_violations":{"type":"integer","minimum":0},
+    "trailing_successes":{"type":"integer","minimum":0},
+    "source_run_ids":{"type":"array","items":{"type":"string"}},
+    "certificate_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"},"issuer_signature":{"type":"string","minLength":0,"maxLength":128}
+  },
+  "additionalProperties":false
+}

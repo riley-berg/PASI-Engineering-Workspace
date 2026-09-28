@@ -95,6 +95,9 @@ def main()->int:
     p.add_argument("--extension-root",type=Path,default=Path(os.environ.get("PASI_ENGINEERING_EXTENSION_ROOT",str(Path(__file__).resolve().parents[1]/"extensions"/"pasi-chatgpt"))))
     a=p.parse_args(); a.repo=a.repo.expanduser().resolve(); a.extension_root=a.extension_root.expanduser().resolve()
     task=a.task.strip()
+    state=load()
+    state["deployment_id"]=PASI_DEPLOYMENT_ID
+    save(state)
     adapter=ChatGPTAdapter(transport=UrllibBridgeTransport(timeout_seconds=10.0),session_id=f"engineering-{uuid.uuid4().hex}",poll_interval_seconds=.25,max_wait_seconds=a.timeout)
     wait_live(adapter,a.extension_root,min(30,a.timeout)); state=load(); key=fp(task)
     active=state.get("active_operation_id"); active_key=state.get("active_task_fingerprint")

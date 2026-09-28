@@ -724,6 +724,61 @@ def test_long_run_launcher_uses_repository_virtualenv_python():
     assert 'PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"' in launcher
     assert '"$PYTHON_BIN" scripts/pasi_168h_acceptance.py' in launcher
     assert 'PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"' in launcher
+    assert 'PASI_ENGINEERING_RUNTIME_DIR="${PASI_ENGINEERING_RUNTIME_DIR:-$RUNTIME_DIR/runtime}"' in launcher
+    assert 'PASI_NEW_CHAT_AUDIT_KEY_DIR="${PASI_NEW_CHAT_AUDIT_KEY_DIR:-$RUNTIME_DIR/keys}"' in launcher
+    assert 'PASI_168H_SMOKE="${PASI_168H_SMOKE:-0}"' in launcher
+    assert 'scripts/pasi_168h_acceptance.py --hours 168 --smoke' in launcher
+
+
+def test_168h_runner_replays_and_persists_new_chat_audit():
+    result = {
+        "path": "/tmp/new-chat-decisions.jsonl",
+        "public_key": "/tmp/public.pem",
+        "records": 3,
+        "valid": True,
+        "errors": [],
+        "chain_head": "abc123",
+    }
+    state = {}
+    original = acceptance.new_chat_audit
+    try:
+        acceptance.new_chat_audit = lambda: result
+        replayed = acceptance.record_new_chat_audit(state)
+    finally:
+        acceptance.new_chat_audit = original
+    assert replayed == result
+    assert state["new_chat_audit_valid"] is True
+    assert state["new_chat_audit_record_count"] == 3
+    assert state["new_chat_audit_chain_head"] == "abc123"
+    assert state["new_chat_audit_log"] == "/tmp/new-chat-decisions.jsonl"
+    assert state["new_chat_audit_public_key"] == "/tmp/public.pem"
+    assert state["new_chat_audit_errors"] == []
+
+
+def test_168h_runner_fails_closed_on_invalid_new_chat_audit():
+    result = {
+        "path": "/tmp/new-chat-decisions.jsonl",
+        "public_key": "/tmp/public.pem",
+        "records": 1,
+        "valid": False,
+        "errors": ["line 1: record_signature is invalid"],
+        "chain_head": "bad",
+    }
+    state = {}
+    original = acceptance.new_chat_audit
+    try:
+        acceptance.new_chat_audit = lambda: result
+        try:
+            acceptance.record_new_chat_audit(state)
+        except RuntimeError as exc:
+            assert "new-chat audit chain is invalid" in str(exc)
+        else:
+            raise AssertionError("invalid new-chat audit chain was accepted")
+    finally:
+        acceptance.new_chat_audit = original
+    assert state["new_chat_audit_valid"] is False
+    assert state["new_chat_audit_record_count"] == 1
+    assert "record_signature is invalid" in state["new_chat_audit_errors"][0]
 
 
 def test_p0_4_acceptance_is_run_level_gate_not_model_task():

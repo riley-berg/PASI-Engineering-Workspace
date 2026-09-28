@@ -177,9 +177,24 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
         encoding="utf-8",
     )
     before = git(worktree, "rev-parse", "HEAD")
+    previous_context: dict[str, object] = {}
+    prior_state = state_dir() / "state.json"
+    if prior_state.is_file():
+        try:
+            loaded = json.loads(prior_state.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                previous_context = {
+                    "previous_task_id": loaded.get("current_task"),
+                    "previous_phase": loaded.get("current_phase"),
+                    "previous_commit": loaded.get("last_commit"),
+                    "next_task": loaded.get("next_task"),
+                }
+        except (OSError, json.JSONDecodeError):
+            previous_context = {}
     env = os.environ.copy()
     env.update({
         "PASI_ACCEPTANCE_RUN_ID": run_id,
+        "PASI_TASK_PREVIOUS_CONTEXT": json.dumps(previous_context, sort_keys=True),
         "PASI_TASK_ID": task.task_id,
         "PASI_TASK_PHASE": task.phase.id,
         "PASI_TASK_TITLE": task.title,

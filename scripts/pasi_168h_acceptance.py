@@ -514,6 +514,23 @@ def main() -> int:
                     state["evidence_pr"] = reconciled.get("evidence_pr", {})
                     state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [task.title])[-12:]
                     deferred.pop(task.task_id, None); state["deferred_tasks"] = deferred
+                    remaining = [next_task for next_task in all_tasks() if not next_task.checked]
+                    if remaining:
+                        next_task = remaining[0]
+                        emit({
+                            "event": "next_task_ready",
+                            "at": utcnow().isoformat(),
+                            "completed_task_id": task.task_id,
+                            "next_task_id": next_task.task_id,
+                            "next_phase": next_task.phase.id,
+                        })
+                        state["next_task"] = {
+                            "task_id": next_task.task_id,
+                            "phase": next_task.phase.id,
+                            "title": next_task.title,
+                        }
+                    else:
+                        state["next_task"] = None
                     write_state(state)
                     continue
                 evidence = run_task(task, worktree, branch, run_id)
@@ -522,7 +539,23 @@ def main() -> int:
                 state["evidence_pr"] = evidence.get("evidence_pr", state.get("evidence_pr", {}))
                 state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [task.title])[-12:]
                 deferred.pop(task.task_id, None)
-                state["deferred_tasks"] = deferred
+                remaining = [next_task for next_task in all_tasks() if not next_task.checked]
+                if remaining:
+                    next_task = remaining[0]
+                    emit({
+                        "event": "next_task_ready",
+                        "at": utcnow().isoformat(),
+                        "completed_task_id": task.task_id,
+                        "next_task_id": next_task.task_id,
+                        "next_phase": next_task.phase.id,
+                    })
+                    state["next_task"] = {
+                        "task_id": next_task.task_id,
+                        "phase": next_task.phase.id,
+                        "title": next_task.title,
+                    }
+                else:
+                    state["next_task"] = None
                 metrics = operation_metrics()
                 if metrics:
                     emit({"event": "operation_metrics", "at": utcnow().isoformat(), "task_id": task.task_id, "metrics": metrics})

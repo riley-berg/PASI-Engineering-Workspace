@@ -10,6 +10,7 @@ from pasi.core.context_compiler import ContextCompilationError, ContextCompiler
 from pasi.core.dependency_graph import DependencyGraph
 from pasi.core.github_issue_intake import GitHubIssueTaskIntake, IssueIntakeError
 from pasi.core.memory_compaction import MemoryCompactor, CompactionError
+from pasi.core.cross_run_learning import LearningPromotionError
 from pasi.core.memory_store import SQLiteMemoryStore
 from pasi.core.projects_sync import SQLiteProjectSyncStore
 from pasi.core.roadmap import (
@@ -99,6 +100,30 @@ class PlannerConsoleService:
                 "count": len(self._list_roadmaps()),
             }
 
+        if method == "GET" and parsed.path == "/v1/planner/dependency-graph":
+            try:
+                roadmap = self._roadmap(query.get("roadmap_id", [None])[0])
+                graph = DependencyGraph.build(roadmap)
+            except RoadmapNotFound:
+                return HTTPStatus.NOT_FOUND, {"error": "roadmap not found"}
+            return HTTPStatus.OK, graph.to_dict()
+
+        if method == "GET" and parsed.path == "/v1/planner/learning":
+            scope = query.get("scope", ["project:pasi"])[0]
+            memories = self.memory_store.list(scope=scope, kind=query.get("kind", [None])[0])
+            learned = [
+                memory.to_dict()
+                for memory in memories
+                if memory.memory_id.startswith("learn-")
+                and memory.source_operation_id
+                and memory.provenance_refs
+            ]
+            return HTTPStatus.OK, {
+                "scope": scope,
+                "learning": learned,
+                "count": len(learned),
+            }
+
         if method == "GET" and parsed.path == "/v1/planner/roadmap":
             try:
                 roadmap = self._roadmap(query.get("roadmap_id", [None])[0])
@@ -118,7 +143,13 @@ class PlannerConsoleService:
                 ).get(task_id)
             except TaskDetailNotFound:
                 return HTTPStatus.NOT_FOUND, {"error": "task not found"}
-            return HTTPStatus.OK, detail.to_dict()
+            detail_payload = detail.to_dict()
+            detail_payload["children"] = [
+                child.to_dict()
+                for child in roadmap.children_of(task_id)
+            ]
+            return HTTPStatus.OK, detail_payload
+
 
         if method == "GET" and parsed.path == "/v1/planner/selection":
             roadmap = self._roadmap(query.get("roadmap_id", [None])[0])
@@ -230,6 +261,34 @@ class PlannerConsoleService:
                     }
                     for item in values
                 ],
+            }
+
+        if method == "POST" and parsed.path == "/v1/planner/preferences":
+            auth = headers.get("Authorization", "")
+            if not auth.startswith("Bearer "):
+                return HTTPStatus.UNAUTHORIZED, {"error": "missing bearer authorization"}
+            payload = body or {}
+            try:
+                self.controls.authorize(auth[7:])
+                scope = str(payload.get("scope", "workspace:pasi"))
+                key = str(payload.get("key", ""))
+                expected_revision = int(payload.get("expected_revision", -1))
+                value = payload.get("value")
+                saved = self.preferences.set(
+                    scope,
+                    key,
+                    value,
+                    expected_revision=expected_revision,
+                )
+            except AuthorizationError as exc:
+                return HTTPStatus.UNAUTHORIZED, {"error": str(exc)}
+            except (PreferenceError, ValueError) as exc:
+                return HTTPStatus.BAD_REQUEST, {"error": str(exc)}
+            return HTTPStatus.OK, {
+                "scope": saved.scope,
+                "key": saved.key,
+                "value": saved.value,
+                "revision": saved.revision,
             }
 
         if method == "GET" and parsed.path == "/v1/planner/projects":

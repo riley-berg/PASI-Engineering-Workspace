@@ -155,10 +155,11 @@ def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str
 
 def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     git(root, "fetch", "origin", "main", timeout=120)
+    source_ref = os.environ.get("PASI_168H_SOURCE_REF", "HEAD").strip() or "HEAD"
     worktree = worktree.expanduser().resolve()
     worktree.parent.mkdir(parents=True, exist_ok=True)
     if not (worktree / ".git").exists():
-        git(root, "worktree", "add", "-B", branch, str(worktree), "origin/main", timeout=120)
+        git(root, "worktree", "add", "-B", branch, str(worktree), source_ref, timeout=120)
     elif git(worktree, "branch", "--show-current") != branch:
         if git(worktree, "status", "--porcelain", check=False):
             raise RuntimeError("acceptance worktree is not clean")

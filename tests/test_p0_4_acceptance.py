@@ -124,3 +124,27 @@ def test_chat_recovers_terminal_empty_context_exhaustion():
 def test_p0_4_branch_selection_uses_cli_branch_on_new_run():
     runner = Path(acceptance.__file__).read_text(encoding="utf-8")
     assert 'branch = str(args.branch or existing.get("branch")' in runner
+
+
+def test_executor_feeds_failures_back_into_bounded_repair_prompt():
+    runner = Path(__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
+    assert 'MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))' in runner
+    assert 'PREVIOUS EXECUTION FEEDBACK:' in runner
+    assert 'cleanup_failed_attempt(root)' in runner
+    assert 'Completion-contract or patch validation failed:' in runner
+    assert 'Patch application failed.' in runner
+    assert 'Python verification failed after applying the patch.' in runner
+    assert 'Frontend verification failed after applying the patch.' in runner
+
+
+def test_executor_repair_prompt_requires_resolution_not_explanation():
+    from scripts import pasi_engineering_executor as executor
+
+    task = "Acceptance evidence registry"
+    feedback = "missing/duplicate markers: summary, evidence"
+    rendered = executor.repair_feedback(task, feedback, 2)
+    assert "CURRENT" not in rendered
+    assert "PREVIOUS EXECUTION FEEDBACK:" in rendered
+    assert feedback in rendered
+    assert "Resolve the reported failure in the next attempt" in rendered
+    assert "do not merely explain it" in rendered

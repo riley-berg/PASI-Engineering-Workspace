@@ -17,11 +17,13 @@ elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
   PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 else
   PYTHON_BIN="$(command -v python3 || command -v python || true)"
-fi
-
-if [[ -z "$PYTHON_BIN" ]]; then
-  echo "error: no usable Python executable found; set PASI_PYTHON" >&2
-  exit 2
+  if [[ -z "$PYTHON_BIN" ]]; then
+    echo "error: no usable Python executable found; set PASI_PYTHON" >&2
+    exit 2
+  fi
+  echo "[PASI 168h] repository .venv is absent; creating it from $PYTHON_BIN." >&2
+  "$PYTHON_BIN" -m venv "$REPO_ROOT/.venv"
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
 fi
 
 if [[ "$PYTHON_BIN" == */* ]]; then

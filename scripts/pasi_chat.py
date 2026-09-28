@@ -111,14 +111,16 @@ def _record_hash(record:Mapping[str,Any])->str:
     return hashlib.sha256(_canonical_record_payload(record).encode("utf-8")).hexdigest()
 
 
-def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str]]:
+def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str],int]:
     if not path.exists():
-        return [],[]
+        return [],[],0
     values:list[dict[str,Any]]=[]
     errors:list[str]=[]
+    nonempty_lines=0
     for line_number,line in enumerate(path.read_text(encoding="utf-8").splitlines(),1):
         if not line.strip():
             continue
+        nonempty_lines+=1
         try:
             value=json.loads(line)
         except json.JSONDecodeError as exc:
@@ -128,7 +130,7 @@ def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str]]:
             errors.append(f"line {line_number}: record must be an object")
             continue
         values.append(dict(value))
-    return values,errors
+    return values,errors,nonempty_lines
 
 
 def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
@@ -200,7 +202,7 @@ def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->d
     anchor_path=state_path
     if anchor_path is None and target==NEW_CHAT_DECISIONS_PATH:
         anchor_path=STATE_PATH
-    values,parse_errors=_read_chain_records(target)
+    values,parse_errors,nonempty_lines=_read_chain_records(target)
     errors=list(parse_errors)
     previous_hash=NEW_CHAT_CHAIN_GENESIS
     expected_index=1
@@ -244,7 +246,7 @@ def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->d
 
     return {
         "path":str(target),
-        "records":len(values),
+        "records":nonempty_lines,
         "valid":not errors,
         "errors":errors,
         "chain_head":previous_hash if values else NEW_CHAT_CHAIN_GENESIS,

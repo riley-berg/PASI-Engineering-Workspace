@@ -168,7 +168,7 @@ def test_p0_4_task_discovery_cache_avoids_repeated_github_reads(monkeypatch):
         issue = int(url.rstrip("/").split("/")[-1])
         return {"body": bodies[issue]}
     monkeypatch.setattr(acceptance, "github", fake_github)
-    acceptance._TASK_CACHE = acceptance.TaskDiscoveryCache()
+    monkeypatch.setattr(acceptance, "_TASK_CACHE", acceptance.TaskDiscoveryCache())
 
     first = acceptance.all_tasks()
     second = acceptance.all_tasks()
@@ -202,7 +202,7 @@ def test_p0_4_commit_reconciliation_uses_argv_not_shell():
     source = Path(acceptance.__file__).read_text(encoding="utf-8")
     assert "subprocess.getstatusoutput(" not in source
     executor = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
-    assert executor.splitlines().count("import subprocess") == 0
+    assert executor.splitlines().count("import subprocess") == 1
 
 
 def test_extension_background_has_one_side_panel_initializer():

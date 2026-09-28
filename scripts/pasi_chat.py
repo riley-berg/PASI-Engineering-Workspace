@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, os, re, time, uuid
+import argparse, base64, hashlib, json, os, re, stat, time, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
 from automation.computer_use.chatgpt import ChatGPTAdapter, ChatGPTAdapterError, UrllibBridgeTransport
 
 CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
@@ -17,6 +20,10 @@ RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/"
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
 NEW_CHAT_DECISIONS_PATH=RUNTIME_DIR/"new-chat-decisions.jsonl"
 NEW_CHAT_CHAIN_GENESIS="PASI_NEW_CHAT_CHAIN_V1:GENESIS"
+AUDIT_KEY_DIR=Path(os.environ.get("PASI_NEW_CHAT_AUDIT_KEY_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"keys"))).expanduser().resolve()
+AUDIT_PRIVATE_KEY_PATH=AUDIT_KEY_DIR/"new-chat-audit-ed25519-private.pem"
+AUDIT_PUBLIC_KEY_PATH=AUDIT_KEY_DIR/"new-chat-audit-ed25519-public.pem"
+AUDIT_SIGNATURE_ALGORITHM="Ed25519"
 
 def fp(task:str)->str: return hashlib.sha256(task.strip().encode()).hexdigest()
 def valid_url(v:object)->str|None: return v if isinstance(v,str) and CHAT_URL_RE.match(v) else None
@@ -104,11 +111,66 @@ def _parse_timestamp(value:object)->datetime|None:
 def _canonical_record_payload(record:Mapping[str,Any])->str:
     payload=dict(record)
     payload.pop("record_hash",None)
+    payload.pop("record_signature",None)
     return json.dumps(payload,sort_keys=True,ensure_ascii=False,separators=(",",":"))
 
 
 def _record_hash(record:Mapping[str,Any])->str:
     return hashlib.sha256(_canonical_record_payload(record).encode("utf-8")).hexdigest()
+
+
+def _public_key_id(public_key:Ed25519PublicKey)->str:
+    return hashlib.sha256(public_key.public_bytes(Encoding.Raw,PublicFormat.Raw)).hexdigest()[:16]
+
+
+def _ensure_audit_keypair()->tuple[Ed25519PrivateKey,str]:
+    AUDIT_KEY_DIR.mkdir(parents=True,exist_ok=True)
+    if AUDIT_PRIVATE_KEY_PATH.exists():
+        try:
+            loaded=serialization.load_pem_private_key(AUDIT_PRIVATE_KEY_PATH.read_bytes(),password=None)
+        except (ValueError,OSError) as exc:
+            raise RuntimeError(f"new-chat audit private key is invalid: {exc}") from exc
+        if not isinstance(loaded,Ed25519PrivateKey):
+            raise RuntimeError("new-chat audit private key is not Ed25519")
+        private_key=loaded
+    else:
+        private_key=Ed25519PrivateKey.generate()
+        pem=private_key.private_bytes(Encoding.PEM,PrivateFormat.PKCS8,NoEncryption())
+        AUDIT_PRIVATE_KEY_PATH.write_bytes(pem)
+        AUDIT_PRIVATE_KEY_PATH.chmod(stat.S_IRUSR|stat.S_IWUSR)
+
+    public_key=private_key.public_key()
+    public_pem=public_key.public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo)
+    if not AUDIT_PUBLIC_KEY_PATH.exists() or AUDIT_PUBLIC_KEY_PATH.read_bytes()!=public_pem:
+        AUDIT_PUBLIC_KEY_PATH.write_bytes(public_pem)
+        AUDIT_PUBLIC_KEY_PATH.chmod(stat.S_IRUSR|stat.S_IWUSR|stat.S_IRGRP|stat.S_IROTH)
+    return private_key,_public_key_id(public_key)
+
+
+def _load_audit_public_key(path:Path=AUDIT_PUBLIC_KEY_PATH)->Ed25519PublicKey|None:
+    try:
+        key=serialization.load_pem_public_key(path.read_bytes())
+    except (OSError,ValueError):
+        return None
+    return key if isinstance(key,Ed25519PublicKey) else None
+
+
+def _sign_record_hash(record_hash:str, private_key:Ed25519PrivateKey)->str:
+    return base64.b64encode(private_key.sign(record_hash.encode("ascii"))).decode("ascii")
+
+
+def _verify_record_signature(record:Mapping[str,Any], public_key:Ed25519PublicKey)->bool:
+    signature=record.get("record_signature")
+    if not isinstance(signature,str) or not signature:
+        return False
+    try:
+        public_key.verify(
+            base64.b64decode(signature,validate=True),
+            str(record.get("record_hash")).encode("ascii"),
+        )
+    except (ValueError,TypeError,UnicodeError):
+        return False
+    return True
 
 
 def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str],int]:
@@ -139,7 +201,8 @@ def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
         errors.append("decision must be create_new_chat")
     for field in ("decision_id","recorded_at","observed_conversation_url","conversation_signature",
                   "freshness_window_seconds","exhaustion_evidence","chain_index",
-                  "previous_record_hash","record_hash"):
+                  "previous_record_hash","record_hash","record_signature",
+                  "signature_algorithm","signature_key_id"):
         if field not in record:
             errors.append(f"missing required field: {field}")
     if not valid_url(record.get("observed_conversation_url")):
@@ -194,16 +257,25 @@ def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
         errors.append("chat_exhausted evidence is not true")
     if evidence.get("normalized_chat_exhausted") is not True:
         errors.append("normalized_chat_exhausted evidence is not true")
+    if record.get("signature_algorithm")!=AUDIT_SIGNATURE_ALGORITHM:
+        errors.append("signature_algorithm must be Ed25519")
+    if not isinstance(record.get("signature_key_id"),str) or not record.get("signature_key_id").strip():
+        errors.append("signature_key_id is missing or empty")
+    if not isinstance(record.get("record_signature"),str) or not record.get("record_signature").strip():
+        errors.append("record_signature is missing or empty")
     return errors
 
 
-def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->dict[str,Any]:
+def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None, public_key_path:Path|None=None)->dict[str,Any]:
     target=path or NEW_CHAT_DECISIONS_PATH
     anchor_path=state_path
     if anchor_path is None and target==NEW_CHAT_DECISIONS_PATH:
         anchor_path=STATE_PATH
     values,parse_errors,nonempty_lines=_read_chain_records(target)
     errors=list(parse_errors)
+    public_key=_load_audit_public_key(public_key_path or AUDIT_PUBLIC_KEY_PATH)
+    if values and public_key is None:
+        errors.append("audit public key is missing or invalid")
     previous_hash=NEW_CHAT_CHAIN_GENESIS
     expected_index=1
     for position,value in enumerate(values,1):
@@ -219,6 +291,12 @@ def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->d
             calculated_hash=_record_hash(value)
             if stored_hash!=calculated_hash:
                 errors.append(f"line {position}: record_hash does not match canonical record contents")
+            if public_key is not None:
+                actual_key_id=_public_key_id(public_key)
+                if value.get("signature_key_id")!=actual_key_id:
+                    errors.append(f"line {position}: signature_key_id does not match verification key")
+                elif not _verify_record_signature(value,public_key):
+                    errors.append(f"line {position}: record_signature is invalid")
         else:
             calculated_hash=None
         if calculated_hash is not None:
@@ -260,9 +338,10 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
     if not isinstance(evidence,Mapping):
         raise ValueError("new-chat decision requires durable exhaustion evidence")
 
-    replay=replay_new_chat_decisions(NEW_CHAT_DECISIONS_PATH, STATE_PATH)
+    private_key,signature_key_id=_ensure_audit_keypair()
+    replay=replay_new_chat_decisions(NEW_CHAT_DECISIONS_PATH, STATE_PATH, AUDIT_PUBLIC_KEY_PATH)
     if not replay["valid"]:
-        raise ValueError("cannot append new-chat proof: existing audit chain is invalid")
+        raise ValueError("cannot append new-chat proof: existing audit chain or signatures are invalid")
     next_index=replay["records"]+1
     previous_hash=replay["chain_head"]
 
@@ -279,8 +358,11 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
         "exhaustion_evidence":dict(evidence),
         "chain_index":next_index,
         "previous_record_hash":previous_hash,
+        "signature_algorithm":AUDIT_SIGNATURE_ALGORITHM,
+        "signature_key_id":signature_key_id,
     }
     decision["record_hash"]=_record_hash(decision)
+    decision["record_signature"]=_sign_record_hash(decision["record_hash"],private_key)
     RUNTIME_DIR.mkdir(parents=True,exist_ok=True)
     with NEW_CHAT_DECISIONS_PATH.open("a",encoding="utf-8") as handle:
         handle.write(json.dumps(decision,sort_keys=True,separators=(",",":"))+"\n")
@@ -290,6 +372,7 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
     state["last_new_chat_decision"]=decision
     state["new_chat_decision_count"]=next_index
     state["new_chat_decision_chain_head"]=decision["record_hash"]
+    state["new_chat_decision_signature_key_id"]=signature_key_id
     save(state)
     return decision
 

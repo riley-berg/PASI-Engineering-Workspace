@@ -45,11 +45,15 @@ def observed_chat_state(observation:Mapping[str,Any]|None)->dict[str,Any]:
 def select_chat_mode(state:Mapping[str,Any],live:Mapping[str,Any])->str:
     if bool(live.get("usage_limited") or state.get("usage_limited")):
         return "blocked"
+    # A replacement chat is permitted only when the current conversation has
+    # explicit context-exhaustion evidence. Connection loss, stale heartbeat,
+    # or a temporarily missing URL are recovery conditions, not new-chat
+    # conditions.
     if bool(live.get("chat_exhausted") or state.get("chat_exhausted")):
         return "new_chat"
     if valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")):
         return "reuse"
-    return "new_chat"
+    return "recover"
 
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
     deadline=time.monotonic()+timeout; expected=expected_version(ext); latest=observed_chat_state(None)
@@ -70,6 +74,36 @@ def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
                 except ValueError: pass
         time.sleep(.5)
     raise RuntimeError("Engineering Workspace ChatGPT controller heartbeat is not live")
+
+def recover_existing_chat(adapter:ChatGPTAdapter,state:Mapping[str,Any],live:Mapping[str,Any])->dict[str,Any]:
+    merged=dict(state)
+    if valid_url(live.get("chat_url")):
+        merged["chat_url"]=live["chat_url"]
+    if bool(live.get("chat_exhausted")):
+        merged["chat_exhausted"]=True
+    if bool(live.get("usage_limited")):
+        merged["usage_limited"]=True
+    if valid_url(merged.get("chat_url")) or bool(merged.get("chat_exhausted")):
+        return merged
+
+    # Health can legitimately omit the conversation URL during a transient
+    # controller/browser state transition. Re-read the authoritative browser
+    # state before deciding anything about chat creation.
+    try:
+        observation=adapter.read_browser_state()
+    except ChatGPTAdapterError:
+        observation=None
+    observed=observed_chat_state(observation)
+    if valid_url(observed.get("chat_url")):
+        merged["chat_url"]=observed["chat_url"]
+    merged["chat_exhausted"]=bool(merged.get("chat_exhausted") or observed.get("chat_exhausted"))
+    merged["usage_limited"]=bool(merged.get("usage_limited") or observed.get("usage_limited"))
+    if valid_url(merged.get("chat_url")) or bool(merged.get("chat_exhausted")):
+        return merged
+    raise RuntimeError(
+        "CHAT_SESSION_UNCERTAIN: existing ChatGPT session could not be identified; "
+        "refusing to create a new chat without explicit context-exhaustion evidence"
+    )
 
 def prompt(task:str,phase:str,task_id:str,issue:str)->str:
     return f"""CURRENT TASK:
@@ -132,9 +166,26 @@ def main()->int:
         state["chat_url"]=live["chat_url"]
     state["chat_exhausted"]=bool(live.get("chat_exhausted"))
     state["usage_limited"]=bool(live.get("usage_limited"))
-    state["connection_interrupted"]=False
+    state["connection_interrupted"]=bool(live.get("connection_failure"))
     save(state)
     key=fp(task)
+    pending_new_chat=state.get("pending_new_chat_operation_id")
+    if isinstance(pending_new_chat,str) and pending_new_chat.strip():
+        try:
+            recovered=adapter.wait_for_completion(pending_new_chat,timeout_seconds=a.timeout,recover_response_text=False)
+        except ChatGPTAdapterError:
+            state["connection_interrupted"]=True
+            save(state)
+            raise
+        if recovered.completion!="complete":
+            raise RuntimeError(f"pending ChatGPT session creation did not complete: {recovered.completion}")
+        state["pending_new_chat_operation_id"]=None
+        state["chat_url"]=valid_url(recovered.chat_url) or state.get("chat_url")
+        state["chat_exhausted"]=False
+        state["usage_limited"]=False
+        state["reasoning_mode"]=None
+        save(state)
+
     active=state.get("active_operation_id"); active_key=state.get("active_task_fingerprint")
 
     def wait_task_response(operation_id:str)->Any:
@@ -158,9 +209,26 @@ def main()->int:
         mode=select_chat_mode(state,live)
         if mode=="blocked":
             raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")
+        if mode=="recover":
+            recovered=recover_existing_chat(adapter,state,live)
+            if recovered.get("usage_limited"):
+                raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")
+            state.update(recovered)
+            live=recovered
+            mode="reuse"
         if mode=="new_chat":
-            op=adapter.new_session(); r=adapter.read_operation(op)
+            try:
+                op=adapter.new_session()
+            except ChatGPTAdapterError:
+                pending=getattr(adapter,"current_operation_id",None)
+                if isinstance(pending,str) and pending.strip():
+                    state["pending_new_chat_operation_id"]=pending
+                    state["connection_interrupted"]=True
+                    save(state)
+                raise
+            r=adapter.read_operation(op)
             if r.completion!="complete": raise RuntimeError("new ChatGPT session did not complete")
+            state["pending_new_chat_operation_id"]=None
             state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
             save(state)
         if state.get("reasoning_mode")!="thinking": adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"
@@ -192,7 +260,7 @@ def main()->int:
     if response.text: print("\n=== CHATGPT RESPONSE ===\n"); print(response.text)
     if isinstance(adapter.last_operation,Mapping) and adapter.last_operation.get("operation_id"):
         print("PASI_OPERATION_METRICS: "+json.dumps({"operation_id":adapter.last_operation.get("operation_id"),"timing":adapter.last_operation.get("timing"),"recovery_events":adapter.last_operation.get("recovery_events")},separators=(",",":")))
-    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url"); state["chat_exhausted"]=bool(response.chat_exhausted)
+    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url"); state["chat_exhausted"]=bool(response.chat_exhausted); state["connection_interrupted"]=False; state["pending_new_chat_operation_id"]=None
     if response.completion in TERMINAL: state["active_operation_id"]=None; state["active_task_fingerprint"]=None
     save(state)
     return 0 if response.completion=="complete" and bool(response.text.strip()) else 1

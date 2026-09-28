@@ -81,6 +81,25 @@ def test_registry_binds_exact_provenance_and_integrity(tmp_path, monkeypatch):
     assert record["record_digest_algorithm"] == "sha256"
     assert record["previous_record_digest"] is None
 
+    registry.register_acceptance_artifact(
+        repo_root=repo,
+        extension_root=extension_root,
+        run_id="ew-test-run-2",
+        task_id="P0.5",
+        phase="P0",
+        branch="pasi/p0-5-test",
+        artifact_kind="task-completion",
+        code_head="cafebabe",
+        state_root=state,
+    )
+    records = [
+        json.loads(line)
+        for line in registry_file.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(records) == 2
+    assert records[1]["previous_record_digest"] == records[0]["record_digest"]
+
 
 def test_registry_binds_observed_controller_version(tmp_path, monkeypatch):
     repo = tmp_path / "repo"
@@ -102,6 +121,7 @@ def test_registry_binds_observed_controller_version(tmp_path, monkeypatch):
         phase="P0",
         branch="main",
         artifact_kind="run-start",
+        code_head="deadbeef",
         state_root=state,
     )
 
@@ -129,6 +149,7 @@ def test_registry_rejects_controller_version_mismatch(tmp_path):
             phase="P0",
             branch="main",
             artifact_kind="run-start",
+            code_head="deadbeef",
             state_root=state,
         )
 

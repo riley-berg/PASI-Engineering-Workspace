@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "suite_id": "pasi-p0-runtime-controls",
+  "suite_version": 1,
+  "allowed_origins": ["http://127.0.0.1:*", "http://localhost:*"],
+  "steps": [
+    {
+      "id": "open-operation",
+      "action": "navigate",
+      "url": "/?operation_id=p0-human-test",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "operation-visible",
+      "action": "assert_text",
+      "selector": "body",
+      "text": "p0-human-test",
+      "contains": true,
+      "timeout_ms": 10000
+    },
+    {
+      "id": "start-operation",
+      "action": "runtime_control",
+      "operation_id": "p0-human-test",
+      "control_action": "start"
+    },
+    {
+      "id": "reload-after-start",
+      "action": "reload",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "started-state-visible",
+      "action": "assert_text",
+      "selector": "body",
+      "text": "claimed",
+      "contains": true,
+      "timeout_ms": 10000
+    },
+    {
+      "id": "stop-operation",
+      "action": "runtime_control",
+      "operation_id": "p0-human-test",
+      "control_action": "stop"
+    },
+    {
+      "id": "reload-after-stop",
+      "action": "reload",
+      "timeout_ms": 30000
+    },
+    {
+      "id": "failed-state-visible",
+      "action": "assert_text",
+      "selector": "body",
+      "text": "failed",
+      "contains": true,
+      "timeout_ms": 10000
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://pasi.local/schemas/human-test-run-v1.json",
+  "title":"PASI Human Test Run v1",
+  "type":"object",
+  "required":["schema_version","run_id","suite_id","suite_version","code_head","browser_name","browser_version","target_origin","started_at","ended_at","status","steps","negative_control","policy_violations","evidence_sha256"],
+  "properties":{
+    "schema_version":{"const":1},
+    "run_id":{"type":"string","minLength":1},
+    "suite_id":{"type":"string","minLength":1},
+    "suite_version":{"type":"integer","minimum":1},
+    "code_head":{"type":"string","pattern":"^[0-9a-f]{40}$"},
+    "browser_name":{"type":"string","minLength":1},
+    "browser_version":{"type":"string","minLength":1},
+    "target_origin":{"type":"string","format":"uri"},
+    "extension_version":{"type":"string","minLength":1},
+    "execution_source":{"const":"mv3-human-test-extension"},
+    "started_at":{"type":"string","format":"date-time"},
+    "ended_at":{"type":"string","format":"date-time"},
+    "status":{"enum":["PASS","FAIL"]},
+    "steps":{"type":"array"},
+    "negative_control":{"type":"boolean"},
+    "policy_violations":{"type":"array","items":{"type":"string"}},
+    "evidence_sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}
+  },
+  "additionalProperties":false
+}

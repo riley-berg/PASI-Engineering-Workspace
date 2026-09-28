@@ -11,7 +11,12 @@ test "$(basename "$REPO_ROOT")" = "PASI-Engineering-Workspace" || {
 
 : "${PASI_GITHUB_TOKEN:?set PASI_GITHUB_TOKEN to a GitHub token with issue-write access}"
 export PASI_PUSH=1
-export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-python scripts/pasi_engineering_executor.py}"
+PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "error: PASI Python executable not found or not executable: $PYTHON_BIN" >&2
+  exit 2
+fi
+export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"
 export PASI_ENGINEERING_EXTENSION_ROOT="${PASI_ENGINEERING_EXTENSION_ROOT:-$REPO_ROOT/extensions/pasi-chatgpt}"
 
@@ -59,7 +64,7 @@ backoff="$BASE_BACKOFF"
 
 while true; do
   set +e
-  python scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
+  "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
   rc=$?
   set -e
 

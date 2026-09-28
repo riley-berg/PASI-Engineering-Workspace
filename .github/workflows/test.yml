@@ -23,6 +23,8 @@ jobs:
       - name: Test
         run: python -m pytest -q
       - name: P0.4 clean-environment smoke
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           env -u PYTHONPATH python scripts/pasi_168h_acceptance.py --hours 168 --smoke
           bash -n scripts/run_p0_4_168h.sh

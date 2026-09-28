@@ -36,6 +36,15 @@ jobs:
           PASI_ACCEPTANCE_STATE_DIR: ${{ runner.temp }}/pasi-168h-smoke
         run: |
           env -u PYTHONPATH ./scripts/run_p0_4_168h.sh
+      - name: P0.4 fresh-checkout launcher bootstrap
+        env:
+          PASI_GITHUB_TOKEN: ${{ github.token }}
+          PASI_PYTHON: ''
+          PASI_168H_SMOKE: '1'
+          PASI_ACCEPTANCE_STATE_DIR: ${{ runner.temp }}/pasi-168h-fresh-checkout
+        run: |
+          rm -rf .venv
+          env -u PYTHONPATH ./scripts/run_p0_4_168h.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

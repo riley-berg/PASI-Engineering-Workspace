@@ -219,16 +219,15 @@ for key in sorted(expected,key=lambda x:(int(x.split("P")[-1]),0 if x.startswith
     set_field(PROJECT_ID,item["id"],fields["Team"],{"singleSelectOptionId":team_ids[team]})
     set_field(PROJECT_ID,item["id"],fields["Status"],{"singleSelectOptionId":status_ids[status]})
 
-    read=gql(READBACK,{"id":item["id"]})["node"]["fieldValues"]["nodes"]
-    observed={}
-    for value in read:
-        name=(value.get("field") or {}).get("name")
-        if name=="Start date": observed["Start date"]=value.get("date")
-        elif name=="Target date": observed["Target date"]=value.get("date")
-        elif name=="Iteration": observed["Iteration"]=value.get("title")
-        elif name=="Quarter": observed["Quarter"]=value.get("title")
-        elif name=="Team": observed["Team"]=value.get("name")
-        elif name=="Status": observed["Status"]=value.get("name")
+    read=gql(READBACK,{"id":item["id"]})["node"]
+    observed={
+        "Start date": ((read.get("startDate") or {}).get("date")),
+        "Target date": ((read.get("targetDate") or {}).get("date")),
+        "Iteration": ((read.get("iteration") or {}).get("title")),
+        "Quarter": ((read.get("quarter") or {}).get("title")),
+        "Team": ((read.get("team") or {}).get("name")),
+        "Status": ((read.get("status") or {}).get("name")),
+    }
     expected_values={
         "Start date":start,
         "Target date":target,

@@ -111,3 +111,16 @@ def test_p0_4_runner_recovers_branch_and_worktree_from_durable_state():
     assert 'existing.get("branch")' in runner
     assert 'existing.get("worktree")' in runner
     assert 'existing.get("run_id")' in runner
+
+
+def test_chat_recovers_terminal_empty_context_exhaustion():
+    from scripts import pasi_chat as chat
+
+    source = Path(chat.__file__).read_text(encoding="utf-8")
+    assert 'exhausted_without_contract=response.chat_exhausted' in source
+    assert 'response.completion!="complete" or not bool(response.text.strip())' in source
+
+
+def test_p0_4_branch_selection_uses_cli_branch_on_new_run():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'branch = str(args.branch or existing.get("branch")' in runner

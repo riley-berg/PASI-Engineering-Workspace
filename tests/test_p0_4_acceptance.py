@@ -335,6 +335,7 @@ def _write_two_chat_decision_records(chat, path, state_path, public_path, privat
     state_path.write_text(json.dumps({
         "new_chat_decision_count":2,
         "new_chat_decision_chain_head":second["record_hash"],
+        "new_chat_decision_signature_key_id":chat._public_key_id(private.public_key()),
     })+"\n",encoding="utf-8")
     return first,second
 
@@ -366,10 +367,12 @@ def test_replay_detects_reordered_audit_entries(tmp_path):
 
     path=tmp_path / "new-chat-decisions.jsonl"
     state=tmp_path / "chat-session.json"
-    first,second=_write_two_chat_decision_records(chat,path,state)
+    public_path=tmp_path / "public.pem"
+    private=Ed25519PrivateKey.generate()
+    first,second=_write_two_chat_decision_records(chat,path,state,public_path,private)
     path.write_text(json.dumps(second)+"\n"+json.dumps(first)+"\n",encoding="utf-8")
 
-    result=chat.replay_new_chat_decisions(path,state)
+    result=chat.replay_new_chat_decisions(path,state,public_path)
     assert result["valid"] is False
     assert any("chain_index" in error for error in result["errors"])
     assert any("previous_record_hash" in error for error in result["errors"])
@@ -406,6 +409,50 @@ def test_replay_detects_inserted_audit_entry_against_persisted_tip(tmp_path):
     assert result["valid"] is False
     assert any("chain anchor count" in error for error in result["errors"])
     assert any("chain anchor head" in error for error in result["errors"])
+
+
+def test_replay_validation_rejects_tampered_signature(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    from scripts import pasi_chat as chat
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    private=Ed25519PrivateKey.generate()
+    public_path=tmp_path / "public.pem"
+    public_path.write_bytes(private.public_key().public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo))
+
+    captured=datetime.now(timezone.utc).isoformat()
+    record={
+        "decision_id":"decision-tampered",
+        "decision":"create_new_chat",
+        "recorded_at":captured,
+        "observed_conversation_url":"https://chatgpt.com/c/current",
+        "conversation_signature":"sig-current",
+        "freshness_window_seconds":{"min":-5.0,"max":30.0},
+        "observed_age_seconds":1.0,
+        "exhaustion_evidence":{
+            "kind":"chatgpt_state",
+            "chat_url":"https://chatgpt.com/c/current",
+            "conversation_signature":"sig-current",
+            "captured_at":captured,
+            "conversation_context_exhausted":True,
+            "chat_exhausted":True,
+            "normalized_chat_exhausted":True,
+        },
+        "chain_index":1,
+        "previous_record_hash":chat.NEW_CHAT_CHAIN_GENESIS,
+        "signature_algorithm":"Ed25519",
+        "signature_key_id":chat._public_key_id(private.public_key()),
+    }
+    record["record_hash"]=chat._record_hash(record)
+    record["record_signature"]="invalid"
+    path=tmp_path / "new-chat-decisions.jsonl"
+    path.write_text(json.dumps(record)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path,public_key_path=public_path)
+    assert result["valid"] is False
+    assert any("record_signature is invalid" in error for error in result["errors"])
 
 
 def test_replay_validation_rejects_tampered_conversation_identity(tmp_path):
@@ -487,6 +534,7 @@ def test_replay_validation_rejects_malformed_json_line(tmp_path):
 def test_replay_validator_cli_is_repository_tool():
     source=Path(__file__).parents[1].joinpath("scripts","replay_new_chat_decisions.py").read_text(encoding="utf-8")
     assert "replay_new_chat_decisions" in source
+    assert "--public-key" in source
     assert 'return 0 if result["valid"] else 1' in source
 
 

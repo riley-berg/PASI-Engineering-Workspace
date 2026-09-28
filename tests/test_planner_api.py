@@ -164,3 +164,83 @@ def test_github_issue_preview_rejects_missing_acceptance_section(tmp_path):
     )
     assert status == 400
     assert payload["valid"] is False
+
+
+def test_planner_api_exposes_dependency_children_learning_and_preferences(tmp_path):
+    service = build_service(tmp_path)
+
+    status, graph = service.request(
+        method="GET",
+        path="/v1/planner/dependency-graph?roadmap_id=pasi-frontend",
+        headers={},
+    )
+    assert status == 200
+    assert graph["roadmap_id"] == "pasi-frontend"
+    assert graph["canonical_sha256"]
+
+    status, detail = service.request(
+        method="GET",
+        path="/v1/planner/tasks/FE-P2.1?roadmap_id=pasi-frontend",
+        headers={},
+    )
+    assert status == 200
+    assert "children" in detail
+    assert isinstance(detail["children"], list)
+
+    from pasi.core.memory import MemoryRecord
+    service.memory_store.create(
+        MemoryRecord(
+            memory_id="learn-test",
+            scope="project:pasi",
+            kind="learned",
+            content="Verified reusable planning lesson.",
+            provenance_refs=("evidence://learn/1",),
+            source_operation_id="op-learn-1",
+            confidence=0.94,
+        )
+    )
+    status, learning = service.request(
+        method="GET",
+        path="/v1/planner/learning?scope=project:pasi",
+        headers={},
+    )
+    assert status == 200
+    assert learning["count"] == 1
+    assert learning["learning"][0]["memory_id"] == "learn-test"
+
+    status, preferences = service.request(
+        method="GET",
+        path="/v1/planner/preferences?scope=workspace:pasi",
+        headers={},
+    )
+    assert status == 200
+    assert any(item["key"] == "planner.view" for item in preferences["preferences"])
+
+    status, saved = service.request(
+        method="POST",
+        path="/v1/planner/preferences",
+        headers={"Authorization": "Bearer token"},
+        body={
+            "scope": "workspace:pasi",
+            "key": "planner.view",
+            "value": "timeline",
+            "expected_revision": 0,
+        },
+    )
+    assert status == 200
+    assert saved["revision"] == 1
+    assert saved["value"] == "timeline"
+
+    status, stale = service.request(
+        method="POST",
+        path="/v1/planner/preferences",
+        headers={"Authorization": "Bearer token"},
+        body={
+            "scope": "workspace:pasi",
+            "key": "planner.view",
+            "value": "board",
+            "expected_revision": 0,
+        },
+    )
+    assert status == 400
+    assert "expected" in stale["error"]

@@ -126,3 +126,16 @@ textarea{width:100%;resize:vertical;background:#0e161e;color:var(--text);border:
 .planner-ready{color:#93f2bb}
 @media (max-width:900px){.planner-columns{grid-template-columns:1fr}}
 @media (max-width:600px){.form-grid-two{grid-template-columns:1fr}.planner-head-actions{align-items:stretch;flex-direction:column}}
+
+.graph-list{display:grid;gap:7px}
+.graph-row{display:grid;grid-template-columns:140px 1fr;gap:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface2);padding:9px;font-size:12px}
+.graph-row strong{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.07em}
+.graph-row .blocked{color:#f8d78f}
+.child-card{border:1px solid var(--border);border-radius:9px;background:var(--surface2);padding:9px;cursor:pointer}
+.child-card:hover{border-color:#456075}
+.preferences-list{display:grid;gap:8px}
+.preference-row{display:grid;grid-template-columns:150px 1fr auto;gap:8px;align-items:center;border:1px solid var(--border);border-radius:9px;background:var(--surface2);padding:9px}
+.preference-key{font-size:11px;color:var(--muted)}
+.preference-value input,.preference-value select{width:100%}
+.learning-card{border:1px solid var(--border);border-radius:9px;background:var(--surface2);padding:10px;display:grid;gap:7px}
+.learning-meta{display:flex;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:11px}

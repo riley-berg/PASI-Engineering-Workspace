@@ -303,6 +303,48 @@
         </article>
       </div>
 
+
+      <div class="planner-columns">
+        <article class="planner-pane">
+          <div class="subhead">Dependency graph</div>
+          <div id="planner-graph" class="graph-list">
+            <div class="empty">No dependency graph loaded.</div>
+          </div>
+        </article>
+
+        <article class="planner-pane">
+          <div class="subhead">Child tasks and lineage</div>
+          <div id="planner-children" class="task-list">
+            <div class="empty">Select a task to inspect child lineage.</div>
+          </div>
+        </article>
+      </div>
+
+      <div class="planner-columns">
+        <article class="planner-pane">
+          <div class="subhead">Cross-run learning</div>
+          <form id="planner-learning-form" class="filter-grid">
+            <label>Scope<input id="planner-learning-scope" value="project:pasi"></label>
+            <button class="button secondary" type="submit">Load learning</button>
+          </form>
+          <div id="planner-learning" class="memory-list">
+            <div class="empty">No promoted cross-run learning loaded.</div>
+          </div>
+        </article>
+
+        <article class="planner-pane">
+          <div class="subhead">Workspace preferences</div>
+          <form id="planner-preferences-form" class="preferences-form">
+            <label>Scope<input id="planner-preferences-scope" value="workspace:pasi"></label>
+            <div id="planner-preferences-list" class="preferences-list">
+              <div class="empty">No preferences loaded.</div>
+            </div>
+            <button class="button secondary" type="submit">Load preferences</button>
+          </form>
+          <p id="planner-preferences-result" class="control-result" aria-live="polite"></p>
+        </article>
+      </div>
+
       <div class="planner-columns">
         <article class="planner-pane">
           <div class="subhead">Project memory</div>

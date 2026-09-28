@@ -16,6 +16,7 @@ PASI_DEPLOYMENT_ID=os.environ.get("PASI_DEPLOYMENT_ID","pasi-chatgpt-handoff")
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
 NEW_CHAT_DECISIONS_PATH=RUNTIME_DIR/"new-chat-decisions.jsonl"
+NEW_CHAT_CHAIN_GENESIS="PASI_NEW_CHAT_CHAIN_V1:GENESIS"
 
 def fp(task:str)->str: return hashlib.sha256(task.strip().encode()).hexdigest()
 def valid_url(v:object)->str|None: return v if isinstance(v,str) and CHAT_URL_RE.match(v) else None
@@ -100,12 +101,43 @@ def _parse_timestamp(value:object)->datetime|None:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
 
+def _canonical_record_payload(record:Mapping[str,Any])->str:
+    payload=dict(record)
+    payload.pop("record_hash",None)
+    return json.dumps(payload,sort_keys=True,ensure_ascii=False,separators=(",",":"))
+
+
+def _record_hash(record:Mapping[str,Any])->str:
+    return hashlib.sha256(_canonical_record_payload(record).encode("utf-8")).hexdigest()
+
+
+def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str]]:
+    if not path.exists():
+        return [],[]
+    values:list[dict[str,Any]]=[]
+    errors:list[str]=[]
+    for line_number,line in enumerate(path.read_text(encoding="utf-8").splitlines(),1):
+        if not line.strip():
+            continue
+        try:
+            value=json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        if not isinstance(value,Mapping):
+            errors.append(f"line {line_number}: record must be an object")
+            continue
+        values.append(dict(value))
+    return values,errors
+
+
 def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
     errors:list[str]=[]
     if record.get("decision")!="create_new_chat":
         errors.append("decision must be create_new_chat")
     for field in ("decision_id","recorded_at","observed_conversation_url","conversation_signature",
-                  "freshness_window_seconds","exhaustion_evidence"):
+                  "freshness_window_seconds","exhaustion_evidence","chain_index",
+                  "previous_record_hash","record_hash"):
         if field not in record:
             errors.append(f"missing required field: {field}")
     if not valid_url(record.get("observed_conversation_url")):
@@ -163,27 +195,60 @@ def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
     return errors
 
 
-def replay_new_chat_decisions(path:Path|None=None)->dict[str,Any]:
+def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->dict[str,Any]:
     target=path or NEW_CHAT_DECISIONS_PATH
-    if not target.exists():
-        return {"path":str(target),"records":0,"valid":True,"errors":[]}
-    errors:list[str]=[]
-    records=0
-    for line_number,line in enumerate(target.read_text(encoding="utf-8").splitlines(),1):
-        if not line.strip():
-            continue
-        records+=1
-        try:
-            value=json.loads(line)
-        except json.JSONDecodeError as exc:
-            errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
-            continue
-        if not isinstance(value,Mapping):
-            errors.append(f"line {line_number}: record must be an object")
-            continue
+    anchor_path=state_path
+    if anchor_path is None and target==NEW_CHAT_DECISIONS_PATH:
+        anchor_path=STATE_PATH
+    values=parse_records,parse_errors=_read_chain_records(target)
+    errors=list(parse_errors)
+    previous_hash=NEW_CHAT_CHAIN_GENESIS
+    expected_index=1
+    for position,value in enumerate(values,1):
         for error in validate_new_chat_decision_record(value):
-            errors.append(f"line {line_number}: {error}")
-    return {"path":str(target),"records":records,"valid":not errors,"errors":errors}
+            errors.append(f"line {position}: {error}")
+        index=value.get("chain_index")
+        if index!=expected_index:
+            errors.append(f"line {position}: chain_index {index!r} does not equal expected {expected_index}")
+        if value.get("previous_record_hash")!=previous_hash:
+            errors.append(f"line {position}: previous_record_hash does not match prior chain hash")
+        stored_hash=value.get("record_hash")
+        if isinstance(stored_hash,str) and stored_hash:
+            calculated_hash=_record_hash(value)
+            if stored_hash!=calculated_hash:
+                errors.append(f"line {position}: record_hash does not match canonical record contents")
+        else:
+            calculated_hash=None
+        if calculated_hash is not None:
+            previous_hash=calculated_hash
+        else:
+            previous_hash=stored_hash if isinstance(stored_hash,str) else previous_hash
+        expected_index+=1
+
+    if anchor_path is not None and anchor_path.exists():
+        try:
+            anchor=json.loads(anchor_path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError):
+            anchor={}
+        if isinstance(anchor,Mapping):
+            anchored_count=anchor.get("new_chat_decision_count")
+            anchored_head=anchor.get("new_chat_decision_chain_head")
+            if anchored_count is not None and anchored_count!=len(values):
+                errors.append(
+                    f"chain anchor count {anchored_count!r} does not match replayed record count {len(values)}"
+                )
+            if anchored_head is not None:
+                expected_head=previous_hash if values else NEW_CHAT_CHAIN_GENESIS
+                if anchored_head!=expected_head:
+                    errors.append("chain anchor head does not match replayed chain tip")
+
+    return {
+        "path":str(target),
+        "records":len(values),
+        "valid":not errors,
+        "errors":errors,
+        "chain_head":previous_hash if values else NEW_CHAT_CHAIN_GENESIS,
+    }
 
 
 def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_operation_id:str|None=None)->dict[str,Any]:
@@ -192,6 +257,13 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
     evidence=proof.get("exhaustion_evidence")
     if not isinstance(evidence,Mapping):
         raise ValueError("new-chat decision requires durable exhaustion evidence")
+
+    replay=replay_new_chat_decisions(NEW_CHAT_DECISIONS_PATH, STATE_PATH)
+    if not replay["valid"]:
+        raise ValueError("cannot append new-chat proof: existing audit chain is invalid")
+    next_index=replay["records"]+1
+    previous_hash=replay["chain_head"]
+
     decision={
         "decision_id":uuid.uuid4().hex,
         "decision":"create_new_chat",
@@ -203,7 +275,10 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
         "observed_age_seconds":proof.get("observed_age_seconds"),
         "source_operation_id":source_operation_id,
         "exhaustion_evidence":dict(evidence),
+        "chain_index":next_index,
+        "previous_record_hash":previous_hash,
     }
+    decision["record_hash"]=_record_hash(decision)
     RUNTIME_DIR.mkdir(parents=True,exist_ok=True)
     with NEW_CHAT_DECISIONS_PATH.open("a",encoding="utf-8") as handle:
         handle.write(json.dumps(decision,sort_keys=True,separators=(",",":"))+"\n")
@@ -211,7 +286,8 @@ def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_opera
         os.fsync(handle.fileno())
     state=load()
     state["last_new_chat_decision"]=decision
-    state["new_chat_decision_count"]=int(state.get("new_chat_decision_count",0) or 0)+1
+    state["new_chat_decision_count"]=next_index
+    state["new_chat_decision_chain_head"]=decision["record_hash"]
     save(state)
     return decision
 

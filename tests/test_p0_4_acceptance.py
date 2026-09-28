@@ -72,6 +72,12 @@ def test_chat_reuses_usable_live_conversation_after_connection_interruption():
         "connection_failure": True,
     }
     assert chat.select_chat_mode({}, live) == "reuse"
+    assert chat.select_chat_mode({}, {
+        "chat_url": None,
+        "chat_exhausted": False,
+        "usage_limited": False,
+        "connection_failure": True,
+    }) == "recover"
 
 
 def test_chat_only_creates_replacement_for_context_exhaustion():
@@ -82,6 +88,11 @@ def test_chat_only_creates_replacement_for_context_exhaustion():
         "chat_exhausted": True,
         "usage_limited": False,
     }) == "new_chat"
+    assert chat.select_chat_mode({}, {
+        "chat_url": None,
+        "chat_exhausted": False,
+        "usage_limited": False,
+    }) == "recover"
     assert chat.select_chat_mode({}, {
         "chat_url": "https://chatgpt.com/c/current",
         "chat_exhausted": False,
@@ -96,6 +107,22 @@ def test_chat_session_identity_is_persisted_for_idempotent_restart():
     assert 'STATE_PATH=RUNTIME_DIR/"chat-session.json"' in source
     assert 'session_id=state.get("session_id")' in source
     assert 'session_id=session_id' in source
+
+
+def test_task_history_context_tracks_previous_committed_action():
+    from scripts import pasi_168h_acceptance as acceptance
+
+    rendered = acceptance.task_history_context({
+        "recent_tasks": [{
+            "task_id": "P1.1",
+            "phase": "P1",
+            "title": "Unified operation state",
+            "commit": "abcdef1234567890",
+        }]
+    })
+    assert "P1.1: Unified operation state" in rendered
+    assert "commit abcdef123456" in rendered
+    assert "latest committed action" in rendered
 
 
 def test_p0_4_acceptance_is_run_level_gate_not_model_task():

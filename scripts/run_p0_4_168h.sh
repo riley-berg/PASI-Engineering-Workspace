@@ -49,7 +49,7 @@ cleanup() {
 trap cleanup EXIT
 
 read_status() {
-  "$REPO_ROOT/.venv/bin/python" - "$RUNTIME_DIR/state.json" <<'PY'
+  "$PYTHON_BIN" - "$RUNTIME_DIR/state.json" <<'PY'
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])

@@ -7,7 +7,7 @@ name = "pasi-engineering-workspace"
 version = "0.1.0"
 description = "Roadmap-driven PASI automation core"
 requires-python = ">=3.12"
-dependencies = ["cryptography>=44,<47"]
+dependencies = ["cryptography>=50.0.1,<51"]
 
 [project.optional-dependencies]
 dev = ["pytest>=9,<10"]

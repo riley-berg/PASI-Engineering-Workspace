@@ -213,7 +213,9 @@ def test_extension_background_has_one_side_panel_initializer():
 
 
 def test_executor_prompt_context_excludes_completed_roadmap_tasks():
-    context = acceptance.unfinished_issue_context(
+    from scripts import pasi_engineering_executor as executor
+
+    context = executor.unfinished_issue_context(
         """- [x] **P0.1 — M0 live task acceptance** — completed
 - [x] **P0.2 — M1 twenty-operation chain** — completed
 - [ ] **P0.4 — 168-hour long-run acceptance** — still open
@@ -230,5 +232,5 @@ Only unfinished roadmap work should be presented."""
 
 def test_executor_canonical_context_uses_unfinished_task_filter():
     source = Path(__file__).parents[1].joinpath("scripts", "pasi_engineering_executor.py").read_text(encoding="utf-8")
-    assert "return unfinished_issue_context(str(body or ""))[:30000]" in source
+    assert 'return unfinished_issue_context(str(body or ""))[:30000]' in source
     assert 'match.group(1).lower()=="x"' in source

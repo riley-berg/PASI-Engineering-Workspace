@@ -63,6 +63,19 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+TASK_CHECKBOX_RE=re.compile(r"^\s*- \[([ xX])\] \*\*(P\d+\.\d+)\b.*$",re.MULTILINE)
+
+
+def unfinished_issue_context(body: str) -> str:
+    lines=[]
+    for line in str(body or "").splitlines():
+        match=TASK_CHECKBOX_RE.match(line)
+        if match and match.group(1).lower()=="x":
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def canonical_issue_context() -> str:
     import urllib.request
     token=os.environ.get("PASI_GITHUB_TOKEN","").strip() or os.environ.get("GITHUB_TOKEN","").strip()
@@ -80,7 +93,7 @@ def canonical_issue_context() -> str:
     except Exception:
         return ""
     body=payload.get("body") if isinstance(payload,dict) else ""
-    return str(body or "")[:30000]
+    return unfinished_issue_context(str(body or ""))[:30000]
 
 
 def main():

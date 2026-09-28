@@ -83,9 +83,16 @@ def test_chat_reuses_usable_live_conversation_after_connection_interruption():
 def test_chat_only_creates_replacement_for_context_exhaustion():
     from scripts import pasi_chat as chat
 
+    # A raw/stale exhaustion flag is never sufficient to authorize a new chat.
     assert chat.select_chat_mode({}, {
         "chat_url": "https://chatgpt.com/c/current",
         "chat_exhausted": True,
+        "usage_limited": False,
+    }) == "reuse"
+    assert chat.select_chat_mode({}, {
+        "chat_url": "https://chatgpt.com/c/current",
+        "chat_exhausted": True,
+        "chat_exhaustion_confirmed": True,
         "usage_limited": False,
     }) == "new_chat"
     assert chat.select_chat_mode({}, {
@@ -98,6 +105,139 @@ def test_chat_only_creates_replacement_for_context_exhaustion():
         "chat_exhausted": False,
         "usage_limited": True,
     }) == "blocked"
+
+
+def test_exhaustion_proof_requires_fresh_current_chat_state():
+    from datetime import datetime, timezone
+
+    from scripts import pasi_chat as chat
+
+    class FakeAdapter:
+        def __init__(self, observation):
+            self.observation = observation
+
+        def read_browser_observation(self):
+            return self.observation
+
+    fresh = datetime.now(timezone.utc).isoformat()
+    observation = {
+        "captured_at": fresh,
+        "data": {
+            "kind": "chatgpt_state",
+            "chat_url": "https://chatgpt.com/c/current",
+            "conversation_context_exhausted": True,
+            "chat_exhausted": True,
+            "conversation_signature": "sig-current-42",
+            "active_operation_id": "op-42",
+        },
+    }
+    proof = chat.confirm_current_chat_exhaustion(
+        FakeAdapter(observation),
+        expected_chat_url="https://chatgpt.com/c/current",
+        expected_operation_id="op-42",
+        timeout=0.5,
+    )
+    assert proof is not None
+    assert proof["chat_exhaustion_confirmed"] is True
+
+
+def test_exhaustion_false_positive_stale_observation_is_rejected():
+    from datetime import datetime, timedelta, timezone
+
+    from scripts import pasi_chat as chat
+
+    class FakeAdapter:
+        def read_browser_observation(self):
+            return {
+                "captured_at": (datetime.now(timezone.utc) - timedelta(seconds=90)).isoformat(),
+                "data": {
+                    "kind": "chatgpt_state",
+                    "chat_url": "https://chatgpt.com/c/current",
+                    "conversation_context_exhausted": True,
+                    "chat_exhausted": True,
+                    "conversation_signature": "sig-stale",
+                },
+            }
+
+    assert chat.confirm_current_chat_exhaustion(
+        FakeAdapter(),
+        expected_chat_url="https://chatgpt.com/c/current",
+        timeout=0.35,
+    ) is None
+
+
+def test_exhaustion_false_positive_wrong_conversation_is_rejected():
+    from datetime import datetime, timezone
+
+    from scripts import pasi_chat as chat
+
+    class FakeAdapter:
+        def read_browser_observation(self):
+            return {
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "kind": "chatgpt_state",
+                    "chat_url": "https://chatgpt.com/c/other",
+                    "conversation_context_exhausted": True,
+                    "chat_exhausted": True,
+                    "conversation_signature": "sig-other",
+                },
+            }
+
+    assert chat.confirm_current_chat_exhaustion(
+        FakeAdapter(),
+        expected_chat_url="https://chatgpt.com/c/current",
+        timeout=0.35,
+    ) is None
+
+
+def test_exhaustion_false_positive_missing_signature_is_rejected():
+    from datetime import datetime, timezone
+
+    from scripts import pasi_chat as chat
+
+    class FakeAdapter:
+        def read_browser_observation(self):
+            return {
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "kind": "chatgpt_state",
+                    "chat_url": "https://chatgpt.com/c/current",
+                    "conversation_context_exhausted": True,
+                    "chat_exhausted": True,
+                },
+            }
+
+    assert chat.confirm_current_chat_exhaustion(
+        FakeAdapter(),
+        expected_chat_url="https://chatgpt.com/c/current",
+        timeout=0.35,
+    ) is None
+
+
+def test_exhaustion_false_positive_generic_error_flag_is_rejected():
+    from datetime import datetime, timezone
+
+    from scripts import pasi_chat as chat
+
+    class FakeAdapter:
+        def read_browser_observation(self):
+            return {
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "data": {
+                    "kind": "chatgpt_health",
+                    "chat_url": "https://chatgpt.com/c/current",
+                    "conversation_context_exhausted": True,
+                    "chat_exhausted": True,
+                    "conversation_signature": "sig-health",
+                },
+            }
+
+    assert chat.confirm_current_chat_exhaustion(
+        FakeAdapter(),
+        expected_chat_url="https://chatgpt.com/c/current",
+        timeout=0.35,
+    ) is None
 
 
 def test_interrupted_or_timeout_response_keeps_active_operation():
@@ -193,8 +333,9 @@ def test_chat_recovers_terminal_empty_context_exhaustion():
     from scripts import pasi_chat as chat
 
     source = Path(chat.__file__).read_text(encoding="utf-8")
-    assert 'exhausted_without_contract=response.chat_exhausted' in source
-    assert 'response.completion!="complete" or not bool(response.text.strip())' in source
+    assert 'exhaustion_candidate=response.chat_exhausted' in source
+    assert 'confirm_current_chat_exhaustion(' in source
+    assert 'exhaustion_proof and' in source
 
 
 def test_p0_4_branch_selection_uses_cli_branch_on_new_run():

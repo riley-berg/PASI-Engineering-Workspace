@@ -28,6 +28,13 @@ jobs:
         run: |
           env -u PYTHONPATH python scripts/pasi_168h_acceptance.py --hours 168 --smoke
           bash -n scripts/run_p0_4_168h.sh
+      - name: P0.4 production launcher smoke
+        env:
+          PASI_GITHUB_TOKEN: ${{ github.token }}
+          PASI_168H_SMOKE: '1'
+          PASI_ACCEPTANCE_STATE_DIR: ${{ runner.temp }}/pasi-168h-smoke
+        run: |
+          env -u PYTHONPATH ./scripts/run_p0_4_168h.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '22'

@@ -1,0 +1,18 @@
+name: project-v2-roadmap-sync
+on:
+  push:
+    branches: [pasi/project-v2-roadmap-sync-20260927]
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Sync roadmap Project V2 fields
+        env:
+          PASI_PROJECTS_TOKEN: ${{ secrets.PASI_PROJECTS_TOKEN }}
+        run: python scripts/project_v2_roadmap_sync.py

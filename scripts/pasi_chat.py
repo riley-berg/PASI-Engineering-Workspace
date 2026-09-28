@@ -200,7 +200,7 @@ def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None)->d
     anchor_path=state_path
     if anchor_path is None and target==NEW_CHAT_DECISIONS_PATH:
         anchor_path=STATE_PATH
-    values=parse_records,parse_errors=_read_chain_records(target)
+    values,parse_errors=_read_chain_records(target)
     errors=list(parse_errors)
     previous_hash=NEW_CHAT_CHAIN_GENESIS
     expected_index=1

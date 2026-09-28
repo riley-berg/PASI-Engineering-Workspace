@@ -413,7 +413,19 @@ def task_history_context(state: dict[str, object]) -> str:
     recent = state.get("recent_tasks", [])
     if not isinstance(recent, list) or not recent:
         return ""
-    return "Previous accepted tasks in this run:\n" + "\n".join(f"- {str(item)[:500]}" for item in recent[-5:])
+    rendered = []
+    for item in recent[-5:]:
+        if isinstance(item, dict):
+            task_id = str(item.get("task_id") or "")
+            title = str(item.get("title") or "")
+            commit = str(item.get("commit") or "")
+            detail = f"{task_id}: {title}"
+            if commit:
+                detail += f" (commit {commit[:12]})"
+            rendered.append(f"- {detail[:500]}")
+        else:
+            rendered.append(f"- {str(item)[:500]}")
+    return "Previous accepted tasks in this run; continue from the latest committed action:\n" + "\n".join(rendered)
 
 
 def main() -> int:
@@ -470,11 +482,14 @@ def main() -> int:
         "run_id": run_id, "repo": REPO, "branch": branch, "worktree": str(worktree),
         "started_at": utcnow().isoformat(), "deadline_at": deadline.isoformat(), "status": "running",
         "completed_tasks": 0, "failed_tasks": 0, "recent_tasks": [], "deferred_tasks": {},
+        "last_completed_task": None,
+        "last_operation_metrics": None,
         "p0_4_started_at": utcnow().isoformat(), "p0_4_status": "running",
     }
     state["status"] = "running"
     state["deadline_at"] = deadline.isoformat()
     state.setdefault("completed_tasks", 0); state.setdefault("failed_tasks", 0); state.setdefault("recent_tasks", []); state.setdefault("deferred_tasks", {})
+    state.setdefault("last_completed_task", None); state.setdefault("last_operation_metrics", None)
     state.setdefault("p0_4_started_at", utcnow().isoformat()); state.setdefault("p0_4_status", "running")
     write_state(state)
     telemetry = RunTelemetry(run_id)
@@ -538,6 +553,9 @@ def main() -> int:
                     ready.append(task)
             if not ready:
                 telemetry.sample(); time.sleep(15); continue
+            # P0.4 is a continuous task handoff loop, not an hourly scheduler:
+            # once the prior executor has reached terminal response + verification,
+            # the next unchecked canonical task is dispatched immediately.
             task = ready[0]
             state["current_task"] = task.task_id
             state["current_phase"] = task.phase.id
@@ -551,7 +569,18 @@ def main() -> int:
                     state["completed_tasks"] = int(state.get("completed_tasks", 0)) + 1
                     state["last_commit"] = reconciled["commit_after"]
                     state["evidence_pr"] = reconciled.get("evidence_pr", {})
-                    state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [task.title])[-12:]
+                    state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [{
+                        "task_id": task.task_id,
+                        "phase": task.phase.id,
+                        "title": task.title,
+                        "commit": reconciled["commit_after"],
+                    }])[-12:]
+                    state["last_completed_task"] = {
+                        "task_id": task.task_id,
+                        "phase": task.phase.id,
+                        "title": task.title,
+                        "commit": reconciled["commit_after"],
+                    }
                     deferred.pop(task.task_id, None); state["deferred_tasks"] = deferred
                     remaining = [next_task for next_task in all_tasks() if not next_task.checked]
                     if remaining:
@@ -576,7 +605,18 @@ def main() -> int:
                 state["completed_tasks"] = int(state.get("completed_tasks", 0)) + 1
                 state["last_commit"] = evidence["commit_after"]
                 state["evidence_pr"] = evidence.get("evidence_pr", state.get("evidence_pr", {}))
-                state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [task.title])[-12:]
+                state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [{
+                    "task_id": task.task_id,
+                    "phase": task.phase.id,
+                    "title": task.title,
+                    "commit": evidence["commit_after"],
+                }])[-12:]
+                state["last_completed_task"] = {
+                    "task_id": task.task_id,
+                    "phase": task.phase.id,
+                    "title": task.title,
+                    "commit": evidence["commit_after"],
+                }
                 deferred.pop(task.task_id, None)
                 remaining = [next_task for next_task in all_tasks() if not next_task.checked]
                 if remaining:
@@ -597,6 +637,7 @@ def main() -> int:
                     state["next_task"] = None
                 metrics = operation_metrics()
                 if metrics:
+                    state["last_operation_metrics"] = metrics
                     emit({"event": "operation_metrics", "at": utcnow().isoformat(), "task_id": task.task_id, "metrics": metrics})
                 write_state(state)
             except subprocess.TimeoutExpired as exc:

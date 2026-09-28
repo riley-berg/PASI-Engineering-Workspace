@@ -125,6 +125,19 @@ def test_task_history_context_tracks_previous_committed_action():
     assert "latest committed action" in rendered
 
 
+def test_runner_uses_configurable_tested_source_ref_for_new_worktrees():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'source_ref = os.environ.get("PASI_168H_SOURCE_REF", "HEAD")' in runner
+    assert '"worktree", "add", "-B", branch, str(worktree), source_ref' in runner
+
+
+def test_long_run_launcher_uses_repository_virtualenv_python():
+    launcher = Path(acceptance.__file__).with_name("run_p0_4_168h.sh").read_text(encoding="utf-8")
+    assert 'PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"' in launcher
+    assert '"$PYTHON_BIN" scripts/pasi_168h_acceptance.py' in launcher
+    assert 'PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"' in launcher
+
+
 def test_p0_4_acceptance_is_run_level_gate_not_model_task():
     runner = Path(acceptance.__file__).read_text(encoding="utf-8")
     assert 'task.task_id != "P0.4"' in runner

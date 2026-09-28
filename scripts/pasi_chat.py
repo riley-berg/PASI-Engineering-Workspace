@@ -383,6 +383,7 @@ def main()->int:
             state["pending_new_chat_operation_id"]=None
             state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
             state["chat_exhausted"]=False
+            state["chat_exhaustion_confirmed"]=False
             state["usage_limited"]=False
             state["reasoning_mode"]=None
             save(state)
@@ -441,8 +442,10 @@ def main()->int:
         state["pending_new_chat_operation_id"]=None
         state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
         state["chat_exhausted"]=False
+        state["chat_exhaustion_confirmed"]=False
         state["usage_limited"]=False
         state["reasoning_mode"]=None
+        exhaustion_proof=None
         save(state)
         adapter.select_reasoning_mode("thinking")
         state["reasoning_mode"]="thinking"

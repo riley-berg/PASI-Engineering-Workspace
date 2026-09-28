@@ -31,6 +31,7 @@ jobs:
       - name: P0.4 production launcher smoke
         env:
           PASI_GITHUB_TOKEN: ${{ github.token }}
+          PASI_PYTHON: python
           PASI_168H_SMOKE: '1'
           PASI_ACCEPTANCE_STATE_DIR: ${{ runner.temp }}/pasi-168h-smoke
         run: |

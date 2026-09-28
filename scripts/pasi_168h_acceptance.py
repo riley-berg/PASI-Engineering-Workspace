@@ -397,7 +397,7 @@ def main() -> int:
         worktree = args.worktree.expanduser().resolve()
     else:
         worktree = Path(str(existing.get("worktree") or "~/.pasi-worktrees/pasi-engineering-workspace-168h")).expanduser().resolve()
-    branch = str(branch or existing.get("branch") or f"pasi/p0-4-168h-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
+    branch = str(args.branch or existing.get("branch") or f"pasi/p0-4-168h-run-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
     same_run = (
         not args.smoke
         and existing.get("status") == "running"

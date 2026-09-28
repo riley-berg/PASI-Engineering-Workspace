@@ -12,9 +12,18 @@ test "$(basename "$REPO_ROOT")" = "PASI-Engineering-Workspace" || {
 : "${PASI_GITHUB_TOKEN:?set PASI_GITHUB_TOKEN to a GitHub token with issue-write access}"
 export PASI_PUSH=1
 PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"
-if [[ ! -x "$PYTHON_BIN" ]]; then
-  echo "error: PASI Python executable not found or not executable: $PYTHON_BIN" >&2
-  exit 2
+if [[ "$PYTHON_BIN" == */* ]]; then
+  if [[ ! -x "$PYTHON_BIN" ]]; then
+    echo "error: PASI Python executable not found or not executable: $PYTHON_BIN" >&2
+    exit 2
+  fi
+else
+  resolved_python="$(command -v "$PYTHON_BIN" || true)"
+  if [[ -z "$resolved_python" || ! -x "$resolved_python" ]]; then
+    echo "error: PASI Python command not found on PATH: $PYTHON_BIN" >&2
+    exit 2
+  fi
+  PYTHON_BIN="$resolved_python"
 fi
 export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"

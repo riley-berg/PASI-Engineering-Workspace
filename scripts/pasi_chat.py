@@ -8,6 +8,7 @@ from automation.computer_use.chatgpt import ChatGPTAdapter, UrllibBridgeTranspor
 
 CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
 TERMINAL={"complete","error","interrupted"}
+PASI_DEPLOYMENT_ID=os.environ.get("PASI_DEPLOYMENT_ID","pasi-chatgpt-handoff")
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
 
@@ -57,6 +58,7 @@ Phase: {phase}
 Task ID: {task_id}
 Canonical issue: {issue}
 Repository: https://github.com/th3-st0v3/PASI-Engineering-Workspace
+Deployment ID: {os.environ.get("PASI_DEPLOYMENT_ID", PASI_DEPLOYMENT_ID)}
 
 Work only on this task. Use the supplied repository/worktree. Local computer evidence must be repository-relative to that worktree. Never request absolute host paths, browser-profile files, credentials, or unrestricted shell access. Inspect implementation, make the smallest correct change, verify it, and repair verification failures.
 

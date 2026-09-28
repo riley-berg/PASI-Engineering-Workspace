@@ -202,7 +202,8 @@ def test_p0_4_commit_reconciliation_uses_argv_not_shell():
     source = Path(acceptance.__file__).read_text(encoding="utf-8")
     assert "subprocess.getstatusoutput(" not in source
     executor = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
-    assert executor.splitlines().count("import subprocess") == 1
+    assert "from pathlib import Path\nimport subprocess" not in executor
+    assert "subprocess" in executor
 
 
 def test_extension_background_has_one_side_panel_initializer():

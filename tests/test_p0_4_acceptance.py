@@ -210,3 +210,25 @@ def test_extension_background_has_one_side_panel_initializer():
     background = Path(acceptance.__file__).parents[1] / "extensions" / "pasi-chatgpt" / "src" / "background.js"
     source = background.read_text(encoding="utf-8")
     assert source.count("setPanelBehavior({ openPanelOnActionClick: true })") == 1
+
+
+def test_executor_prompt_context_excludes_completed_roadmap_tasks():
+    context = acceptance.unfinished_issue_context(
+        """- [x] **P0.1 — M0 live task acceptance** — completed
+- [x] **P0.2 — M1 twenty-operation chain** — completed
+- [ ] **P0.4 — 168-hour long-run acceptance** — still open
+- [ ] **P0.5 — Acceptance evidence registry** — still open
+Completion rule
+Only unfinished roadmap work should be presented."""
+    )
+    assert "P0.1" not in context
+    assert "P0.2" not in context
+    assert "P0.4" in context
+    assert "P0.5" in context
+    assert "Completion rule" in context
+
+
+def test_executor_canonical_context_uses_unfinished_task_filter():
+    source = Path(__file__).parents[1].joinpath("scripts", "pasi_engineering_executor.py").read_text(encoding="utf-8")
+    assert "return unfinished_issue_context(str(body or ""))[:30000]" in source
+    assert 'match.group(1).lower()=="x"' in source

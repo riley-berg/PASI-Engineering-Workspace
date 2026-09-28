@@ -547,7 +547,42 @@ def main() -> int:
     finally:
         telemetry.stop()
 
-    state["status"] = "deadline_reached"; state["completed_at"] = utcnow().isoformat(); write_state(state)
+    # The 168-hour gate completes at the elapsed-time boundary even if some
+    # later roadmap tasks remain pending. Finalize P0.4 independently so the
+    # acceptance result cannot be lost merely because the broader roadmap is incomplete.
+    discovered = all_tasks()
+    p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
+    if p0_4 is not None and not p0_4.checked:
+        evidence_path = state_dir() / "p0.4-evidence.json"
+        started_text = str(state.get("p0_4_started_at") or utcnow().isoformat())
+        started_at = datetime.fromisoformat(started_text.replace("Z", "+00:00"))
+        completed_at = utcnow()
+        evidence_payload = {
+            "task_id": "P0.4",
+            "run_id": run_id,
+            "started_at": started_text,
+            "completed_at": completed_at.isoformat(),
+            "deadline_at": deadline.isoformat(),
+            "elapsed_hours": max(0.0, (completed_at - started_at).total_seconds() / 3600.0),
+            "branch": branch,
+            "worktree": str(worktree),
+            "resource_telemetry": str(state_dir() / "resource-snapshots.sqlite3"),
+            "failure_registry": str(state_dir() / "failure-signatures.sqlite3"),
+            "events": str(state_dir() / "events.jsonl"),
+            "completed_tasks_during_window": int(state.get("completed_tasks", 0)),
+            "failed_tasks_during_window": int(state.get("failed_tasks", 0)),
+        }
+        evidence_path.write_text(json.dumps(evidence_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        evidence_pr = ensure_evidence_pr(branch, run_id)
+        state["p0_4_status"] = "complete"
+        state["p0_4_completed_at"] = evidence_payload["completed_at"]
+        state["p0_4_evidence"] = evidence_payload
+        state["evidence_pr"] = evidence_pr
+        mark_checked(p0_4)
+        emit({"event": "p0_4_completed", **evidence_payload, "evidence_pr": evidence_pr})
+    state["status"] = "deadline_reached"
+    state["completed_at"] = utcnow().isoformat()
+    write_state(state)
     emit({"event": "run_deadline_reached", "at": utcnow().isoformat(), "run_id": run_id})
     return 0
 

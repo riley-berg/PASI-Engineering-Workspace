@@ -9,8 +9,7 @@ from automation.computer_use.chatgpt import ChatGPTAdapter, UrllibBridgeTranspor
 CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
 TERMINAL={"complete","error","interrupted"}
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
-RUN_ID=re.sub(r"[^A-Za-z0-9_.-]+","-",os.environ.get("PASI_ACCEPTANCE_RUN_ID","default")).strip("-") or "default"
-STATE_PATH=RUNTIME_DIR/f"chat-session-{RUN_ID}.json"
+STATE_PATH=RUNTIME_DIR/"chat-session.json"
 
 def fp(task:str)->str: return hashlib.sha256(task.strip().encode()).hexdigest()
 def valid_url(v:object)->str|None: return v if isinstance(v,str) and CHAT_URL_RE.match(v) else None
@@ -22,39 +21,22 @@ def save(v:Mapping[str,Any])->None:
     RUNTIME_DIR.mkdir(parents=True,exist_ok=True); tmp=STATE_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(dict(v),indent=2,ensure_ascii=False)+"\n",encoding="utf-8"); tmp.replace(STATE_PATH)
 
-def controller_source(root:Path)->Path|None:
+def expected_version(root:Path)->str|None:
     for candidate in (root/"src"/"content.js", root/"content.js"):
-        if candidate.is_file():
-            return candidate
+        try: text=candidate.read_text(encoding="utf-8")
+        except OSError: continue
+        m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",text)
+        if m: return m.group(1).strip()
     return None
 
-def expected_version(root:Path)->str|None:
-    source=controller_source(root)
-    if source is None:
-        return None
-    try: text=source.read_text(encoding="utf-8")
-    except OSError: return None
-    m=re.search(r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",text)
-    return m.group(1).strip() if m else None
-
-def expected_deployment_id(root:Path)->str|None:
-    source=controller_source(root)
-    if source is None:
-        return None
-    try: text=source.read_text(encoding="utf-8")
-    except OSError: return None
-    m=re.search(r"\bPASI_DEPLOYMENT_ID\s*=\s*['\"]([^'\"]+)['\"]",text)
-    return m.group(1).strip() if m else None
-
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->None:
-    deadline=time.monotonic()+timeout; expected=expected_version(ext); expected_deployment=expected_deployment_id(ext)
+    deadline=time.monotonic()+timeout; expected=expected_version(ext)
     while time.monotonic()<deadline:
         try: obs=adapter.read_browser_observation()
         except Exception: obs=None
         data=obs.get("data") if isinstance(obs,Mapping) else None
         if isinstance(data,Mapping) and data.get("kind") in {"chatgpt_health","chatgpt_state"}:
             if expected and data.get("controller_version")!=expected: time.sleep(.5); continue
-            if expected_deployment and data.get("deployment_id")!=expected_deployment: time.sleep(.5); continue
             captured=data.get("captured_at") or (obs.get("captured_at") if isinstance(obs,Mapping) else None)
             if isinstance(captured,str):
                 try:
@@ -128,16 +110,6 @@ def main()->int:
     if response.completion=="timeout":
         try: response=adapter.read_operation(op)
         except Exception: pass
-    if response.completion=="complete" and not response.text.strip():
-        for _ in range(4):
-            time.sleep(0.25)
-            try:
-                repaired=adapter.read_operation(op)
-            except Exception:
-                continue
-            response=repaired
-            if response.completion!="complete" or response.text.strip():
-                break
     if response.completion=="error" and response.chat_exhausted:
         state["chat_exhausted"]=True; save(state); op=adapter.new_session(); r=adapter.read_operation(op)
         if r.completion!="complete": raise RuntimeError("replacement ChatGPT session did not complete")

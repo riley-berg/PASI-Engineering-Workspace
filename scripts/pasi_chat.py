@@ -341,9 +341,21 @@ def main()->int:
         state["session_id"]=session_id
         if valid_url(live.get("chat_url")):
             state["chat_url"]=live["chat_url"]
-        state["chat_exhausted"]=bool(state.get("chat_exhausted") or live.get("chat_exhausted"))
+        state["chat_exhausted"]=False
+        state["chat_exhaustion_confirmed"]=False
         state["usage_limited"]=bool(state.get("usage_limited") or live.get("usage_limited"))
         state["connection_interrupted"]=bool(live.get("connection_failure"))
+        if live.get("chat_exhausted") is True:
+            initial_exhaustion=confirm_current_chat_exhaustion(
+                adapter,
+                expected_chat_url=valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")),
+                timeout=min(5.0,a.timeout),
+            )
+            if initial_exhaustion:
+                live.update(initial_exhaustion)
+                state["chat_exhausted"]=True
+                state["chat_exhaustion_confirmed"]=True
+                state["chat_url"]=initial_exhaustion["chat_url"]
         save(state)
 
         mode=select_chat_mode(state,live)
@@ -406,8 +418,7 @@ def main()->int:
         )
     exhausted_without_contract=bool(
         exhaustion_proof
-        and response.completion!="complete"
-        and response.completion!="timeout"
+        and (response.completion!="complete" or not bool(response.text.strip()))
     )
     if exhausted_without_contract:
         state["chat_exhausted"]=True

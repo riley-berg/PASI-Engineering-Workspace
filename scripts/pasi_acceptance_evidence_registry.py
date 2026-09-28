@@ -128,7 +128,7 @@ def sha256_file(path: Path) -> tuple[str, int]:
 
 def _relative_ref(path: Path, state_root: Path, repo_root: Path, runtime_root: Path) -> str:
     resolved = path.expanduser().resolve()
-    for prefix, root in (("state", state_root), ("runtime", runtime_root), ("worktree", repo_root)):
+    for prefix, root in (("runtime", runtime_root), ("state", state_root), ("worktree", repo_root)):
         try:
             relative = resolved.relative_to(root.resolve())
         except ValueError:

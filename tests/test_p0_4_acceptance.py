@@ -321,7 +321,7 @@ def test_replay_validation_rejects_malformed_json_line(tmp_path):
 def test_replay_validator_cli_is_repository_tool():
     source=Path(__file__).parents[1].joinpath("scripts","replay_new_chat_decisions.py").read_text(encoding="utf-8")
     assert "replay_new_chat_decisions" in source
-    assert "return 0 if result["valid"] else 1" in source
+    assert 'return 0 if result["valid"] else 1' in source
 
 
 def test_new_chat_requires_durable_exhaustion_proof():

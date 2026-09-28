@@ -11,7 +11,19 @@ test "$(basename "$REPO_ROOT")" = "PASI-Engineering-Workspace" || {
 
 : "${PASI_GITHUB_TOKEN:?set PASI_GITHUB_TOKEN to a GitHub token with issue-write access}"
 export PASI_PUSH=1
-PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"
+if [[ -n "${PASI_PYTHON:-}" ]]; then
+  PYTHON_BIN="$PASI_PYTHON"
+elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+else
+  PYTHON_BIN="$(command -v python3 || command -v python || true)"
+fi
+
+if [[ -z "$PYTHON_BIN" ]]; then
+  echo "error: no usable Python executable found; set PASI_PYTHON" >&2
+  exit 2
+fi
+
 if [[ "$PYTHON_BIN" == */* ]]; then
   if [[ ! -x "$PYTHON_BIN" ]]; then
     echo "error: PASI Python executable not found or not executable: $PYTHON_BIN" >&2
@@ -25,6 +37,12 @@ else
   fi
   PYTHON_BIN="$resolved_python"
 fi
+
+if ! "$PYTHON_BIN" -c 'import cryptography' >/dev/null 2>&1; then
+  echo "[PASI 168h] Python dependencies are not installed; bootstrapping repository environment." >&2
+  "$PYTHON_BIN" -m pip install -e '.[dev]'
+fi
+
 export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"
 export PASI_ENGINEERING_EXTENSION_ROOT="${PASI_ENGINEERING_EXTENSION_ROOT:-$REPO_ROOT/extensions/pasi-chatgpt}"

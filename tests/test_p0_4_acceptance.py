@@ -162,6 +162,9 @@ def test_new_chat_decision_is_durable_and_contains_authorizing_proof(tmp_path, m
     monkeypatch.setattr(chat, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(chat, "STATE_PATH", tmp_path / "chat-session.json")
     monkeypatch.setattr(chat, "NEW_CHAT_DECISIONS_PATH", tmp_path / "new-chat-decisions.jsonl")
+    monkeypatch.setattr(chat, "AUDIT_KEY_DIR", tmp_path / "keys")
+    monkeypatch.setattr(chat, "AUDIT_PRIVATE_KEY_PATH", tmp_path / "keys" / "private.pem")
+    monkeypatch.setattr(chat, "AUDIT_PUBLIC_KEY_PATH", tmp_path / "keys" / "public.pem")
 
     captured = datetime.now(timezone.utc).isoformat()
     proof = {
@@ -207,14 +210,32 @@ def test_new_chat_decision_is_durable_and_contains_authorizing_proof(tmp_path, m
     assert decision["chain_index"] == 1
     assert decision["previous_record_hash"] == chat.NEW_CHAT_CHAIN_GENESIS
     assert state["new_chat_decision_chain_head"] == decision["record_hash"]
+    assert decision["signature_algorithm"] == "Ed25519"
+    assert decision["signature_key_id"] == state["new_chat_decision_signature_key_id"]
+    assert decision["record_signature"]
+    assert (tmp_path / "keys" / "private.pem").stat().st_mode & 0o777 == 0o600
+    assert (tmp_path / "keys" / "public.pem").exists()
+    replay = chat.replay_new_chat_decisions(
+        tmp_path / "new-chat-decisions.jsonl",
+        tmp_path / "chat-session.json",
+        tmp_path / "keys" / "public.pem",
+    )
+    assert replay["valid"] is True
 
 
 def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path):
+    import base64
     import json
-    from scripts import pasi_chat as chat
     from datetime import datetime, timezone
+    from scripts import pasi_chat as chat
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
     chat_path=tmp_path / "new-chat-decisions.jsonl"
+    public_path=tmp_path / "public.pem"
+    private=Ed25519PrivateKey.generate()
+    public_path.write_bytes(private.public_key().public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo))
+
     captured=datetime.now(timezone.utc).isoformat()
     record={
         "decision_id":"decision-1",
@@ -238,19 +259,24 @@ def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path)
         },
         "chain_index":1,
         "previous_record_hash":chat.NEW_CHAT_CHAIN_GENESIS,
+        "signature_algorithm":"Ed25519",
+        "signature_key_id":chat._public_key_id(private.public_key()),
     }
     record["record_hash"]=chat._record_hash(record)
-    chat_path.write_text(json.dumps(record)+"\n",encoding="utf-8")
+    record["record_signature"]=base64.b64encode(private.sign(record["record_hash"].encode("ascii"))).decode("ascii")
+    chat_path.write_text(json.dumps(record)+"
+",encoding="utf-8")
 
-    result=chat.replay_new_chat_decisions(chat_path)
+    result=chat.replay_new_chat_decisions(chat_path, public_key_path=public_path)
     assert result["valid"] is True
     assert result["records"] == 1
     assert result["errors"] == []
     assert result["chain_head"] == record["record_hash"]
 
 
-def _write_two_chat_decision_records(chat, path, state_path):
+def _write_two_chat_decision_records(chat, path, state_path, public_path, private):
     from datetime import datetime, timezone
+    import base64
     import json
 
     captured=datetime.now(timezone.utc).isoformat()
@@ -276,8 +302,11 @@ def _write_two_chat_decision_records(chat, path, state_path):
         },
         "chain_index":1,
         "previous_record_hash":chat.NEW_CHAT_CHAIN_GENESIS,
+        "signature_algorithm":"Ed25519",
+        "signature_key_id":chat._public_key_id(private.public_key()),
     }
     first["record_hash"]=chat._record_hash(first)
+    first["record_signature"]=base64.b64encode(private.sign(first["record_hash"].encode("ascii"))).decode("ascii")
     second={**first}
     second.update({
         "decision_id":"decision-2",
@@ -293,11 +322,16 @@ def _write_two_chat_decision_records(chat, path, state_path):
         },
     })
     second["record_hash"]=chat._record_hash(second)
+    second["record_signature"]=base64.b64encode(private.sign(second["record_hash"].encode("ascii"))).decode("ascii")
     path.write_text(
         json.dumps(first,sort_keys=True,separators=(",",":"))+"\n"+
         json.dumps(second,sort_keys=True,separators=(",",":"))+"\n",
         encoding="utf-8",
     )
+    public_path.write_bytes(private.public_key().public_bytes(
+        __import__("cryptography").hazmat.primitives.serialization.Encoding.PEM,
+        __import__("cryptography").hazmat.primitives.serialization.PublicFormat.SubjectPublicKeyInfo,
+    ))
     state_path.write_text(json.dumps({
         "new_chat_decision_count":2,
         "new_chat_decision_chain_head":second["record_hash"],
@@ -311,10 +345,13 @@ def test_replay_detects_deleted_middle_audit_entry(tmp_path):
 
     path=tmp_path / "new-chat-decisions.jsonl"
     state=tmp_path / "chat-session.json"
-    first,second=_write_two_chat_decision_records(chat,path,state)
+    public_path=tmp_path / "public.pem"
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    private=Ed25519PrivateKey.generate()
+    first,second=_write_two_chat_decision_records(chat,path,state,public_path,private)
     path.write_text(json.dumps(second)+"\n",encoding="utf-8")
 
-    result=chat.replay_new_chat_decisions(path,state)
+    result=chat.replay_new_chat_decisions(path,state,public_path)
     assert result["valid"] is False
     assert any("chain_index" in error for error in result["errors"])
     assert any("previous_record_hash" in error for error in result["errors"])

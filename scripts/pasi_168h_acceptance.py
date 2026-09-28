@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 REPO = "th3-st0v3/PASI-Engineering-Workspace"
 ROADMAP_FILE = Path(__file__).resolve().parents[1] / "roadmap" / "p0-p22-168h.json"
 HOURS = 168.0

@@ -35,6 +35,7 @@ def test_registry_binds_exact_provenance_and_integrity(tmp_path, monkeypatch):
     monkeypatch.setenv("PASI_RUNNER_ID", "runner-test")
     monkeypatch.setenv("PASI_PROVIDER", "chatgpt")
     monkeypatch.setenv("CI", "1")
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     started = datetime(2026, 9, 28, 5, 0, tzinfo=timezone.utc)
     completed = datetime(2026, 9, 28, 5, 1, tzinfo=timezone.utc)
@@ -209,7 +210,9 @@ def test_runner_registers_task_manifest_with_commit_and_changed_files(tmp_path, 
         "run",
         lambda *args, **kwargs: type("R", (), {"returncode": 0, "stdout": "", "stderr": ""})(),
     )
-    heads = iter(("before", "after"))
+    before_sha = "a" * 40
+    after_sha = "b" * 40
+    heads = iter((before_sha, after_sha))
     def fake_git(cwd, *args, **kwargs):
         if args[:2] == ("rev-parse", "HEAD"):
             return next(heads)
@@ -224,12 +227,12 @@ def test_runner_registers_task_manifest_with_commit_and_changed_files(tmp_path, 
     task = acceptance.Task(phase, "P0.5", "Acceptance evidence registry", False)
     evidence = acceptance.run_task(task, worktree, "pasi/p0-5-test", "ew-test-run")
     record = json.loads((state / "acceptance-evidence-registry.jsonl").read_text().splitlines()[0])
-    assert evidence["commit_after"] == "after"
+    assert evidence["commit_after"] == after_sha
     assert evidence["evidence_artifact"].startswith("state/evidence/")
-    assert record["code_head"] == "after"
+    assert record["code_head"] == after_sha
     manifest = json.loads((state / record["artifact_ref"].removeprefix("state/")).read_text())
     refs = {item["ref"] for item in manifest["artifacts"]}
-    assert "git:after" in refs
+    assert f"git:{after_sha}" in refs
     assert "worktree/acceptance/proof.txt" in refs
     assert "runtime/last-preflight.txt" in refs
     assert "runtime/last-executor-output.txt" in refs

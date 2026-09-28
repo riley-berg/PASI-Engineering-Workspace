@@ -535,6 +535,8 @@ def test_replay_validator_cli_is_repository_tool():
     source=Path(__file__).parents[1].joinpath("scripts","replay_new_chat_decisions.py").read_text(encoding="utf-8")
     assert "replay_new_chat_decisions" in source
     assert "--public-key" in source
+    assert "REPO_ROOT=Path(__file__).resolve().parents[1]" in source
+    assert "sys.path.insert(0,str(REPO_ROOT))" in source
     assert 'return 0 if result["valid"] else 1' in source
 
 

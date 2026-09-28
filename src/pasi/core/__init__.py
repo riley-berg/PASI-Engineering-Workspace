@@ -23,6 +23,8 @@ from .computer_control import ComputerActionResult, ComputerControlError, Comput
 from .resource_observer import HostResourceObserver, ResourceObservationError, ResourceSnapshot, SQLiteResourceObservationStore
 from .terminal import TerminalCapabilityError, TerminalCommand, TerminalResult, SQLiteTerminalEvidenceStore, TypedTerminalExecutor
 from .github_issue_intake import GitHubIssueTaskIntake, GitHubIssueTaskProposal, IssueIntakeError
+from .human_testing import CodeChangeCandidate, HumanTestRun, HumanTestStepResult, HumanTestTrustCertificate, HumanTestTrustEvaluator, HumanTestTrustPolicy, SelfImprovementDecision, SelfImprovementGate, TrustStatus
+from .human_test_store import DuplicateHumanTestRun, HumanTestRunNotFound, HumanTestStore
 from .memory import MemoryError, MemoryRecord, MemoryStatus
 from .memory_store import DuplicateMemory, MemoryNotFound, SQLiteMemoryStore, StaleMemoryRevision
 from .memory_compaction import CompactionError, CompactionGroup, MemoryCompactor
@@ -53,7 +55,6 @@ from .recovery import (
 )
 from .repair_loop import BoundedRepairController, RepairAttempt, RepairResult
 from .planner import Planner, PlannerDecision
-from .planner_api import DashboardAPIService, PlannerConsoleService
 from .retrieval import ProvenanceAwareRetriever, RetrievedMemory, RetrievalError
 from .roadmap_store import DuplicateRoadmap, RoadmapNotFound, SQLiteRoadmapStore
 from .dependency_graph import DependencyGraph, StaleDependencyGraph
@@ -136,6 +137,7 @@ __all__ = [
     "ContextCompilationError",
     "ContextCompiler",
     "ContextSource",
+    "CodeChangeCandidate",
     "CrossRunLearning",
     "LearningPromotionError",
     "LearningProposal",
@@ -144,6 +146,13 @@ __all__ = [
     "FileWriteResult",
     "GitHubIssueTaskIntake",
     "HostRecoveryController",
+    "HumanTestRun",
+    "HumanTestRunNotFound",
+    "HumanTestStepResult",
+    "HumanTestStore",
+    "HumanTestTrustCertificate",
+    "HumanTestTrustEvaluator",
+    "HumanTestTrustPolicy",
     "HostResourceObserver",
     "GitHubIssueTaskProposal",
     "IssueIntakeError",
@@ -160,6 +169,7 @@ __all__ = [
     "CompactionGroup",
     "MemoryCompactor",
     "DuplicateEvent",
+    "DuplicateHumanTestRun",
     "DuplicateLedgerEntry",
     "DuplicateOperationState",
     "DurableEvent",
@@ -176,9 +186,7 @@ __all__ = [
     "OperationRevisionConflict",
     "OperationState",
     "OperationStateNotFound",
-    "DashboardAPIService",
     "Planner",
-    "PlannerConsoleService",
     "PlannerDecision",
     "RecoveryClassification",
     "RecoveryDecision",
@@ -224,6 +232,9 @@ __all__ = [
     "SQLiteFailureRegistry",
     "SQLiteOperationLedger",
     "SQLiteOperationStateStore",
+    "SelfImprovementDecision",
+    "SelfImprovementGate",
+    "TrustStatus",
     "EvidenceAwareTaskSelector",
     "EvidenceSnapshot",
     "StaleSelection",

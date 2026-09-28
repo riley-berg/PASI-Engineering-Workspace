@@ -139,6 +139,84 @@ def test_exhaustion_proof_requires_fresh_current_chat_state():
     )
     assert proof is not None
     assert proof["chat_exhaustion_confirmed"] is True
+    assert proof["chat_url"] == "https://chatgpt.com/c/current"
+    assert proof["conversation_signature"] == "sig-current-42"
+    assert proof["freshness_window_seconds"] == {"min": -5.0, "max": 30.0}
+    assert proof["observed_age_seconds"] is not None
+    assert proof["exhaustion_evidence"] == {
+        "kind": "chatgpt_state",
+        "chat_url": "https://chatgpt.com/c/current",
+        "conversation_signature": "sig-current-42",
+        "captured_at": fresh,
+        "active_operation_id": "op-42",
+        "conversation_context_exhausted": True,
+        "chat_exhausted": True,
+        "normalized_chat_exhausted": True,
+    }
+
+
+def test_new_chat_decision_is_durable_and_contains_authorizing_proof(tmp_path, monkeypatch):
+    from scripts import pasi_chat as chat
+    from datetime import datetime, timezone
+
+    monkeypatch.setattr(chat, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(chat, "STATE_PATH", tmp_path / "chat-session.json")
+    monkeypatch.setattr(chat, "NEW_CHAT_DECISIONS_PATH", tmp_path / "new-chat-decisions.jsonl")
+
+    captured = datetime.now(timezone.utc).isoformat()
+    proof = {
+        "chat_exhaustion_confirmed": True,
+        "chat_url": "https://chatgpt.com/c/current",
+        "conversation_signature": "sig-current-42",
+        "freshness_window_seconds": {"min": -5.0, "max": 30.0},
+        "observed_age_seconds": 1.25,
+        "exhaustion_evidence": {
+            "kind": "chatgpt_state",
+            "chat_url": "https://chatgpt.com/c/current",
+            "conversation_signature": "sig-current-42",
+            "captured_at": captured,
+            "active_operation_id": "op-42",
+            "conversation_context_exhausted": True,
+            "chat_exhausted": True,
+            "normalized_chat_exhausted": True,
+        },
+    }
+
+    decision = chat.record_new_chat_decision(
+        proof,
+        reason="current_chat_exhausted_after_response_without_valid_contract",
+        source_operation_id="op-42",
+    )
+
+    records = (tmp_path / "new-chat-decisions.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(records) == 1
+    record = __import__("json").loads(records[0])
+    assert record == decision
+    assert record["decision"] == "create_new_chat"
+    assert record["observed_conversation_url"] == "https://chatgpt.com/c/current"
+    assert record["conversation_signature"] == "sig-current-42"
+    assert record["freshness_window_seconds"] == {"min": -5.0, "max": 30.0}
+    assert record["exhaustion_evidence"]["captured_at"] == captured
+    assert record["exhaustion_evidence"]["conversation_context_exhausted"] is True
+    assert record["exhaustion_evidence"]["chat_exhausted"] is True
+    assert record["source_operation_id"] == "op-42"
+
+    state = __import__("json").loads((tmp_path / "chat-session.json").read_text(encoding="utf-8"))
+    assert state["last_new_chat_decision"] == decision
+    assert state["new_chat_decision_count"] == 1
+
+
+def test_new_chat_requires_durable_exhaustion_proof():
+    from scripts import pasi_chat as chat
+
+    try:
+        chat.record_new_chat_decision({
+            "chat_exhaustion_confirmed": False,
+        }, reason="invalid", source_operation_id=None)
+    except ValueError as exc:
+        assert "confirmed current-conversation exhaustion proof" in str(exc)
+    else:
+        raise AssertionError("new-chat decision without proof was accepted")
 
 
 def test_exhaustion_false_positive_stale_observation_is_rejected():

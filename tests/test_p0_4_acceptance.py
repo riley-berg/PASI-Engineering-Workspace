@@ -110,6 +110,8 @@ def test_interrupted_or_timeout_response_keeps_active_operation():
 
 
 def test_active_operation_is_recovered_before_new_chat_selection():
+    from scripts import pasi_chat as chat
+
     source = Path(chat.__file__).read_text(encoding="utf-8")
     assert "active=state.get(\"active_operation_id\")" in source
     assert "response=wait_existing_operation(op)" in source
@@ -120,11 +122,15 @@ def test_active_operation_is_recovered_before_new_chat_selection():
 
 
 def test_p0_4_recovery_wait_does_not_cancel_the_existing_operation():
+    from scripts import pasi_chat as chat
+
     source = Path(chat.__file__).read_text(encoding="utf-8")
     assert "cancel_on_timeout=False" in source
 
 
 def test_new_chat_creation_preserves_its_recovery_operation():
+    from scripts import pasi_chat as chat
+
     adapter_source = Path(chat.__file__).parents[1].joinpath("automation","computer_use","chatgpt.py").read_text(encoding="utf-8")
     assert "cancel_on_timeout=False" in adapter_source
     assert "self.current_operation_id" in adapter_source

@@ -173,6 +173,9 @@ def record_new_chat_audit(state: dict[str, object], *, required: bool = True) ->
     state["new_chat_audit_public_key"] = str(result.get("public_key") or "")
     state["new_chat_audit_errors"] = list(result.get("errors", []))
     if required and not bool(result.get("valid")):
+        state["status"] = "audit_invalid"
+        state["audit_failure_at"] = utcnow().isoformat()
+        write_state(state)
         error_text = "; ".join(str(item) for item in result.get("errors", [])) or "unknown audit replay failure"
         emit({
             "event": "new_chat_audit_invalid",

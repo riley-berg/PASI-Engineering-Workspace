@@ -52,3 +52,47 @@ def test_chat_prompt_is_task_specific_and_no_scheduled_delay():
     assert 'def prompt(task:str,phase:str,task_id:str,issue:str)' in chat
     assert 'Task ID: {task_id}' in chat
     assert 'time.sleep(3600' not in chat
+
+
+def test_chat_prompt_contains_valid_literal_capability_json():
+    from scripts import pasi_chat as chat
+
+    rendered = chat.prompt("Task", "P0", "P0.4", "108")
+    assert '{"request_id":"read-1"' in rendered
+    assert '"parameters":{"query":"relevant_symbol_or_text","limit":10}' in rendered
+
+
+def test_chat_reuses_usable_live_conversation_after_connection_interruption():
+    from scripts import pasi_chat as chat
+
+    live = {
+        "chat_url": "https://chatgpt.com/c/current",
+        "chat_exhausted": False,
+        "usage_limited": False,
+        "connection_failure": True,
+    }
+    assert chat.select_chat_mode({}, live) == "reuse"
+
+
+def test_chat_only_creates_replacement_for_context_exhaustion():
+    from scripts import pasi_chat as chat
+
+    assert chat.select_chat_mode({}, {
+        "chat_url": "https://chatgpt.com/c/current",
+        "chat_exhausted": True,
+        "usage_limited": False,
+    }) == "new_chat"
+    assert chat.select_chat_mode({}, {
+        "chat_url": "https://chatgpt.com/c/current",
+        "chat_exhausted": False,
+        "usage_limited": True,
+    }) == "blocked"
+
+
+def test_chat_session_identity_is_persisted_for_idempotent_restart():
+    from scripts import pasi_chat as chat
+
+    source = Path(chat.__file__).read_text(encoding="utf-8")
+    assert 'STATE_PATH=RUNTIME_DIR/"chat-session.json"' in source
+    assert 'session_id=state.get("session_id")' in source
+    assert 'session_id=session_id' in source

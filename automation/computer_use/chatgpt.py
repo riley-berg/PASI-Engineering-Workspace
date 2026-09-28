@@ -112,7 +112,11 @@ class ChatGPTAdapter(AIAdapter):
         self.last_chat_url = None
         operation = self._queue("new_chat", "")
         self.current_operation_id = self._operation_id(operation)
-        result = self.wait_for_completion(self.current_operation_id, recover_response_text=False)
+        result = self.wait_for_completion(
+            self.current_operation_id,
+            recover_response_text=False,
+            cancel_on_timeout=False,
+        )
         if result.completion != "complete":
             raise ChatGPTAdapterError(f"new ChatGPT session did not complete: {result.completion}")
         if result.chat_url:

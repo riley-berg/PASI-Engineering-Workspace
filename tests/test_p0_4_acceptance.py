@@ -96,3 +96,18 @@ def test_chat_session_identity_is_persisted_for_idempotent_restart():
     assert 'STATE_PATH=RUNTIME_DIR/"chat-session.json"' in source
     assert 'session_id=state.get("session_id")' in source
     assert 'session_id=session_id' in source
+
+
+def test_p0_4_acceptance_is_run_level_gate_not_model_task():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'task.task_id != "P0.4"' in runner
+    assert 'p0_4_status' in runner
+    assert 'mark_checked(p0_4)' in runner
+    assert 'def ensure_evidence_pr' in runner
+
+
+def test_p0_4_runner_recovers_branch_and_worktree_from_durable_state():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'existing.get("branch")' in runner
+    assert 'existing.get("worktree")' in runner
+    assert 'existing.get("run_id")' in runner

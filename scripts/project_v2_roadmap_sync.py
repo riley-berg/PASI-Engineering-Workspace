@@ -173,7 +173,7 @@ for item in project["items"]["nodes"]:
         continue
     prefix="FE" if match.group(1) else "P"
     phase=int(match.group(2))
-    key=f"{prefix}-P{phase}"
+    key=(f"FE-P{phase}" if prefix=="FE" else f"P{phase}")
     if phase not in SCHEDULES:
         continue
     if key in phase_items:

@@ -10,9 +10,12 @@ CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
 TERMINAL={"complete","error","interrupted"}
 CHAT_RECOVERY_WINDOW_SECONDS=float(os.environ.get("PASI_CHAT_RECOVERY_WINDOW_SECONDS","120"))
 CHAT_RECOVERY_POLL_SECONDS=max(0.25,float(os.environ.get("PASI_CHAT_RECOVERY_POLL_SECONDS","1")))
+EXHAUSTION_FRESHNESS_MIN_SECONDS=-5.0
+EXHAUSTION_FRESHNESS_MAX_SECONDS=30.0
 PASI_DEPLOYMENT_ID=os.environ.get("PASI_DEPLOYMENT_ID","pasi-chatgpt-handoff")
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
+NEW_CHAT_DECISIONS_PATH=RUNTIME_DIR/"new-chat-decisions.jsonl"
 
 def fp(task:str)->str: return hashlib.sha256(task.strip().encode()).hexdigest()
 def valid_url(v:object)->str|None: return v if isinstance(v,str) and CHAT_URL_RE.match(v) else None
@@ -70,17 +73,52 @@ def select_chat_mode(state:Mapping[str,Any],live:Mapping[str,Any])->str:
     return "recover"
 
 
-def _fresh_timestamp(value:object,max_age_seconds:float=30.0)->bool:
+def _timestamp_age_seconds(value:object)->float|None:
     if not isinstance(value,str):
-        return False
+        return None
     try:
         captured=datetime.fromisoformat(value.replace("Z","+00:00"))
     except ValueError:
-        return False
+        return None
     if captured.tzinfo is None:
         captured=captured.replace(tzinfo=timezone.utc)
-    age=(datetime.now(timezone.utc)-captured).total_seconds()
-    return -5 <= age <= max_age_seconds
+    return (datetime.now(timezone.utc)-captured).total_seconds()
+
+
+def _fresh_timestamp(value:object,max_age_seconds:float=EXHAUSTION_FRESHNESS_MAX_SECONDS)->bool:
+    age=_timestamp_age_seconds(value)
+    return age is not None and EXHAUSTION_FRESHNESS_MIN_SECONDS <= age <= max_age_seconds
+
+
+def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_operation_id:str|None=None)->dict[str,Any]:
+    if not proof.get("chat_exhaustion_confirmed"):
+        raise ValueError("new-chat decision requires confirmed current-conversation exhaustion proof")
+    evidence=proof.get("exhaustion_evidence")
+    if not isinstance(evidence,Mapping):
+        raise ValueError("new-chat decision requires durable exhaustion evidence")
+    decision={
+        "decision_id":uuid.uuid4().hex,
+        "decision":"create_new_chat",
+        "reason":reason,
+        "recorded_at":datetime.now(timezone.utc).isoformat(),
+        "observed_conversation_url":proof.get("chat_url"),
+        "conversation_signature":proof.get("conversation_signature"),
+        "freshness_window_seconds":dict(proof.get("freshness_window_seconds") or {}),
+        "observed_age_seconds":proof.get("observed_age_seconds"),
+        "source_operation_id":source_operation_id,
+        "exhaustion_evidence":dict(evidence),
+    }
+    RUNTIME_DIR.mkdir(parents=True,exist_ok=True)
+    with NEW_CHAT_DECISIONS_PATH.open("a",encoding="utf-8") as handle:
+        handle.write(json.dumps(decision,sort_keys=True,separators=(",",":"))+"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    state=load()
+    state["last_new_chat_decision"]=decision
+    state["new_chat_decision_count"]=int(state.get("new_chat_decision_count",0) or 0)+1
+    save(state)
+    return decision
+
 
 
 def confirm_current_chat_exhaustion(
@@ -128,9 +166,25 @@ def confirm_current_chat_exhaustion(
         if data.get("conversation_context_exhausted") is not True:
             time.sleep(.25)
             continue
+        age=_timestamp_age_seconds(observed.get("captured_at"))
         return {
             **observed,
             "chat_exhaustion_confirmed":True,
+            "freshness_window_seconds":{
+                "min":EXHAUSTION_FRESHNESS_MIN_SECONDS,
+                "max":EXHAUSTION_FRESHNESS_MAX_SECONDS,
+            },
+            "observed_age_seconds":age,
+            "exhaustion_evidence":{
+                "kind":data.get("kind"),
+                "chat_url":data.get("chat_url"),
+                "conversation_signature":data.get("conversation_signature"),
+                "captured_at":observed.get("captured_at"),
+                "active_operation_id":active_operation_id,
+                "conversation_context_exhausted":data.get("conversation_context_exhausted"),
+                "chat_exhausted":data.get("chat_exhausted"),
+                "normalized_chat_exhausted":observed.get("chat_exhausted"),
+            },
         }
     return None
 
@@ -369,6 +423,11 @@ def main()->int:
             live=recovered
             mode="reuse"
         if mode=="new_chat":
+            record_new_chat_decision(
+                live,
+                reason="current_chat_exhausted_before_task_dispatch",
+                source_operation_id=live.get("active_operation_id"),
+            )
             try:
                 op=adapter.new_session()
             except ChatGPTAdapterError:
@@ -428,6 +487,11 @@ def main()->int:
         state["active_task_id"]=None
         state["active_task_fingerprint"]=None
         save(state)
+        record_new_chat_decision(
+            exhaustion_proof,
+            reason="current_chat_exhausted_after_response_without_valid_contract",
+            source_operation_id=op if isinstance(op,str) else None,
+        )
         try:
             op=adapter.new_session()
         except ChatGPTAdapterError:

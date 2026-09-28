@@ -727,6 +727,7 @@ def test_long_run_launcher_uses_repository_virtualenv_python():
     assert 'PASI_ENGINEERING_RUNTIME_DIR="${PASI_ENGINEERING_RUNTIME_DIR:-$RUNTIME_DIR/runtime}"' in launcher
     assert 'PASI_NEW_CHAT_AUDIT_KEY_DIR="${PASI_NEW_CHAT_AUDIT_KEY_DIR:-$RUNTIME_DIR/keys}"' in launcher
     assert 'PASI_168H_SMOKE="${PASI_168H_SMOKE:-0}"' in launcher
+    assert 'resolved_python="$(command -v "$PYTHON_BIN" || true)"' in launcher
     assert 'scripts/pasi_168h_acceptance.py --hours 168 --smoke' in launcher
 
 

@@ -36,6 +36,7 @@ MAX_PREDECESSOR_OPERATION_ID_CHARS = 200
 MAX_SEQUENCE_INDEX = 1_000_000
 MAX_RECOVERY_EVENTS_PER_OPERATION = 64
 M1_CHECKPOINT_SCHEMA_VERSION = 1
+M2_RECOVERY_SCHEMA_VERSION = 1
 MAX_TIMING_KEYS = frozenset({
     "injected_at_ms",
     "ack_at_ms",
@@ -63,6 +64,7 @@ _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "GitHub app was not found in the ChatGPT menu.",
     "PASI browser page reloaded during operation",
     "PASI_NATIVE: browser page reloaded during operation",
+    "PASI_NATIVE: controlled/observed connection loss interrupted generation",
     "PASI: browser page reloaded during operation",
     "PASI_NATIVE: bridge completion failed",
     "CHAT_EXHAUSTED:",
@@ -325,6 +327,7 @@ class BridgeState:
         idempotency_key: str | None = None,
         completion_markers: list[str] | None = None,
         m0_recovery_probe: bool = False,
+        m2_recovery_probe: bool = False,
         chain_id: str | None = None,
         sequence_index: int | None = None,
         predecessor_operation_id: str | None = None,
@@ -358,6 +361,10 @@ class BridgeState:
             operation_type != "prompt" or "PASI TASK P0.1" not in prompt
         ):
             raise ValueError("m0_recovery_probe is only permitted for the P0.1 prompt operation")
+        if not isinstance(m2_recovery_probe, bool):
+            raise ValueError("m2_recovery_probe must be a boolean")
+        if m2_recovery_probe and operation_type != "prompt":
+            raise ValueError("m2_recovery_probe is only permitted for prompt operations")
 
         with self.lock:
             queue = self._load_queue()
@@ -460,6 +467,7 @@ class BridgeState:
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                m2_recovery_probe=m2_recovery_probe,
                 chain_id=normalized_chain_id,
                 sequence_index=normalized_sequence_index,
                 predecessor_operation_id=normalized_predecessor,
@@ -769,7 +777,9 @@ class BridgeState:
             "replacement_reason", "reload_count", "age_ms", "idle_ms",
             "recovery_started_at_ms", "recovery_finished_at_ms",
             "recovery_duration_ms", "outcome", "observed_status", "error",
-            "operation_type", "source", "controller_error"
+            "operation_id", "operation_type", "source", "recovery_source", "controller_error",
+            "resumed_after_reconnect", "same_operation_resumed", "response_stopped_on_loss",
+            "checkpoint_preserved", "resume_phase"
         )
         event = {key: data[key] for key in allowed if key in data}
         if isinstance(captured_at, str):
@@ -803,6 +813,11 @@ class BridgeState:
             for item in queue:
                 if item.get("operation_id") != operation_id or item.get("operation_type") != "prompt":
                     continue
+                if not self._completion_markers_satisfied(
+                    response_text,
+                    item.get("completion_markers"),
+                ):
+                    return dict(item)
                 stored_response = self.state_manager.load_terminal_response(operation_id)
                 current = item.get("response_text")
                 authoritative = (
@@ -1054,6 +1069,11 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
+            if not self._completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            ):
+                return
             stored_response = self.state_manager.load_terminal_response(operation_id)
             current_response = item.get("response_text")
             if (
@@ -1115,6 +1135,11 @@ class BridgeState:
             or not response_text.strip()
         ):
             return False
+        if not self._completion_markers_satisfied(
+            response_text,
+            item.get("completion_markers"),
+        ):
+            return False
 
         item["response_text"] = response_text
         item["response_text_available"] = True
@@ -1127,6 +1152,26 @@ class BridgeState:
             time.time(),
         )
         return True
+
+    @staticmethod
+    def _completion_markers_satisfied(
+        response_text: object,
+        completion_markers: object,
+    ) -> bool:
+        if not isinstance(response_text, str) or not response_text.strip():
+            return False
+        if completion_markers is None:
+            return True
+        if not isinstance(completion_markers, list) or not completion_markers:
+            return True
+        lines = [line.strip() for line in response_text.splitlines()]
+        for marker in completion_markers:
+            if not isinstance(marker, str) or not marker.strip():
+                continue
+            marker = marker.strip()
+            if any(line == marker or line.startswith(marker + ":") for line in lines):
+                return True
+        return False
 
     @staticmethod
     def _retry_class(error: str) -> str:
@@ -1163,6 +1208,10 @@ class BridgeState:
                     and item.get("response_text_available") is True
                     and isinstance(item.get("response_text"), str)
                     and bool(str(item.get("response_text")).strip())
+                    and self._completion_markers_satisfied(
+                        str(item.get("response_text")),
+                        item.get("completion_markers"),
+                    )
                 ):
                     validate_transition(current_status, "completed")
                     item["status"] = "completed"
@@ -1493,6 +1542,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "personal-ai-system-chatgpt-bridge",
                     "m1_checkpoint_schema_version": M1_CHECKPOINT_SCHEMA_VERSION,
+                    "m2_recovery_schema_version": M2_RECOVERY_SCHEMA_VERSION,
                 }
             )
             return
@@ -1838,6 +1888,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(m0_recovery_probe, bool):
             self._send_json({"error": "m0_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
             return
+        m2_recovery_probe = payload.get("m2_recovery_probe", False)
+        if not isinstance(m2_recovery_probe, bool):
+            self._send_json({"error": "m2_recovery_probe must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
 
         if not isinstance(
             operation_type,
@@ -1882,6 +1936,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 idempotency_key=idempotency_key,
                 completion_markers=completion_markers,
                 m0_recovery_probe=m0_recovery_probe,
+                m2_recovery_probe=m2_recovery_probe,
                 chain_id=chain_id,
                 sequence_index=sequence_index,
                 predecessor_operation_id=predecessor_operation_id,
@@ -2066,6 +2121,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             and isinstance(response_text, str)
             and bool(response_text.strip())
         )
+        if (
+            existing_operation.get("operation_type") == "prompt"
+            and incoming_response_verified
+            and not self.bridge_state._completion_markers_satisfied(
+                response_text,
+                existing_operation.get("completion_markers"),
+            )
+        ):
+            self._send_json(
+                {
+                    "error": "Prompt completion response did not satisfy the configured completion marker."
+                },
+                HTTPStatus.CONFLICT,
+            )
+            return
         if existing_operation.get("status") == "completed":
             # A duplicate acknowledgement is idempotent. A later verified
             # response payload is still valid evidence when the original

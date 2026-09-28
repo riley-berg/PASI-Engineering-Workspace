@@ -8,6 +8,8 @@ from automation.computer_use.chatgpt import ChatGPTAdapter, ChatGPTAdapterError,
 
 CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
 TERMINAL={"complete","error","interrupted"}
+CHAT_RECOVERY_WINDOW_SECONDS=float(os.environ.get("PASI_CHAT_RECOVERY_WINDOW_SECONDS","120"))
+CHAT_RECOVERY_POLL_SECONDS=max(0.25,float(os.environ.get("PASI_CHAT_RECOVERY_POLL_SECONDS","1")))
 PASI_DEPLOYMENT_ID=os.environ.get("PASI_DEPLOYMENT_ID","pasi-chatgpt-handoff")
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
@@ -141,6 +143,10 @@ PASI_RESULT_PATCH_BEGIN
 PASI_RESULT_PATCH_END
 """
 
+def should_clear_active_operation(response:Any)->bool:
+    return getattr(response,"completion",None)=="complete"
+
+
 def main()->int:
     p=argparse.ArgumentParser()
     p.add_argument("task"); p.add_argument("--repo",type=Path,required=True)
@@ -158,24 +164,68 @@ def main()->int:
         session_id=f"engineering-{uuid.uuid4().hex}"
         state["session_id"]=session_id
     save(state)
-    adapter=ChatGPTAdapter(transport=UrllibBridgeTransport(timeout_seconds=10.0),session_id=session_id,poll_interval_seconds=.25,max_wait_seconds=a.timeout)
-    live=wait_live(adapter,a.extension_root,min(30,a.timeout))
-    state=load()
-    state["session_id"]=session_id
-    if valid_url(live.get("chat_url")):
-        state["chat_url"]=live["chat_url"]
-    state["chat_exhausted"]=bool(state.get("chat_exhausted") or live.get("chat_exhausted"))
-    state["usage_limited"]=bool(state.get("usage_limited") or live.get("usage_limited"))
-    state["connection_interrupted"]=bool(live.get("connection_failure"))
-    save(state)
+    adapter=ChatGPTAdapter(
+        transport=UrllibBridgeTransport(timeout_seconds=10.0),
+        session_id=session_id,
+        poll_interval_seconds=.25,
+        max_wait_seconds=a.timeout,
+    )
+
     key=fp(task)
+    active=state.get("active_operation_id")
+    active_task_id=state.get("active_task_id")
     pending_new_chat=state.get("pending_new_chat_operation_id")
+
+    def preserve_active(operation_id:str)->None:
+        state["active_operation_id"]=operation_id
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=True
+        save(state)
+
+    def wait_existing_operation(operation_id:str)->Any:
+        deadline=time.monotonic()+CHAT_RECOVERY_WINDOW_SECONDS
+        while True:
+            remaining_recovery=deadline-time.monotonic()
+            if remaining_recovery<=0:
+                preserve_active(operation_id)
+                raise ChatGPTAdapterError("ChatGPT connection recovery window expired while preserving the existing operation")
+            wait_budget=min(a.timeout,remaining_recovery)
+            try:
+                result=adapter.wait_for_completion(
+                    operation_id,
+                    timeout_seconds=wait_budget,
+                    cancel_on_timeout=False,
+                )
+            except ChatGPTAdapterError:
+                preserve_active(operation_id)
+                # Never reinterpret transport/browser loss as permission to
+                # create a chat. Give the existing operation another chance
+                # after the bridge/controller becomes reachable again.
+                try:
+                    wait_live(adapter,a.extension_root,min(5,remaining_recovery))
+                except Exception:
+                    pass
+                time.sleep(min(CHAT_RECOVERY_POLL_SECONDS,max(0.25,remaining_recovery)))
+                continue
+            if result.completion=="timeout":
+                preserve_active(operation_id)
+                try:
+                    wait_live(adapter,a.extension_root,min(5,remaining_recovery))
+                except Exception:
+                    pass
+                continue
+            state["connection_interrupted"]=False
+            return result
+
+    # The active operation is authoritative. Reconnect/re-read it before
+    # consulting browser state or choosing a chat mode. This prevents a stale
+    # heartbeat, missing URL, or connection interruption from causing a new
+    # prompt/chat while the previous action is still incomplete.
     if isinstance(pending_new_chat,str) and pending_new_chat.strip():
         try:
-            recovered=adapter.wait_for_completion(pending_new_chat,timeout_seconds=a.timeout,recover_response_text=False)
+            recovered=wait_existing_operation(pending_new_chat)
         except ChatGPTAdapterError:
-            state["connection_interrupted"]=True
-            save(state)
             raise
         if recovered.completion!="complete":
             raise RuntimeError(f"pending ChatGPT session creation did not complete: {recovered.completion}")
@@ -186,26 +236,30 @@ def main()->int:
         state["reasoning_mode"]=None
         save(state)
 
-    active=state.get("active_operation_id"); active_key=state.get("active_task_fingerprint")
-
-    def wait_task_response(operation_id:str)->Any:
-        try:
-            result=adapter.wait_for_completion(operation_id,timeout_seconds=a.timeout)
-        except ChatGPTAdapterError:
-            # Preserve the same operation and stable session identity across
-            # bridge/browser interruption. Recovery may requeue the same
-            # operation; the runner must never create a replacement chat.
-            state["active_operation_id"]=operation_id
-            state["active_task_fingerprint"]=key
-            state["connection_interrupted"]=True
-            save(state)
-            raise
-        state["connection_interrupted"]=False
-        return result
-
-    if isinstance(active,str) and active.strip() and active_key==key:
-        op=active; response=wait_task_response(op)
+    response=None
+    op=None
+    if isinstance(active,str) and active.strip():
+        if isinstance(active_task_id,str) and active_task_id.strip() and active_task_id!=a.task_id:
+            raise RuntimeError(
+                f"CHAT_ACTIVE_TASK_MISMATCH: active operation {active} belongs to {active_task_id}, not {a.task_id}; "
+                "refusing to submit a second prompt"
+            )
+        op=active
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        save(state)
+        response=wait_existing_operation(op)
     else:
+        live=wait_live(adapter,a.extension_root,min(30,a.timeout))
+        state=load()
+        state["session_id"]=session_id
+        if valid_url(live.get("chat_url")):
+            state["chat_url"]=live["chat_url"]
+        state["chat_exhausted"]=bool(state.get("chat_exhausted") or live.get("chat_exhausted"))
+        state["usage_limited"]=bool(state.get("usage_limited") or live.get("usage_limited"))
+        state["connection_interrupted"]=bool(live.get("connection_failure"))
+        save(state)
+
         mode=select_chat_mode(state,live)
         if mode=="blocked":
             raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")
@@ -229,39 +283,95 @@ def main()->int:
             r=adapter.read_operation(op)
             if r.completion!="complete": raise RuntimeError("new ChatGPT session did not complete")
             state["pending_new_chat_operation_id"]=None
-            state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
+            state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
+            state["chat_exhausted"]=False
+            state["usage_limited"]=False
+            state["reasoning_mode"]=None
             save(state)
-        if state.get("reasoning_mode")!="thinking": adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"
+        if state.get("reasoning_mode")!="thinking":
+            adapter.select_reasoning_mode("thinking")
+            state["reasoning_mode"]="thinking"
+            save(state)
         op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue))
-        state["active_operation_id"]=op; state["active_task_fingerprint"]=key; state["connection_interrupted"]=False; save(state)
-        response=wait_task_response(op)
+        state["active_operation_id"]=op
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=False
+        save(state)
+        response=wait_existing_operation(op)
+
     if response.completion=="timeout":
-        try: response=adapter.read_operation(op)
-        except Exception: pass
-    # Context exhaustion can surface as error, interrupted, or a terminal
-    # completion with no response text. In all of those cases, a replacement
-    # chat is safe because the adapter only sets chat_exhausted for bounded
-    # context-exhaustion evidence; provider-level usage limits are handled by
-    # select_chat_mode() as "blocked".
+        try:
+            response=adapter.read_operation(op)
+        except Exception:
+            pass
+
+    # A context-exhaustion error is the only condition that authorizes moving
+    # this incomplete action to a replacement conversation. The operation
+    # itself remains the source of truth for why the handoff occurred.
     exhausted_without_contract=response.chat_exhausted and (
         response.completion!="complete" or not bool(response.text.strip())
     )
     if exhausted_without_contract:
-        state["chat_exhausted"]=True; state["usage_limited"]=False
-        state["active_operation_id"]=None; state["active_task_fingerprint"]=None
+        state["chat_exhausted"]=True
+        state["usage_limited"]=False
+        state["active_operation_id"]=None
+        state["active_task_id"]=None
+        state["active_task_fingerprint"]=None
         save(state)
-        op=adapter.new_session(); r=adapter.read_operation(op)
+        try:
+            op=adapter.new_session()
+        except ChatGPTAdapterError:
+            pending=getattr(adapter,"current_operation_id",None)
+            if isinstance(pending,str) and pending.strip():
+                state["pending_new_chat_operation_id"]=pending
+                state["connection_interrupted"]=True
+                save(state)
+            raise
+        r=adapter.read_operation(op)
         if r.completion!="complete": raise RuntimeError("replacement ChatGPT session did not complete")
-        state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
-        adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"
-        op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue)); state["active_operation_id"]=op; state["active_task_fingerprint"]=key; save(state)
-        response=wait_task_response(op)
-    print(f"Prompt operation: {op}"); print(f"Completion: {response.completion}"); print(f"Chat URL: {response.chat_url or state.get('chat_url') or 'not reported'}")
-    if response.text: print("\n=== CHATGPT RESPONSE ===\n"); print(response.text)
+        state["pending_new_chat_operation_id"]=None
+        state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
+        state["chat_exhausted"]=False
+        state["usage_limited"]=False
+        state["reasoning_mode"]=None
+        save(state)
+        adapter.select_reasoning_mode("thinking")
+        state["reasoning_mode"]="thinking"
+        op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue))
+        state["active_operation_id"]=op
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=False
+        save(state)
+        response=wait_existing_operation(op)
+
+    print(f"Prompt operation: {op}")
+    print(f"Completion: {response.completion}")
+    print(f"Chat URL: {response.chat_url or state.get('chat_url') or 'not reported'}")
+    if response.text:
+        print("\n=== CHATGPT RESPONSE ===\n")
+        print(response.text)
     if isinstance(adapter.last_operation,Mapping) and adapter.last_operation.get("operation_id"):
-        print("PASI_OPERATION_METRICS: "+json.dumps({"operation_id":adapter.last_operation.get("operation_id"),"timing":adapter.last_operation.get("timing"),"recovery_events":adapter.last_operation.get("recovery_events")},separators=(",",":")))
-    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url"); state["chat_exhausted"]=bool(response.chat_exhausted); state["connection_interrupted"]=False; state["pending_new_chat_operation_id"]=None
-    if response.completion in TERMINAL: state["active_operation_id"]=None; state["active_task_fingerprint"]=None
+        print("PASI_OPERATION_METRICS: "+json.dumps({
+            "operation_id":adapter.last_operation.get("operation_id"),
+            "timing":adapter.last_operation.get("timing"),
+            "recovery_events":adapter.last_operation.get("recovery_events"),
+        },separators=(",",":")))
+
+    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url")
+    if response.chat_exhausted:
+        state["chat_exhausted"]=True
+    elif response.completion=="complete":
+        state["chat_exhausted"]=False
+    state["connection_interrupted"]=False
+
+    if should_clear_active_operation(response):
+        state["active_operation_id"]=None
+        state["active_task_id"]=None
+        state["active_task_fingerprint"]=None
+    state["pending_new_chat_operation_id"]=None
     save(state)
     return 0 if response.completion=="complete" and bool(response.text.strip()) else 1
+
 if __name__=="__main__": raise SystemExit(main())

@@ -20,9 +20,12 @@ export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_B
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"
 export PASI_ENGINEERING_EXTENSION_ROOT="${PASI_ENGINEERING_EXTENSION_ROOT:-$REPO_ROOT/extensions/pasi-chatgpt}"
 
+PASI_168H_SMOKE="${PASI_168H_SMOKE:-0}"
 WORKTREE="${PASI_168H_WORKTREE:-$HOME/.pasi-worktrees/pasi-engineering-workspace-168h}"
 BRANCH="${PASI_168H_BRANCH:-pasi/p0-4-168h-run-$(date +%Y%m%d-%H%M%S)}"
 RUNTIME_DIR="${PASI_ACCEPTANCE_STATE_DIR:-$HOME/.pasi/engineering-workspace-168h}"
+export PASI_ENGINEERING_RUNTIME_DIR="${PASI_ENGINEERING_RUNTIME_DIR:-$RUNTIME_DIR/runtime}"
+export PASI_NEW_CHAT_AUDIT_KEY_DIR="${PASI_NEW_CHAT_AUDIT_KEY_DIR:-$RUNTIME_DIR/keys}"
 PID_FILE="$RUNTIME_DIR/supervisor.pid"
 MAX_RESTARTS="${PASI_168H_MAX_RESTARTS:-64}"
 BASE_BACKOFF="${PASI_168H_RESTART_BACKOFF_SECONDS:-5}"
@@ -64,7 +67,11 @@ backoff="$BASE_BACKOFF"
 
 while true; do
   set +e
-  "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
+  if [[ "$PASI_168H_SMOKE" == "1" ]]; then
+    "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --smoke
+  else
+    "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
+  fi
   rc=$?
   set -e
 

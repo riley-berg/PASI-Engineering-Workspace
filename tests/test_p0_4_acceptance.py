@@ -100,6 +100,36 @@ def test_chat_only_creates_replacement_for_context_exhaustion():
     }) == "blocked"
 
 
+def test_interrupted_or_timeout_response_keeps_active_operation():
+    from scripts import pasi_chat as chat
+
+    assert chat.should_clear_active_operation(SimpleNamespace(completion="complete")) is True
+    assert chat.should_clear_active_operation(SimpleNamespace(completion="interrupted")) is False
+    assert chat.should_clear_active_operation(SimpleNamespace(completion="error")) is False
+    assert chat.should_clear_active_operation(SimpleNamespace(completion="timeout")) is False
+
+
+def test_active_operation_is_recovered_before_new_chat_selection():
+    source = Path(chat.__file__).read_text(encoding="utf-8")
+    assert "active=state.get(\"active_operation_id\")" in source
+    assert "response=wait_existing_operation(op)" in source
+    assert "active_task_id=state.get(\"active_task_id\")" in source
+    assert "refusing to submit a second prompt" in source
+    assert 'state["active_operation_id"]=None' in source
+    assert "should_clear_active_operation(response)" in source
+
+
+def test_p0_4_recovery_wait_does_not_cancel_the_existing_operation():
+    source = Path(chat.__file__).read_text(encoding="utf-8")
+    assert "cancel_on_timeout=False" in source
+
+
+def test_new_chat_creation_preserves_its_recovery_operation():
+    adapter_source = Path(chat.__file__).parents[1].joinpath("automation","computer_use","chatgpt.py").read_text(encoding="utf-8")
+    assert "cancel_on_timeout=False" in adapter_source
+    assert "self.current_operation_id" in adapter_source
+
+
 def test_chat_session_identity_is_persisted_for_idempotent_restart():
     from scripts import pasi_chat as chat
 

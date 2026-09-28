@@ -138,6 +138,53 @@ def emit(event: dict) -> None:
         handle.flush()
 
 
+def new_chat_audit() -> dict[str, object]:
+    """Replay the durable new-chat audit chain used by the ChatGPT executor."""
+    try:
+        from scripts.pasi_chat import (
+            AUDIT_PUBLIC_KEY_PATH,
+            NEW_CHAT_DECISIONS_PATH,
+            STATE_PATH,
+            replay_new_chat_decisions,
+        )
+        result = replay_new_chat_decisions(
+            NEW_CHAT_DECISIONS_PATH,
+            STATE_PATH,
+            AUDIT_PUBLIC_KEY_PATH,
+        )
+        return {**result, "public_key": str(AUDIT_PUBLIC_KEY_PATH)}
+    except Exception as exc:
+        return {
+            "path": "",
+            "public_key": "",
+            "records": 0,
+            "valid": False,
+            "errors": [f"new-chat audit replay failed: {exc}"],
+            "chain_head": "",
+        }
+
+
+def record_new_chat_audit(state: dict[str, object], *, required: bool = True) -> dict[str, object]:
+    result = new_chat_audit()
+    state["new_chat_audit_valid"] = bool(result.get("valid"))
+    state["new_chat_audit_record_count"] = int(result.get("records", 0) or 0)
+    state["new_chat_audit_chain_head"] = str(result.get("chain_head") or "")
+    state["new_chat_audit_log"] = str(result.get("path") or "")
+    state["new_chat_audit_public_key"] = str(result.get("public_key") or "")
+    state["new_chat_audit_errors"] = list(result.get("errors", []))
+    if required and not bool(result.get("valid")):
+        error_text = "; ".join(str(item) for item in result.get("errors", [])) or "unknown audit replay failure"
+        emit({
+            "event": "new_chat_audit_invalid",
+            "at": utcnow().isoformat(),
+            "errors": list(result.get("errors", [])),
+            "decision_log": result.get("path", ""),
+            "public_key": result.get("public_key", ""),
+        })
+        raise RuntimeError(f"new-chat audit chain is invalid: {error_text}")
+    return result
+
+
 def write_state(payload: dict) -> None:
     path = state_dir() / "state.json"
     tmp = path.with_suffix(".tmp")
@@ -463,10 +510,13 @@ def main() -> int:
     ensure_worktree(root, worktree, branch)
     head = git(worktree, "rev-parse", "HEAD")
     phases = schedule()
+    audit_result = record_new_chat_audit(existing, required=True)
     emit({
         "event": "run_resumed" if same_run else ("run_started" if not args.smoke else "smoke_started"),
         "at": utcnow().isoformat(), "run_id": run_id, "repo": REPO, "branch": branch,
         "worktree": str(worktree), "head": head, "hours": HOURS, "phase_count": len(phases),
+        "new_chat_audit_records": int(audit_result.get("records", 0) or 0),
+        "new_chat_audit_chain_head": audit_result.get("chain_head", ""),
     })
 
     if args.smoke:
@@ -475,6 +525,7 @@ def main() -> int:
         runnable = [task for task in pending if task.task_id != "P0.4"]
         print(f"READY: {len(phases)} phases, {len(discovered)} tasks discovered, {len(pending)} unchecked")
         print(f"RUN-LEVEL GATE: P0.4 excluded from model task dispatch; {len(runnable)} other unchecked tasks are runnable during the 168-hour window")
+        print(f"NEW-CHAT AUDIT: valid={audit_result['valid']} records={audit_result['records']} chain_head={audit_result['chain_head']}")
         print(f"HEAD: {head}")
         return 0
 
@@ -497,6 +548,8 @@ def main() -> int:
     telemetry.start()
     try:
         while utcnow() < deadline:
+            record_new_chat_audit(state, required=True)
+            write_state(state)
             discovered = all_tasks()
             p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
             pending = [task for task in discovered if not task.checked and task.task_id != "P0.4"]
@@ -524,6 +577,10 @@ def main() -> int:
                         "events": str(state_dir() / "events.jsonl"),
                         "completed_tasks_during_window": int(state.get("completed_tasks", 0)),
                         "failed_tasks_during_window": int(state.get("failed_tasks", 0)),
+                        "new_chat_audit_log": str(state.get("new_chat_audit_log") or ""),
+                        "new_chat_audit_public_key": str(state.get("new_chat_audit_public_key") or ""),
+                        "new_chat_audit_record_count": int(state.get("new_chat_audit_record_count", 0) or 0),
+                        "new_chat_audit_chain_head": str(state.get("new_chat_audit_chain_head") or ""),
                     }
                     evidence_path.write_text(json.dumps(evidence_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
                     evidence_pr = ensure_evidence_pr(branch, run_id)
@@ -664,6 +721,8 @@ def main() -> int:
     # The 168-hour gate completes at the elapsed-time boundary even if some
     # later roadmap tasks remain pending. Finalize P0.4 independently so the
     # acceptance result cannot be lost merely because the broader roadmap is incomplete.
+    record_new_chat_audit(state, required=True)
+    write_state(state)
     discovered = all_tasks(force_refresh=True)
     p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
     if p0_4 is not None and not p0_4.checked:
@@ -685,6 +744,10 @@ def main() -> int:
             "events": str(state_dir() / "events.jsonl"),
             "completed_tasks_during_window": int(state.get("completed_tasks", 0)),
             "failed_tasks_during_window": int(state.get("failed_tasks", 0)),
+            "new_chat_audit_log": str(state.get("new_chat_audit_log") or ""),
+            "new_chat_audit_public_key": str(state.get("new_chat_audit_public_key") or ""),
+            "new_chat_audit_record_count": int(state.get("new_chat_audit_record_count", 0) or 0),
+            "new_chat_audit_chain_head": str(state.get("new_chat_audit_chain_head") or ""),
         }
         evidence_path.write_text(json.dumps(evidence_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         evidence_pr = ensure_evidence_pr(branch, run_id)

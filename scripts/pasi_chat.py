@@ -34,28 +34,105 @@ def expected_version(root:Path)->str|None:
 
 def observed_chat_state(observation:Mapping[str,Any]|None)->dict[str,Any]:
     data=observation.get("data") if isinstance(observation,Mapping) else None
+    kind=data.get("kind") if isinstance(data,Mapping) else None
+    captured=observation.get("captured_at") if isinstance(observation,Mapping) else None
     if not isinstance(data,Mapping):
-        return {"chat_url":None,"chat_exhausted":False,"usage_limited":False,"active_operation_id":None,"connection_failure":False}
+        return {
+            "chat_url":None,
+            "chat_exhausted":False,
+            "usage_limited":False,
+            "active_operation_id":None,
+            "connection_failure":False,
+            "conversation_signature":None,
+            "captured_at":captured if isinstance(captured,str) else None,
+            "kind":kind,
+        }
     return {
         "chat_url":valid_url(data.get("chat_url")),
         "chat_exhausted":bool(data.get("conversation_context_exhausted") or data.get("chat_exhausted")),
         "usage_limited":bool(data.get("provider_usage_limited") or data.get("usage_limited")),
         "active_operation_id":data.get("active_operation_id") if isinstance(data.get("active_operation_id"),str) else None,
         "connection_failure":bool(data.get("connection_failure")),
+        "conversation_signature":data.get("conversation_signature") if isinstance(data.get("conversation_signature"),str) and data.get("conversation_signature").strip() else None,
+        "captured_at":captured if isinstance(captured,str) else None,
+        "kind":kind,
     }
 
 def select_chat_mode(state:Mapping[str,Any],live:Mapping[str,Any])->str:
     if bool(live.get("usage_limited") or state.get("usage_limited")):
         return "blocked"
-    # A replacement chat is permitted only when the current conversation has
-    # explicit context-exhaustion evidence. Connection loss, stale heartbeat,
-    # or a temporarily missing URL are recovery conditions, not new-chat
-    # conditions.
-    if bool(live.get("chat_exhausted") or state.get("chat_exhausted")):
+    # Only a fresh, current-conversation exhaustion proof may authorize a
+    # replacement chat. Raw/stale exhaustion flags are intentionally ignored.
+    if bool(live.get("chat_exhaustion_confirmed")):
         return "new_chat"
     if valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")):
         return "reuse"
     return "recover"
+
+
+def _fresh_timestamp(value:object,max_age_seconds:float=30.0)->bool:
+    if not isinstance(value,str):
+        return False
+    try:
+        captured=datetime.fromisoformat(value.replace("Z","+00:00"))
+    except ValueError:
+        return False
+    if captured.tzinfo is None:
+        captured=captured.replace(tzinfo=timezone.utc)
+    age=(datetime.now(timezone.utc)-captured).total_seconds()
+    return -5 <= age <= max_age_seconds
+
+
+def confirm_current_chat_exhaustion(
+    adapter:ChatGPTAdapter,
+    *,
+    expected_chat_url:str|None=None,
+    expected_operation_id:str|None=None,
+    timeout:float=5.0,
+)->dict[str,Any]|None:
+    # New-chat permission is fail-closed. We require the native controller's
+    # current conversation state, not an inherited runner flag or an error
+    # string produced by an earlier operation.
+    deadline=time.monotonic()+max(0.25,timeout)
+    while time.monotonic()<deadline:
+        try:
+            observation=adapter.read_browser_observation()
+        except ChatGPTAdapterError:
+            observation=None
+        data=observation.get("data") if isinstance(observation,Mapping) else None
+        if not isinstance(data,Mapping) or data.get("kind")!="chatgpt_state":
+            time.sleep(.25)
+            continue
+        observed=observed_chat_state(observation)
+        current_url=observed.get("chat_url")
+        if not valid_url(current_url):
+            time.sleep(.25)
+            continue
+        if expected_chat_url and current_url != expected_chat_url:
+            time.sleep(.25)
+            continue
+        if not _fresh_timestamp(observed.get("captured_at")):
+            time.sleep(.25)
+            continue
+        signature=observed.get("conversation_signature")
+        if not isinstance(signature,str) or not signature.strip():
+            time.sleep(.25)
+            continue
+        active_operation_id=observed.get("active_operation_id")
+        if expected_operation_id and active_operation_id not in {expected_operation_id,None}:
+            time.sleep(.25)
+            continue
+        if observed.get("chat_exhausted") is not True:
+            time.sleep(.25)
+            continue
+        if data.get("conversation_context_exhausted") is not True:
+            time.sleep(.25)
+            continue
+        return {
+            **observed,
+            "chat_exhaustion_confirmed":True,
+        }
+    return None
 
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
     deadline=time.monotonic()+timeout; expected=expected_version(ext); latest=observed_chat_state(None)
@@ -315,11 +392,22 @@ def main()->int:
         except Exception:
             pass
 
-    # A context-exhaustion error is the only condition that authorizes moving
-    # this incomplete action to a replacement conversation. The operation
-    # itself remains the source of truth for why the handoff occurred.
-    exhausted_without_contract=response.chat_exhausted and (
-        response.completion!="complete" or not bool(response.text.strip())
+    # A context-exhaustion error is only a trigger to seek fresh proof.
+    # It never authorizes a replacement chat by itself.
+    exhaustion_candidate=response.chat_exhausted
+    current_chat_url=valid_url(response.chat_url) or valid_url(state.get("chat_url"))
+    exhaustion_proof=None
+    if exhaustion_candidate:
+        exhaustion_proof=confirm_current_chat_exhaustion(
+            adapter,
+            expected_chat_url=current_chat_url,
+            expected_operation_id=op if isinstance(op,str) else None,
+            timeout=min(5.0,a.timeout),
+        )
+    exhausted_without_contract=bool(
+        exhaustion_proof
+        and response.completion!="complete"
+        and response.completion!="timeout"
     )
     if exhausted_without_contract:
         state["chat_exhausted"]=True
@@ -369,10 +457,8 @@ def main()->int:
         },separators=(",",":")))
 
     state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url")
-    if response.chat_exhausted:
-        state["chat_exhausted"]=True
-    elif response.completion=="complete":
-        state["chat_exhausted"]=False
+    state["chat_exhausted"]=bool(exhaustion_proof)
+    state["chat_exhaustion_confirmed"]=bool(exhaustion_proof)
     state["connection_interrupted"]=False
 
     if should_clear_active_operation(response):

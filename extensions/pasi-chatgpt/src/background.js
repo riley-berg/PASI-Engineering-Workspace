@@ -320,11 +320,6 @@ chrome.runtime.onStartup.addListener(() => {
 void ensureWatchdogAlarm();
 void injectExistingChatTabs();
 
-if (chrome.sidePanel?.setPanelBehavior) {
-  chrome.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
-    .catch((error) => console.warn('[PASI side panel]', error));
-}
 
 
 chrome.alarms.onAlarm.addListener((alarm) => {

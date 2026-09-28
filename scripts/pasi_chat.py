@@ -164,8 +164,8 @@ def main()->int:
     state["session_id"]=session_id
     if valid_url(live.get("chat_url")):
         state["chat_url"]=live["chat_url"]
-    state["chat_exhausted"]=bool(live.get("chat_exhausted"))
-    state["usage_limited"]=bool(live.get("usage_limited"))
+    state["chat_exhausted"]=bool(state.get("chat_exhausted") or live.get("chat_exhausted"))
+    state["usage_limited"]=bool(state.get("usage_limited") or live.get("usage_limited"))
     state["connection_interrupted"]=bool(live.get("connection_failure"))
     save(state)
     key=fp(task)

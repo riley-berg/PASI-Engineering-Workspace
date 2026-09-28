@@ -206,6 +206,124 @@ def test_new_chat_decision_is_durable_and_contains_authorizing_proof(tmp_path, m
     assert state["new_chat_decision_count"] == 1
 
 
+def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+    from datetime import datetime, timezone
+
+    chat_path=tmp_path / "new-chat-decisions.jsonl"
+    captured=datetime.now(timezone.utc).isoformat()
+    record={
+        "decision_id":"decision-1",
+        "decision":"create_new_chat",
+        "reason":"current_chat_exhausted_after_response_without_valid_contract",
+        "recorded_at":datetime.now(timezone.utc).isoformat(),
+        "observed_conversation_url":"https://chatgpt.com/c/current",
+        "conversation_signature":"sig-current-42",
+        "freshness_window_seconds":{"min":-5.0,"max":30.0},
+        "observed_age_seconds":1.5,
+        "source_operation_id":"op-42",
+        "exhaustion_evidence":{
+            "kind":"chatgpt_state",
+            "chat_url":"https://chatgpt.com/c/current",
+            "conversation_signature":"sig-current-42",
+            "captured_at":captured,
+            "active_operation_id":"op-42",
+            "conversation_context_exhausted":True,
+            "chat_exhausted":True,
+            "normalized_chat_exhausted":True,
+        },
+    }
+    chat_path.write_text(json.dumps(record)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(chat_path)
+    assert result["valid"] is True
+    assert result["records"] == 1
+    assert result["errors"] == []
+
+
+def test_replay_validation_rejects_tampered_conversation_identity(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+    from datetime import datetime, timezone
+
+    captured=datetime.now(timezone.utc).isoformat()
+    record={
+        "decision":"create_new_chat",
+        "recorded_at":captured,
+        "observed_conversation_url":"https://chatgpt.com/c/current",
+        "conversation_signature":"sig-top",
+        "freshness_window_seconds":{"min":-5.0,"max":30.0},
+        "observed_age_seconds":1.0,
+        "exhaustion_evidence":{
+            "kind":"chatgpt_state",
+            "chat_url":"https://chatgpt.com/c/current",
+            "conversation_signature":"sig-evidence",
+            "captured_at":captured,
+            "conversation_context_exhausted":True,
+            "chat_exhausted":True,
+            "normalized_chat_exhausted":True,
+        },
+    }
+    path=tmp_path / "new-chat-decisions.jsonl"
+    path.write_text(json.dumps(record)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path)
+    assert result["valid"] is False
+    assert any("evidence conversation_signature does not match" in error for error in result["errors"])
+
+
+def test_replay_validation_rejects_false_exhaustion_and_bad_freshness(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+    from datetime import datetime, timezone
+
+    captured=datetime.now(timezone.utc).isoformat()
+    record={
+        "decision":"create_new_chat",
+        "recorded_at":captured,
+        "observed_conversation_url":"https://chatgpt.com/c/current",
+        "conversation_signature":"sig-current",
+        "freshness_window_seconds":{"min":-5.0,"max":30.0},
+        "observed_age_seconds":45.0,
+        "exhaustion_evidence":{
+            "kind":"chatgpt_state",
+            "chat_url":"https://chatgpt.com/c/current",
+            "conversation_signature":"sig-current",
+            "captured_at":captured,
+            "conversation_context_exhausted":False,
+            "chat_exhausted":True,
+            "normalized_chat_exhausted":False,
+        },
+    }
+    path=tmp_path / "new-chat-decisions.jsonl"
+    path.write_text(json.dumps(record)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path)
+    assert result["valid"] is False
+    assert any("observed_age_seconds falls outside" in error for error in result["errors"])
+    assert any("conversation_context_exhausted evidence is not true" in error for error in result["errors"])
+    assert any("normalized_chat_exhausted evidence is not true" in error for error in result["errors"])
+
+
+def test_replay_validation_rejects_malformed_json_line(tmp_path):
+    from scripts import pasi_chat as chat
+
+    path=tmp_path / "new-chat-decisions.jsonl"
+    path.write_text("{not-json}\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path)
+    assert result["valid"] is False
+    assert result["records"] == 1
+    assert "invalid JSON" in result["errors"][0]
+
+
+def test_replay_validator_cli_is_repository_tool():
+    source=Path(__file__).parents[1].joinpath("scripts","replay_new_chat_decisions.py").read_text(encoding="utf-8")
+    assert "replay_new_chat_decisions" in source
+    assert "return 0 if result["valid"] else 1" in source
+
+
 def test_new_chat_requires_durable_exhaustion_proof():
     from scripts import pasi_chat as chat
 

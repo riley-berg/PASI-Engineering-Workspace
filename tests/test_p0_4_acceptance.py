@@ -721,9 +721,11 @@ def test_runner_uses_configurable_tested_source_ref_for_new_worktrees():
 
 def test_long_run_launcher_uses_repository_virtualenv_python():
     launcher = Path(acceptance.__file__).with_name("run_p0_4_168h.sh").read_text(encoding="utf-8")
-    assert 'PYTHON_BIN="${PASI_PYTHON:-$REPO_ROOT/.venv/bin/python}"' in launcher
+    assert 'elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then' in launcher
     assert '"$PYTHON_BIN" scripts/pasi_168h_acceptance.py' in launcher
     assert 'PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"' in launcher
+    assert '"$PYTHON_BIN" -m venv "$REPO_ROOT/.venv"' in launcher
+    assert 'if ! "$PYTHON_BIN" -c \'import cryptography\'' in launcher
     assert 'PASI_ENGINEERING_RUNTIME_DIR="${PASI_ENGINEERING_RUNTIME_DIR:-$RUNTIME_DIR/runtime}"' in launcher
     assert 'PASI_NEW_CHAT_AUDIT_KEY_DIR="${PASI_NEW_CHAT_AUDIT_KEY_DIR:-$RUNTIME_DIR/keys}"' in launcher
     assert 'PASI_168H_SMOKE="${PASI_168H_SMOKE:-0}"' in launcher

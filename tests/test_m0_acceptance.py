@@ -63,11 +63,19 @@ class TestM0Acceptance(unittest.TestCase):
             with self.assertRaises(M0AcceptanceError):
                 self.response(**overrides)
 
-    def test_live_contract_allows_same_chat_and_requires_thinking_and_connection_recovery(self) -> None:
+    def test_live_contract_allows_connection_recovery_evidence_when_present(self) -> None:
         value = self.response()
         self.assertFalse(value.runtime_evidence.fresh_chat_created_after_usage)
         self.assertTrue(value.runtime_evidence.thinking_enabled)
+        self.assertIsNotNone(value.runtime_evidence.connection_recovery)
+        assert value.runtime_evidence.connection_recovery is not None
         self.assertTrue(value.runtime_evidence.connection_recovery.resumed_after_reconnect)
+
+    def test_live_contract_allows_same_chat_without_connection_recovery(self) -> None:
+        runtime_evidence = dict(self.response().runtime_evidence.to_dict())
+        runtime_evidence["connection_recovery"] = None
+        value = self.response(runtime_evidence=runtime_evidence)
+        self.assertIsNone(value.runtime_evidence.connection_recovery)
 
     def test_live_contract_allows_usage_gated_fresh_chat(self) -> None:
         value = self.response(
@@ -141,6 +149,18 @@ class TestM0Acceptance(unittest.TestCase):
             self.assertEqual(persisted, destination)
             self.assertEqual(destination.read_text(encoding="utf-8"), "{\"status\": \"PASS\"}\n")
 
+    def test_m0_live_persists_evidence_before_advancing_progression(self) -> None:
+        script = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "run_m0_live_acceptance.py"
+        )
+        source = script.read_text(encoding="utf-8")
+        self.assertLess(
+            source.index("persistent_evidence = persist_evidence"),
+            source.index("progression.save(progression_path)"),
+        )
+
     def test_live_acceptance_script_imports_from_repo_root(self) -> None:
         repo = Path(__file__).resolve().parents[1]
         result = subprocess.run(
@@ -151,6 +171,33 @@ class TestM0Acceptance(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_m0_evidence_file_is_valid_json(self) -> None:
+        payload = {
+            "gate": "M0",
+            "status": "PASS",
+            "provider": "chatgpt_browser",
+            "authenticated": True,
+            "chat_url": "https://chatgpt.com/c/abc123",
+            "task_id": "P0.1",
+            "summary": "Completed the task and produced direct evidence.",
+            "evidence": "canonical validation passed",
+            "commit": "abc123",
+            "branch": "pasi/m0-acceptance-test",
+            "proof_file": "acceptance/M0-LIVE-PROOF.txt",
+            "prompt_advance_rule": "advance only after verified completion",
+            "runtime_evidence": self.response().runtime_evidence.to_dict(),
+            "next_task_id": "",
+            "next_prompt": "",
+            "next_prompt_digest": "",
+            "prompt_advanced_after_verified_completion": False,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m0-live.json"
+            path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(parsed["task_id"], "P0.1")
+        self.assertEqual(parsed["next_prompt"], "")
 
     def test_proof_artifact_expectation_uses_a_real_trailing_newline(self) -> None:
         default = inspect.signature(apply_validate_commit).parameters["expected_proof"].default

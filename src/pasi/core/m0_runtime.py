@@ -89,7 +89,7 @@ class M0RuntimeEvidence:
     fresh_chat_created_after_usage: bool
     fresh_chat_creation_reason: str
     thinking_enabled: bool
-    connection_recovery: ConnectionRecoveryEvidence
+    connection_recovery: ConnectionRecoveryEvidence | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> "M0RuntimeEvidence":
@@ -99,7 +99,6 @@ class M0RuntimeEvidence:
             "fresh_chat_created_after_usage",
             "fresh_chat_creation_reason",
             "thinking_enabled",
-            "connection_recovery",
         ):
             if key not in value:
                 raise M0RuntimeError(f"runtime_evidence missing field: {key}")
@@ -122,21 +121,24 @@ class M0RuntimeEvidence:
         if value["thinking_enabled"] is not True:
             raise M0RuntimeError("M0 requires Thinking to be enabled")
 
+        recovery_value = value.get("connection_recovery")
+        connection_recovery = (
+            None
+            if recovery_value is None
+            else ConnectionRecoveryEvidence.from_mapping(recovery_value)
+        )
+
         return cls(
             fresh_chat_created_after_usage=fresh_chat_created,
             fresh_chat_creation_reason=reason,
             thinking_enabled=True,
-            connection_recovery=ConnectionRecoveryEvidence.from_mapping(
-                value["connection_recovery"]
-            ),
+            connection_recovery=connection_recovery,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "fresh_chat_created_after_usage": self.fresh_chat_created_after_usage,
-            "fresh_chat_creation_reason": self.fresh_chat_creation_reason,
-            "thinking_enabled": self.thinking_enabled,
-            "connection_recovery": {
+        recovery = None
+        if self.connection_recovery is not None:
+            recovery = {
                 "connection_loss_detected": self.connection_recovery.connection_loss_detected,
                 "response_stopped_on_loss": self.connection_recovery.response_stopped_on_loss,
                 "checkpoint_preserved": self.connection_recovery.checkpoint_preserved,
@@ -144,7 +146,12 @@ class M0RuntimeEvidence:
                 "same_operation_resumed": self.connection_recovery.same_operation_resumed,
                 "operation_id": self.connection_recovery.operation_id,
                 "resume_phase": self.connection_recovery.resume_phase,
-            },
+            }
+        return {
+            "fresh_chat_created_after_usage": self.fresh_chat_created_after_usage,
+            "fresh_chat_creation_reason": self.fresh_chat_creation_reason,
+            "thinking_enabled": self.thinking_enabled,
+            "connection_recovery": recovery,
         }
 
 

@@ -255,7 +255,7 @@ def apply_validate_commit(
             },
             indent=2,
         )
-        + "\\n",
+        + "\n",
         encoding="utf-8",
     )
     return after, evidence

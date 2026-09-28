@@ -264,8 +264,7 @@ def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path)
     }
     record["record_hash"]=chat._record_hash(record)
     record["record_signature"]=base64.b64encode(private.sign(record["record_hash"].encode("ascii"))).decode("ascii")
-    chat_path.write_text(json.dumps(record)+"
-",encoding="utf-8")
+    chat_path.write_text(json.dumps(record)+"\\n",encoding="utf-8")
 
     result=chat.replay_new_chat_decisions(chat_path, public_key_path=public_path)
     assert result["valid"] is True
@@ -328,9 +327,10 @@ def _write_two_chat_decision_records(chat, path, state_path, public_path, privat
         json.dumps(second,sort_keys=True,separators=(",",":"))+"\n",
         encoding="utf-8",
     )
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
     public_path.write_bytes(private.public_key().public_bytes(
-        __import__("cryptography").hazmat.primitives.serialization.Encoding.PEM,
-        __import__("cryptography").hazmat.primitives.serialization.PublicFormat.SubjectPublicKeyInfo,
+        Encoding.PEM,
+        PublicFormat.SubjectPublicKeyInfo,
     ))
     state_path.write_text(json.dumps({
         "new_chat_decision_count":2,
@@ -342,6 +342,7 @@ def _write_two_chat_decision_records(chat, path, state_path, public_path, privat
 def test_replay_detects_deleted_middle_audit_entry(tmp_path):
     import json
     from scripts import pasi_chat as chat
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     path=tmp_path / "new-chat-decisions.jsonl"
     state=tmp_path / "chat-session.json"
@@ -361,6 +362,7 @@ def test_replay_detects_deleted_middle_audit_entry(tmp_path):
 def test_replay_detects_reordered_audit_entries(tmp_path):
     import json
     from scripts import pasi_chat as chat
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     path=tmp_path / "new-chat-decisions.jsonl"
     state=tmp_path / "chat-session.json"
@@ -377,10 +379,13 @@ def test_replay_detects_reordered_audit_entries(tmp_path):
 def test_replay_detects_inserted_audit_entry_against_persisted_tip(tmp_path):
     import json
     from scripts import pasi_chat as chat
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
     path=tmp_path / "new-chat-decisions.jsonl"
     state=tmp_path / "chat-session.json"
-    first,second=_write_two_chat_decision_records(chat,path,state)
+    public_path=tmp_path / "public.pem"
+    private=Ed25519PrivateKey.generate()
+    first,second=_write_two_chat_decision_records(chat,path,state,public_path,private)
     inserted={**second}
     inserted.update({
         "decision_id":"decision-inserted",
@@ -389,6 +394,7 @@ def test_replay_detects_inserted_audit_entry_against_persisted_tip(tmp_path):
         "reason":"unexpected insertion",
     })
     inserted["record_hash"]=chat._record_hash(inserted)
+    inserted["record_signature"]=__import__("base64").b64encode(private.sign(inserted["record_hash"].encode("ascii"))).decode("ascii")
     path.write_text(
         json.dumps(first,sort_keys=True,separators=(",",":"))+"\n"+
         json.dumps(second,sort_keys=True,separators=(",",":"))+"\n"+
@@ -396,7 +402,7 @@ def test_replay_detects_inserted_audit_entry_against_persisted_tip(tmp_path):
         encoding="utf-8",
     )
 
-    result=chat.replay_new_chat_decisions(path,state)
+    result=chat.replay_new_chat_decisions(path,state,public_path)
     assert result["valid"] is False
     assert any("chain anchor count" in error for error in result["errors"])
     assert any("chain anchor head" in error for error in result["errors"])

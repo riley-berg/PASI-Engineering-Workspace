@@ -267,7 +267,7 @@ def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path)
     chat_path.write_text(json.dumps(record)+"\\n",encoding="utf-8")
 
     result=chat.replay_new_chat_decisions(chat_path, public_key_path=public_path)
-    assert result["valid"] is True
+    assert result["valid"] is True, result["errors"]
     assert result["records"] == 1
     assert result["errors"] == []
     assert result["chain_head"] == record["record_hash"]

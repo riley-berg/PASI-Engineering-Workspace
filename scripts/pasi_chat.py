@@ -90,6 +90,104 @@ def _fresh_timestamp(value:object,max_age_seconds:float=EXHAUSTION_FRESHNESS_MAX
     return age is not None and EXHAUSTION_FRESHNESS_MIN_SECONDS <= age <= max_age_seconds
 
 
+def _parse_timestamp(value:object)->datetime|None:
+    if not isinstance(value,str):
+        return None
+    try:
+        parsed=datetime.fromisoformat(value.replace("Z","+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
+    errors:list[str]=[]
+    if record.get("decision")!="create_new_chat":
+        errors.append("decision must be create_new_chat")
+    for field in ("decision_id","recorded_at","observed_conversation_url","conversation_signature",
+                  "freshness_window_seconds","exhaustion_evidence"):
+        if field not in record:
+            errors.append(f"missing required field: {field}")
+    if not valid_url(record.get("observed_conversation_url")):
+        errors.append("observed_conversation_url is not a valid ChatGPT conversation URL")
+    signature=record.get("conversation_signature")
+    if not isinstance(signature,str) or not signature.strip():
+        errors.append("conversation_signature is missing or empty")
+
+    window=record.get("freshness_window_seconds")
+    if not isinstance(window,Mapping):
+        errors.append("freshness_window_seconds must be an object")
+        window={}
+    min_age=window.get("min")
+    max_age=window.get("max")
+    if min_age!=EXHAUSTION_FRESHNESS_MIN_SECONDS or max_age!=EXHAUSTION_FRESHNESS_MAX_SECONDS:
+        errors.append("freshness window does not match the enforced exhaustion window")
+
+    observed_age=record.get("observed_age_seconds")
+    if not isinstance(observed_age,(int,float)):
+        errors.append("observed_age_seconds must be numeric")
+    elif not isinstance(min_age,(int,float)) or not isinstance(max_age,(int,float)) or not min_age<=observed_age<=max_age:
+        errors.append("observed_age_seconds falls outside the recorded freshness window")
+
+    captured=_parse_timestamp((record.get("exhaustion_evidence") or {}).get("captured_at") if isinstance(record.get("exhaustion_evidence"),Mapping) else None)
+    recorded=_parse_timestamp(record.get("recorded_at"))
+    if captured is None:
+        errors.append("exhaustion_evidence.captured_at is missing or invalid")
+    if recorded is None:
+        errors.append("recorded_at is missing or invalid")
+    if captured is not None and recorded is not None and recorded < captured:
+        errors.append("recorded_at predates exhaustion evidence capture")
+
+    evidence=record.get("exhaustion_evidence")
+    if not isinstance(evidence,Mapping):
+        return errors
+
+    required_evidence={
+        "kind","chat_url","conversation_signature","captured_at","conversation_context_exhausted",
+        "chat_exhausted","normalized_chat_exhausted",
+    }
+    missing=sorted(required_evidence-set(evidence))
+    errors.extend(f"missing exhaustion evidence field: {field}" for field in missing)
+    if evidence.get("kind")!="chatgpt_state":
+        errors.append("exhaustion evidence kind must be chatgpt_state")
+    if evidence.get("chat_url")!=record.get("observed_conversation_url"):
+        errors.append("evidence chat_url does not match observed_conversation_url")
+    if evidence.get("conversation_signature")!=record.get("conversation_signature"):
+        errors.append("evidence conversation_signature does not match top-level signature")
+    if evidence.get("captured_at")!=((record.get("exhaustion_evidence") or {}).get("captured_at")):
+        errors.append("evidence capture timestamp is inconsistent")
+    if evidence.get("conversation_context_exhausted") is not True:
+        errors.append("conversation_context_exhausted evidence is not true")
+    if evidence.get("chat_exhausted") is not True:
+        errors.append("chat_exhausted evidence is not true")
+    if evidence.get("normalized_chat_exhausted") is not True:
+        errors.append("normalized_chat_exhausted evidence is not true")
+    return errors
+
+
+def replay_new_chat_decisions(path:Path|None=None)->dict[str,Any]:
+    target=path or NEW_CHAT_DECISIONS_PATH
+    if not target.exists():
+        return {"path":str(target),"records":0,"valid":True,"errors":[]}
+    errors:list[str]=[]
+    records=0
+    for line_number,line in enumerate(target.read_text(encoding="utf-8").splitlines(),1):
+        if not line.strip():
+            continue
+        records+=1
+        try:
+            value=json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        if not isinstance(value,Mapping):
+            errors.append(f"line {line_number}: record must be an object")
+            continue
+        for error in validate_new_chat_decision_record(value):
+            errors.append(f"line {line_number}: {error}")
+    return {"path":str(target),"records":records,"valid":not errors,"errors":errors}
+
+
 def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_operation_id:str|None=None)->dict[str,Any]:
     if not proof.get("chat_exhaustion_confirmed"):
         raise ValueError("new-chat decision requires confirmed current-conversation exhaustion proof")

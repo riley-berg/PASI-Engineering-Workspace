@@ -318,7 +318,7 @@ def test_replay_detects_deleted_middle_audit_entry(tmp_path):
     assert result["valid"] is False
     assert any("chain_index" in error for error in result["errors"])
     assert any("previous_record_hash" in error for error in result["errors"])
-    assert any("chain anchor head" in error for error in result["errors"])
+    assert any("chain anchor count" in error for error in result["errors"])
 
 
 def test_replay_detects_reordered_audit_entries(tmp_path):

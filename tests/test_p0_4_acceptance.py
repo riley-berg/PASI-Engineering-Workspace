@@ -204,6 +204,9 @@ def test_new_chat_decision_is_durable_and_contains_authorizing_proof(tmp_path, m
     state = __import__("json").loads((tmp_path / "chat-session.json").read_text(encoding="utf-8"))
     assert state["last_new_chat_decision"] == decision
     assert state["new_chat_decision_count"] == 1
+    assert decision["chain_index"] == 1
+    assert decision["previous_record_hash"] == chat.NEW_CHAT_CHAIN_GENESIS
+    assert state["new_chat_decision_chain_head"] == decision["record_hash"]
 
 
 def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path):
@@ -233,13 +236,133 @@ def test_replay_validation_accepts_and_replays_durable_decision_record(tmp_path)
             "chat_exhausted":True,
             "normalized_chat_exhausted":True,
         },
+        "chain_index":1,
+        "previous_record_hash":chat.NEW_CHAT_CHAIN_GENESIS,
     }
+    record["record_hash"]=chat._record_hash(record)
     chat_path.write_text(json.dumps(record)+"\n",encoding="utf-8")
 
     result=chat.replay_new_chat_decisions(chat_path)
     assert result["valid"] is True
     assert result["records"] == 1
     assert result["errors"] == []
+    assert result["chain_head"] == record["record_hash"]
+
+
+def _write_two_chat_decision_records(chat, path, state_path):
+    from datetime import datetime, timezone
+    import json
+
+    captured=datetime.now(timezone.utc).isoformat()
+    first={
+        "decision_id":"decision-1",
+        "decision":"create_new_chat",
+        "reason":"first",
+        "recorded_at":datetime.now(timezone.utc).isoformat(),
+        "observed_conversation_url":"https://chatgpt.com/c/current",
+        "conversation_signature":"sig-1",
+        "freshness_window_seconds":{"min":-5.0,"max":30.0},
+        "observed_age_seconds":1.0,
+        "source_operation_id":"op-1",
+        "exhaustion_evidence":{
+            "kind":"chatgpt_state",
+            "chat_url":"https://chatgpt.com/c/current",
+            "conversation_signature":"sig-1",
+            "captured_at":captured,
+            "active_operation_id":"op-1",
+            "conversation_context_exhausted":True,
+            "chat_exhausted":True,
+            "normalized_chat_exhausted":True,
+        },
+        "chain_index":1,
+        "previous_record_hash":chat.NEW_CHAT_CHAIN_GENESIS,
+    }
+    first["record_hash"]=chat._record_hash(first)
+    second={**first}
+    second.update({
+        "decision_id":"decision-2",
+        "reason":"second",
+        "conversation_signature":"sig-2",
+        "source_operation_id":"op-2",
+        "chain_index":2,
+        "previous_record_hash":first["record_hash"],
+        "exhaustion_evidence":{
+            **first["exhaustion_evidence"],
+            "conversation_signature":"sig-2",
+            "active_operation_id":"op-2",
+        },
+    })
+    second["record_hash"]=chat._record_hash(second)
+    path.write_text(
+        json.dumps(first,sort_keys=True,separators=(",",":"))+"\n"+
+        json.dumps(second,sort_keys=True,separators=(",",":"))+"\n",
+        encoding="utf-8",
+    )
+    state_path.write_text(json.dumps({
+        "new_chat_decision_count":2,
+        "new_chat_decision_chain_head":second["record_hash"],
+    })+"\n",encoding="utf-8")
+    return first,second
+
+
+def test_replay_detects_deleted_middle_audit_entry(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+
+    path=tmp_path / "new-chat-decisions.jsonl"
+    state=tmp_path / "chat-session.json"
+    first,second=_write_two_chat_decision_records(chat,path,state)
+    path.write_text(json.dumps(second)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path,state)
+    assert result["valid"] is False
+    assert any("chain_index" in error for error in result["errors"])
+    assert any("previous_record_hash" in error for error in result["errors"])
+    assert any("chain anchor head" in error for error in result["errors"])
+
+
+def test_replay_detects_reordered_audit_entries(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+
+    path=tmp_path / "new-chat-decisions.jsonl"
+    state=tmp_path / "chat-session.json"
+    first,second=_write_two_chat_decision_records(chat,path,state)
+    path.write_text(json.dumps(second)+"\n"+json.dumps(first)+"\n",encoding="utf-8")
+
+    result=chat.replay_new_chat_decisions(path,state)
+    assert result["valid"] is False
+    assert any("chain_index" in error for error in result["errors"])
+    assert any("previous_record_hash" in error for error in result["errors"])
+    assert any("record_hash" in error or "chain anchor head" in error for error in result["errors"])
+
+
+def test_replay_detects_inserted_audit_entry_against_persisted_tip(tmp_path):
+    import json
+    from scripts import pasi_chat as chat
+
+    path=tmp_path / "new-chat-decisions.jsonl"
+    state=tmp_path / "chat-session.json"
+    first,second=_write_two_chat_decision_records(chat,path,state)
+    inserted={**second}
+    inserted.update({
+        "decision_id":"decision-inserted",
+        "chain_index":3,
+        "previous_record_hash":second["record_hash"],
+        "reason":"unexpected insertion",
+    })
+    inserted["record_hash"]=chat._record_hash(inserted)
+    path.write_text(
+        json.dumps(first,sort_keys=True,separators=(",",":"))+"\n"+
+        json.dumps(second,sort_keys=True,separators=(",",":"))+"\n"+
+        json.dumps(inserted,sort_keys=True,separators=(",",":"))+"\n",
+        encoding="utf-8",
+    )
+
+    result=chat.replay_new_chat_decisions(path,state)
+    assert result["valid"] is False
+    assert any("chain anchor count" in error for error in result["errors"])
+    assert any("chain anchor head" in error for error in result["errors"])
 
 
 def test_replay_validation_rejects_tampered_conversation_identity(tmp_path):

@@ -335,7 +335,7 @@ def test_chat_recovers_terminal_empty_context_exhaustion():
     source = Path(chat.__file__).read_text(encoding="utf-8")
     assert 'exhaustion_candidate=response.chat_exhausted' in source
     assert 'confirm_current_chat_exhaustion(' in source
-    assert 'exhaustion_proof and' in source
+    assert 'exhausted_without_contract=bool(' in source
 
 
 def test_p0_4_branch_selection_uses_cli_branch_on_new_run():

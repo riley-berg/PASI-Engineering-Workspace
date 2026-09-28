@@ -127,7 +127,7 @@ def test_p0_4_branch_selection_uses_cli_branch_on_new_run():
 
 
 def test_executor_feeds_failures_back_into_bounded_repair_prompt():
-    runner = Path(__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
+    runner = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
     assert 'MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))' in runner
     assert 'PREVIOUS EXECUTION FEEDBACK:' in runner
     assert 'cleanup_failed_attempt(root)' in runner

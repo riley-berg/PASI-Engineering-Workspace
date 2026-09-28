@@ -76,17 +76,29 @@ READBACK="""
 query($id:ID!){
  node(id:$id){
   ... on ProjectV2Item{
-   fieldValues(first:100){
-    nodes{
-     ... on ProjectV2ItemFieldDateValue{field{name} date}
-     ... on ProjectV2ItemFieldIterationValue{field{name} title startDate}
-     ... on ProjectV2ItemFieldSingleSelectValue{field{name} name}
-    }
+   startDate: fieldValueByName(name:"Start date"){
+    ... on ProjectV2ItemFieldDateValue{date}
+   }
+   targetDate: fieldValueByName(name:"Target date"){
+    ... on ProjectV2ItemFieldDateValue{date}
+   }
+   iteration: fieldValueByName(name:"Iteration"){
+    ... on ProjectV2ItemFieldIterationValue{title}
+   }
+   quarter: fieldValueByName(name:"Quarter"){
+    ... on ProjectV2ItemFieldIterationValue{title}
+   }
+   team: fieldValueByName(name:"Team"){
+    ... on ProjectV2ItemFieldSingleSelectValue{name}
+   }
+   status: fieldValueByName(name:"Status"){
+    ... on ProjectV2ItemFieldSingleSelectValue{name}
    }
   }
  }
 }
 """
+
 
 def gql(query, variables):
     req=urllib.request.Request(

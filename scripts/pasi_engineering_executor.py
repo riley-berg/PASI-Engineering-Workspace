@@ -205,5 +205,4 @@ def main():
         print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"]),"repair_attempt":attempt},indent=2))
         return 0
     return 1
-    print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"])},indent=2));return 0
 if __name__=="__main__":raise SystemExit(main())

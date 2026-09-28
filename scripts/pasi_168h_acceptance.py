@@ -23,6 +23,8 @@ HOURS = 168.0
 MAX_TASK_ATTEMPTS = int(os.environ.get("PASI_TASK_MAX_ATTEMPTS", "3"))
 TASK_RETRY_BACKOFF_SECONDS = (15.0, 60.0, 300.0)
 TELEMETRY_INTERVAL_SECONDS = float(os.environ.get("PASI_RESOURCE_SAMPLE_SECONDS", "60"))
+TASK_DISCOVERY_TTL_SECONDS = float(os.environ.get("PASI_TASK_DISCOVERY_TTL_SECONDS", "60"))
+IDLE_POLL_SECONDS = max(0.25, float(os.environ.get("PASI_TASK_IDLE_SLEEP_SECONDS", "2")))
 SRC_ROOT = Path(__file__).resolve().parents[1] / "src"
 if SRC_ROOT.is_dir() and str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
@@ -89,11 +91,39 @@ def tasks_for(phase: Phase) -> tuple[Task, ...]:
     )
 
 
-def all_tasks() -> list[Task]:
-    result: list[Task] = []
-    for phase in schedule():
-        result.extend(tasks_for(phase))
-    return result
+class TaskDiscoveryCache:
+    def __init__(self) -> None:
+        self._entries: dict[int, tuple[float, tuple[Task, ...]]] = {}
+
+    def _load_phase(self, phase: Phase, *, force: bool = False) -> tuple[Task, ...]:
+        now = time.monotonic()
+        cached = self._entries.get(phase.issue)
+        if cached and not force and now - cached[0] < TASK_DISCOVERY_TTL_SECONDS:
+            return cached[1]
+        tasks = tasks_for(phase)
+        self._entries[phase.issue] = (now, tasks)
+        return tasks
+
+    def update_phase_body(self, phase: Phase, body: str) -> None:
+        now = time.monotonic()
+        tasks = tuple(
+            Task(phase, m.group(2), m.group(3).strip(), m.group(1).lower() == "x")
+            for m in TASK_RE.finditer(body)
+        )
+        self._entries[phase.issue] = (now, tasks)
+
+    def all(self, phases: tuple[Phase, ...], *, force: bool = False) -> list[Task]:
+        result: list[Task] = []
+        for phase in phases:
+            result.extend(self._load_phase(phase, force=force))
+        return result
+
+
+_TASK_CACHE = TaskDiscoveryCache()
+
+
+def all_tasks(*, force_refresh: bool = False) -> list[Task]:
+    return _TASK_CACHE.all(schedule(), force=force_refresh)
 
 
 def state_dir() -> Path:
@@ -172,6 +202,7 @@ def mark_checked(task: Task) -> None:
     if count != 1 or updated == body:
         raise RuntimeError(f"could not mark canonical GitHub task {task.task_id} complete")
     github(url, method="PATCH", body=json.dumps({"body": updated}))
+    _TASK_CACHE.update_phase_body(task.phase, updated)
 
 
 def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
@@ -322,15 +353,23 @@ def operation_metrics() -> dict[str, object] | None:
 
 
 def commit_matches_task(worktree: Path, task: Task) -> str | None:
-    code, subject = subprocess.getstatusoutput(
-        f'git -C {shlex.quote(str(worktree))} log -1 --format=%s'
+    result = subprocess.run(
+        ["git", "-C", str(worktree), "log", "-1", "--format=%s"],
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
     )
-    if code != 0 or not subject.startswith(f"pasi: {task.task_id} "):
+    subject = result.stdout.strip()
+    if result.returncode != 0 or not subject.startswith(f"pasi: {task.task_id} "):
         return None
     return git(worktree, "rev-parse", "HEAD")
 
 
 def ensure_evidence_pr(branch: str, run_id: str) -> dict[str, object]:
+    cached = load_run_state().get("evidence_pr")
+    if isinstance(cached, dict) and cached.get("number") and cached.get("url"):
+        return cached
     if not token():
         return {}
     owner = REPO.split("/", 1)[0]
@@ -448,7 +487,7 @@ def main() -> int:
             if not pending:
                 if utcnow() < deadline:
                     telemetry.sample()
-                    time.sleep(15)
+                    time.sleep(IDLE_POLL_SECONDS)
                     continue
                 if p0_4 is not None and not p0_4.checked:
                     evidence_path = state_dir() / "p0.4-evidence.json"
@@ -583,7 +622,7 @@ def main() -> int:
     # The 168-hour gate completes at the elapsed-time boundary even if some
     # later roadmap tasks remain pending. Finalize P0.4 independently so the
     # acceptance result cannot be lost merely because the broader roadmap is incomplete.
-    discovered = all_tasks()
+    discovered = all_tasks(force_refresh=True)
     p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
     if p0_4 is not None and not p0_4.checked:
         evidence_path = state_dir() / "p0.4-evidence.json"

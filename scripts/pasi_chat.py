@@ -184,24 +184,33 @@ def main()->int:
         save(state)
 
     def wait_existing_operation(operation_id:str)->Any:
-        deadline=time.monotonic()+CHAT_RECOVERY_WINDOW_SECONDS
+        recovery_deadline=None
         while True:
-            remaining_recovery=deadline-time.monotonic()
-            if remaining_recovery<=0:
-                preserve_active(operation_id)
-                raise ChatGPTAdapterError("ChatGPT connection recovery window expired while preserving the existing operation")
-            wait_budget=min(a.timeout,remaining_recovery)
             try:
+                wait_budget=a.timeout
+                if recovery_deadline is not None:
+                    remaining_recovery=recovery_deadline-time.monotonic()
+                    if remaining_recovery<=0:
+                        preserve_active(operation_id)
+                        raise ChatGPTAdapterError(
+                            "ChatGPT connection recovery window expired while preserving the existing operation"
+                        )
+                    wait_budget=min(a.timeout,remaining_recovery)
                 result=adapter.wait_for_completion(
                     operation_id,
                     timeout_seconds=wait_budget,
                     cancel_on_timeout=False,
                 )
             except ChatGPTAdapterError:
+                if recovery_deadline is None:
+                    recovery_deadline=time.monotonic()+CHAT_RECOVERY_WINDOW_SECONDS
                 preserve_active(operation_id)
                 # Never reinterpret transport/browser loss as permission to
                 # create a chat. Give the existing operation another chance
                 # after the bridge/controller becomes reachable again.
+                remaining_recovery=recovery_deadline-time.monotonic()
+                if remaining_recovery<=0:
+                    raise
                 try:
                     wait_live(adapter,a.extension_root,min(5,remaining_recovery))
                 except Exception:
@@ -209,12 +218,12 @@ def main()->int:
                 time.sleep(min(CHAT_RECOVERY_POLL_SECONDS,max(0.25,remaining_recovery)))
                 continue
             if result.completion=="timeout":
+                # The operation remains durable and uncancelled. The supervisor
+                # may retry this exact operation later rather than submitting a
+                # duplicate prompt.
+                state["connection_interrupted"]=False
                 preserve_active(operation_id)
-                try:
-                    wait_live(adapter,a.extension_root,min(5,remaining_recovery))
-                except Exception:
-                    pass
-                continue
+                return result
             state["connection_interrupted"]=False
             return result
 

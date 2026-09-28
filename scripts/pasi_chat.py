@@ -154,8 +154,6 @@ def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
         errors.append("evidence chat_url does not match observed_conversation_url")
     if evidence.get("conversation_signature")!=record.get("conversation_signature"):
         errors.append("evidence conversation_signature does not match top-level signature")
-    if evidence.get("captured_at")!=((record.get("exhaustion_evidence") or {}).get("captured_at")):
-        errors.append("evidence capture timestamp is inconsistent")
     if evidence.get("conversation_context_exhausted") is not True:
         errors.append("conversation_context_exhausted evidence is not true")
     if evidence.get("chat_exhausted") is not True:

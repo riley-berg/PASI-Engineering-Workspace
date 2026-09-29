@@ -90,6 +90,20 @@ test('detects only POST ChatGPT generation requests', () => {
   );
   assert.equal(
     source.isGenerationRequest(
+      'https://chatgpt.com/backend-api/f/conversation',
+      {method: 'POST'},
+    ),
+    true,
+  );
+  assert.equal(
+    source.isGenerationRequest(
+      'https://chatgpt.com/backend-api/f/conversation?foo=bar',
+      {method: 'POST'},
+    ),
+    true,
+  );
+  assert.equal(
+    source.isGenerationRequest(
       'https://chatgpt.com/backend-api/files',
       {method: 'POST'},
     ),

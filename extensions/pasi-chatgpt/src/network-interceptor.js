@@ -483,7 +483,15 @@
       }
 
       state.operationEventListener = event => {
-        const detail = event?.detail;
+        let detail = event?.detail;
+        if (typeof detail === 'string') {
+          try {
+            const parsed = JSON.parse(detail);
+            if (parsed && typeof parsed === 'object' && parsed.operationId) {
+              detail = parsed;
+            }
+          } catch (_) {}
+        }
         const operationId =
           typeof detail === 'string' ? detail : detail?.operationId;
         bindOperation(operationId);

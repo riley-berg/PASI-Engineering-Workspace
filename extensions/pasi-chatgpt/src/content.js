@@ -700,12 +700,11 @@
 
   async function bindNetworkOperation(operationId) {
     const value = operationId == null || operationId === '' ? null : String(operationId);
-    if (!value) return false;
 
     let dispatched = false;
     try {
       window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
-        detail: value
+        detail: value || ''
       }));
       dispatched = true;
     } catch (_) {}
@@ -2129,6 +2128,7 @@
       }
       throw error;
     } finally {
+      void bindNetworkOperation(null);
       if (leaseTimerId !== null) {
         clearInterval(leaseTimerId);
         leaseTimerId = null;

@@ -157,7 +157,7 @@
     const op = String(patch.o || "");
     const value = patch.v;
 
-    if (/\\/message\\/content\\/parts\\/0$/.test(path) || /\\/content\\/parts\\/0$/.test(path)) {
+    if (/\/message\/content\/parts\/0$/.test(path) || /\/content\/parts\/0$/.test(path)) {
       if (typeof value === "string") {
         if (op === "append") appendRolling(state, value);
         else if (op === "replace") setResponseText(state, value);

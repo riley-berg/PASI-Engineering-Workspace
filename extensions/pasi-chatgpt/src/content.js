@@ -620,11 +620,14 @@
     return Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
   }
 
-  function assistantResponseEvidence(snapshot, prompt) {
+  function assistantResponseEvidence(snapshot, prompt, baseline = '') {
     if (!snapshot || typeof prompt !== 'string' || !prompt.trim()) return '';
     const matchedUsers = userMessages().filter((node) => userMessageMatchesPrompt(node, prompt));
     if (!matchedUsers.length) return '';
 
+    const baselineFingerprint = typeof baseline === 'string' && baseline.trim()
+      ? fingerprintFromText(baseline)
+      : '';
     const nodes = assistantMessages();
     for (let index = nodes.length - 1; index >= 0; index -= 1) {
       const node = nodes[index];
@@ -632,6 +635,7 @@
       if (!matchedUsers.some((user) => nodeFollows(user, node))) continue;
       const text = extractAssistant(node);
       if (!text) continue;
+      if (baselineFingerprint && fingerprintFromText(text) === baselineFingerprint) continue;
       return text;
     }
     return '';
@@ -1692,7 +1696,8 @@
     let sawGeneration = false;
     const responseEvidence = () => assistantResponseEvidence(
       evidenceContext?.assistantSnapshot,
-      evidenceContext?.prompt
+      evidenceContext?.prompt,
+      baseline
     );
     let generationEndedAt = 0;
     let failureReason = null;

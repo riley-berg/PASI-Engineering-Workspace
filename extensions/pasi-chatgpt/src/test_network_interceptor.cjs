@@ -187,6 +187,47 @@ test('does not intercept unrelated POST traffic', async () => {
   assert.deepEqual(events, []);
 });
 
+test('survives page fetch reassignment after installation', async () => {
+  const events = [];
+  let replacementCalls = 0;
+  const target = {
+    fetch: async () => ({ok: true, status: 200}),
+  };
+  const interceptor = source.createInterceptor({
+    target,
+    emit: event => events.push(event),
+  });
+
+  interceptor.install();
+
+  target.fetch = async () => {
+    replacementCalls += 1;
+    return {
+      ok: true,
+      status: 200,
+      clone() {
+        return {
+          body: {
+            getReader: () => ({
+              read: async () => ({done: true, value: undefined}),
+            }),
+          },
+        };
+      },
+    };
+  };
+
+  const response = await target.fetch(
+    'https://chatgpt.com/backend-api/f/conversation',
+    {method: 'POST'},
+  );
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+  assert.equal(replacementCalls, 1);
+  assert.equal(response.ok, true);
+  assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'COMPLETED']);
+});
+
 test('classifies terminal context exhaustion even when the final SSE line has no newline', async () => {
   const events = [];
   const target = {

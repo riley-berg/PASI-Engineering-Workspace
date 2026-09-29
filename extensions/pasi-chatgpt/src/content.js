@@ -12,7 +12,6 @@
   const DOM_POLL_MS = TIMEOUT_POLICY.domPollMs || 100;
   const CLICK_SETTLE_MS = TIMEOUT_POLICY.clickSettleMs || 250;
   const THINKING_VERIFY_MS = TIMEOUT_POLICY.thinkingVerifyMs || 3000;
-  const RESPONSE_SETTLE_MS = TIMEOUT_POLICY.responseSettleMs || 10;
   const PREVIOUS_RESPONSE_WAIT_MS = 5 * 60 * 1000;
   const GENERATION_START_WAIT_MS = 30 * 1000;
   const MAX_RESPONSE_TEXT_CHARS = 120_000;
@@ -228,43 +227,6 @@
         void processOperation(operation);
       }
     });
-  }
-
-  function armM0RecoveryProbe(operation) {
-    if (operation?.m0_recovery_probe !== true) return;
-    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
-    try {
-      if (sessionStorage.getItem(key) === 'fired') return;
-    } catch (_) {}
-
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (extensionContextInvalidated || activeOperationId !== operation.operation_id) {
-        clearInterval(timer);
-        return;
-      }
-      if (Date.now() - started > TIMEOUTS.generation) {
-        clearInterval(timer);
-        return;
-      }
-      if (!generating()) return;
-      try {
-        if (sessionStorage.getItem(key) === 'fired') {
-          clearInterval(timer);
-          return;
-        }
-      } catch (_) {}
-
-      const trigger = globalThis.PASI_RECOVERY_PROBE?.triggerConnectionLoss;
-      if (typeof trigger !== 'function') return;
-
-      try {
-        sessionStorage.setItem(key, 'fired');
-      } catch (_) {}
-
-      clearInterval(timer);
-      void trigger(operation.operation_id, 'm0_controlled_live_probe');
-    }, 250);
   }
 
   function scheduleImmediatePoll() {
@@ -748,50 +710,6 @@
       if (!known) count += 1;
     }
     return count;
-  }
-
-  function snapshotAssistantMessages() {
-    const nodes = assistantMessages();
-    return {
-      keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
-      nodes: new WeakSet(nodes),
-      count: nodes.length
-    };
-  }
-
-  function assistantNodeIsNew(node, snapshot) {
-    if (!node || !snapshot) return false;
-    const key = node.getAttribute?.('data-message-id');
-    if (key && snapshot.keys.has(key)) return false;
-    return !snapshot.nodes.has(node);
-  }
-
-  function nodeFollows(earlier, later) {
-    if (!earlier || !later || typeof earlier.compareDocumentPosition !== 'function') return false;
-    return Boolean(earlier.compareDocumentPosition(later) & 4);
-  }
-
-  function userMessageMatchesPrompt(node, prompt) {
-    const text = normalize(messageText(node));
-    const { head, tail } = promptFingerprints(prompt);
-    return Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
-  }
-
-  function assistantResponseEvidence(snapshot, prompt) {
-    if (!snapshot || typeof prompt !== 'string' || !prompt.trim()) return '';
-    const matchedUsers = userMessages().filter((node) => userMessageMatchesPrompt(node, prompt));
-    if (!matchedUsers.length) return '';
-
-    const nodes = assistantMessages();
-    for (let index = nodes.length - 1; index >= 0; index -= 1) {
-      const node = nodes[index];
-      if (!assistantNodeIsNew(node, snapshot)) continue;
-      if (!matchedUsers.some((user) => nodeFollows(user, node))) continue;
-      const text = extractAssistant(node);
-      if (!text) continue;
-      return text;
-    }
-    return '';
   }
 
   function captureUiDiagnostics() {
@@ -1670,58 +1588,6 @@
     );
   }
 
-  async function waitForResponse(baseline, completionMarkers = [], evidenceContext = null) {
-    let sawGeneration = false;
-    const responseEvidence = () => assistantResponseEvidence(
-      evidenceContext?.assistantSnapshot,
-      evidenceContext?.prompt
-    );
-    let generationEndedAt = 0;
-    let failureReason = null;
-
-    const response = await waitUntil(() => {
-      // While generation is active, the stop control is the only state needed
-      // for this hot loop. Avoid a full failure-marker DOM scan on every mutation.
-      if (generating()) {
-        sawGeneration = true;
-        generationEndedAt = 0;
-        return null;
-      }
-
-      const detected = detectorState();
-      if (detected.context_exhausted === true) {
-        failureReason = 'CHAT_EXHAUSTED: conversation context is exhausted';
-        return null;
-      }
-      if (
-        detected.context_exhausted !== true &&
-        detected.usage_limited === true
-      ) {
-        failureReason = 'CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited';
-        return null;
-      }
-
-      if (sawGeneration) {
-        if (!generationEndedAt) generationEndedAt = Date.now();
-        if (Date.now() - generationEndedAt < RESPONSE_SETTLE_MS) return null;
-        const responseText = responseEvidence();
-        return responseText && completionMarkersSatisfied(responseText, completionMarkers)
-          ? responseText
-          : null;
-      }
-
-      const responseText = responseEvidence();
-      return completionMarkersSatisfied(responseText, completionMarkers)
-        ? responseText
-        : null;
-    }, TIMEOUTS.generation, DOM_POLL_MS);
-
-    if (failureReason) throw new Error(failureReason);
-    if (response) return response;
-    throw new Error('PASI_NATIVE: ChatGPT generation timed out');
-  }
-
-
   function rememberContextRecovery(operation, error) {
     let stored = null;
     try {
@@ -1984,7 +1850,6 @@
             ? operation.__pasi_baseline_fingerprint
             : fingerprint();
           const promptText = operationPrompt(operation);
-          const assistantSnapshot = snapshotAssistantMessages();
           networkGeneration = await armNetworkGeneration(operation.operation_id);
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
@@ -2084,7 +1949,6 @@
             throw new Error('PASI_NATIVE: response text unavailable; network completion acknowledgement withheld');
           }
 
-          armM0RecoveryProbe(operation);
           const completion = await finishOperation(
             operation.operation_id,
             response,
@@ -2369,14 +2233,11 @@
       composerContainsPrompt,
       userMessages,
       assistantMessages,
-      snapshotAssistantMessages,
-      assistantResponseEvidence,
       conversationSignature,
       operationPrompt,
       findNewChatControl,
       detectorState,
       submitPrompt,
-      waitForResponse,
       armNetworkGeneration,
       disarmNetworkGeneration
     });

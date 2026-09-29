@@ -559,14 +559,27 @@
       throw new Error("PASI_NETWORK: captured generation request has no reusable messages array");
     }
 
-    const message = {
-      id: requestId(),
-      author: {role: "user"},
-      content: {content_type: "text", parts: [String(prompt || "")]},
-      metadata: {}
-    };
     const lastIndex = payload.messages.length - 1;
-    if (lastIndex >= 0 && payload.messages[lastIndex]?.author?.role === "user") {
+    const previous = lastIndex >= 0 && payload.messages[lastIndex]?.author?.role === "user"
+      ? payload.messages[lastIndex]
+      : null;
+    const message = {
+      ...(previous && typeof previous === "object" ? previous : {}),
+      id: requestId(),
+      author: {
+        ...(previous?.author && typeof previous.author === "object" ? previous.author : {}),
+        role: "user"
+      },
+      content: {
+        ...(previous?.content && typeof previous.content === "object" ? previous.content : {}),
+        content_type: "text",
+        parts: [String(prompt || "")]
+      },
+      metadata: {
+        ...(previous?.metadata && typeof previous.metadata === "object" ? previous.metadata : {})
+      }
+    };
+    if (previous) {
       payload.messages[lastIndex] = message;
     } else {
       payload.messages.push(message);

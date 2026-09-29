@@ -80,6 +80,55 @@ async function waitForTerminal(messages, timeoutMs = 2000) {
   return terminalEvent(messages);
 }
 
+test("network actuator scaffold rewrites only the new user turn", () => {
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+    flags: {PASI_NETWORK_INTERCEPTOR_TEST_HOOKS: true},
+  });
+  const api = runtime.sandbox.PASI_NETWORK_INTERCEPTOR_TEST_API;
+  const template = {
+    body: JSON.stringify({
+      action: "next",
+      messages: [{
+        id: "old-user",
+        author: {role: "user", name: "Riley"},
+        content: {content_type: "text", parts: ["old prompt"]},
+        metadata: {client: true},
+      }],
+      conversation_id: "conv-old",
+      parent_message_id: "parent-old",
+      model: "auto",
+    }),
+  };
+  const body = api.buildDirectConversationBody(template, "new prompt", "conv-new", "assistant-new");
+  assert.equal(body.action, "next");
+  assert.equal(body.conversation_id, "conv-new");
+  assert.equal(body.parent_message_id, "assistant-new");
+  assert.equal(body.messages.length, 1);
+  assert.equal(body.messages[0].author.role, "user");
+  assert.equal(body.messages[0].author.name, "Riley");
+  assert.equal(body.messages[0].content.parts[0], "new prompt");
+  assert.notEqual(body.messages[0].id, "old-user");
+});
+
+test("network actuator remains disabled by default", () => {
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+  });
+  runtime.dispatch({
+    source: "pasi-network-controller",
+    target: "pasi-network-interceptor",
+    command: "direct_submit",
+    operation_id: "op-actuator-disabled",
+    prompt: "should not send",
+  });
+  assert.ok(runtime.messages.some((message) =>
+    message.kind === "actuator_unavailable" &&
+    message.operation_id === "op-actuator-disabled" &&
+    message.reason === "feature_disabled"
+  ));
+});
+
 test("network interceptor classifies the live ChatGPT conversation endpoint", () => {
   const runtime = loadInterceptor({
     fetchImpl: async () => new Response("", {status: 200}),

@@ -184,6 +184,9 @@
         ...payload,
         telemetry: payload.telemetry || {},
       });
+      if (trackingState && TERMINAL_EVENTS.has(eventType) && state.activeGeneration === trackingState) {
+        state.activeGeneration = null;
+      }
       return true;
     }
 

@@ -866,3 +866,39 @@ def test_executor_feeds_failures_back_into_bounded_repair_prompt():
     assert 'MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))' in runner
     assert 'PREVIOUS EXECUTION FEEDBACK:' in runner
     assert 'cleanup_failed_attempt(root)' in runner
+def test_ensure_worktree_skips_fetch_for_same_branch(monkeypatch, tmp_path):
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    (worktree / ".git").mkdir()
+
+    calls = []
+
+    def fake_git(cwd: Path, *args: str, **kwargs):
+        calls.append(args)
+        if args[:2] == ("branch", "--show-current"):
+            return "same-branch"
+        if args[:2] == ("status", "--porcelain"):
+            return ""
+        return ""
+
+    monkeypatch.setattr(acceptance, "git", fake_git)
+    acceptance.ensure_worktree(tmp_path, worktree, "same-branch")
+
+    assert ("fetch", "origin", "main") not in calls
+
+
+def test_hint_task_uses_durable_current_task(monkeypatch):
+    from scripts import pasi_168h_acceptance as acceptance
+
+    phase = acceptance.Phase("P0", 108, "Q3-2026", "2026-09-22", "2026-10-04")
+    monkeypatch.setattr(acceptance, "schedule", lambda: (phase,))
+    monkeypatch.setattr(
+        acceptance,
+        "tasks_for",
+        lambda current: (acceptance.Task(current, "P0.8", "Security dependency review", False),),
+    )
+
+    task = acceptance.hinted_task({"current_task": "P0.8"})
+
+    assert task is not None
+    assert task.task_id == "P0.8"

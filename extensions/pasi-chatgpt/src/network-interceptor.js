@@ -30,7 +30,7 @@
 
     let pathname;
     try {
-      pathname = new URL(request.url, target.location?.href || 'https://chatgpt.com').pathname;
+      pathname = new URL(request.url, 'https://chatgpt.com').pathname;
     } catch (_) {
       return false;
     }

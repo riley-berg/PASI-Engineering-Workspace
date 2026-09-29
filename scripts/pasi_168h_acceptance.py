@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -25,7 +26,7 @@ REPO = "th3-st0v3/PASI-Engineering-Workspace"
 ROADMAP_FILE = Path(__file__).resolve().parents[1] / "roadmap" / "p0-p22-168h.json"
 HOURS = 168.0
 MAX_TASK_ATTEMPTS = int(os.environ.get("PASI_TASK_MAX_ATTEMPTS", "3"))
-TASK_RETRY_BACKOFF_SECONDS = (15.0, 60.0, 300.0)
+TASK_RETRY_BACKOFF_SECONDS = tuple(float(value) for value in os.environ.get("PASI_TASK_RETRY_BACKOFF_SECONDS", "1,5,30").split(",") if value.strip()) or (1.0, 5.0, 30.0)
 TELEMETRY_INTERVAL_SECONDS = float(os.environ.get("PASI_RESOURCE_SAMPLE_SECONDS", "60"))
 TASK_DISCOVERY_TTL_SECONDS = float(os.environ.get("PASI_TASK_DISCOVERY_TTL_SECONDS", "60"))
 IDLE_POLL_SECONDS = max(0.25, float(os.environ.get("PASI_TASK_IDLE_SLEEP_SECONDS", "2")))
@@ -117,10 +118,27 @@ class TaskDiscoveryCache:
         self._entries[phase.issue] = (now, tasks)
 
     def all(self, phases: tuple[Phase, ...], *, force: bool = False) -> list[Task]:
-        result: list[Task] = []
+        result: dict[int, tuple[Task, ...]] = {}
+        missing: list[Phase] = []
+        now = time.monotonic()
         for phase in phases:
-            result.extend(self._load_phase(phase, force=force))
-        return result
+            cached = self._entries.get(phase.issue)
+            if cached and not force and now - cached[0] < TASK_DISCOVERY_TTL_SECONDS:
+                result[phase.issue] = cached[1]
+            else:
+                missing.append(phase)
+        if missing:
+            workers = min(8, len(missing))
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=workers,
+                thread_name_prefix="pasi-task-discovery",
+            ) as pool:
+                fetched = list(pool.map(tasks_for, missing))
+            stamped = time.monotonic()
+            for phase, tasks in zip(missing, fetched):
+                self._entries[phase.issue] = (stamped, tasks)
+                result[phase.issue] = tasks
+        return [task for phase in phases for task in result.get(phase.issue, ())]
 
 
 _TASK_CACHE = TaskDiscoveryCache()
@@ -228,31 +246,36 @@ def recover_acceptance_worktree(worktree: Path, *, reason: str) -> None:
 
 
 def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
-    git(root, "fetch", "origin", "main", timeout=120)
     source_ref = os.environ.get("PASI_168H_SOURCE_REF", "HEAD").strip() or "HEAD"
     worktree = worktree.expanduser().resolve()
     worktree.parent.mkdir(parents=True, exist_ok=True)
     if not (worktree / ".git").exists():
+        git(root, "fetch", "origin", "main", timeout=120)
         git(root, "worktree", "add", "-B", branch, str(worktree), source_ref, timeout=120)
+        return
+
+    recover_acceptance_worktree(worktree, reason="ensure_worktree_start")
+    current_branch = git(worktree, "branch", "--show-current")
+    if current_branch == branch:
+        return
+
+    git(root, "fetch", "origin", "main", timeout=120)
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+        cwd=worktree,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        git(worktree, "checkout", branch)
     else:
-        recover_acceptance_worktree(worktree, reason="ensure_worktree_start")
-        if git(worktree, "branch", "--show-current") != branch:
-            result = subprocess.run(
-                ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
-                cwd=worktree,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if result.returncode == 0:
-                git(worktree, "checkout", branch)
-            else:
-                # A reusable acceptance worktree may still point at an older
-                # timestamped branch. New acceptance runs must always start from
-                # the freshly fetched canonical origin/main.
-                git(worktree, "checkout", "--detach", "origin/main")
-                git(worktree, "checkout", "-b", branch)
-        recover_acceptance_worktree(worktree, reason="ensure_worktree_end")
+        # A reusable acceptance worktree may still point at an older
+        # timestamped branch. New acceptance runs must always start from
+        # the freshly fetched canonical origin/main.
+        git(worktree, "checkout", "--detach", "origin/main")
+        git(worktree, "checkout", "-b", branch)
+    recover_acceptance_worktree(worktree, reason="ensure_worktree_end")
 
 
 def recover_task_worktree(worktree: Path, task: Task) -> None:
@@ -504,6 +527,26 @@ def reconcile_committed_task(task: Task, worktree: Path, branch: str, run_id: st
     return evidence
 
 
+def hinted_task(state: dict[str, object]) -> Task | None:
+    """Resolve durable current/next task state with one canonical issue read."""
+    next_hint = state.get("next_task")
+    hint_id = ""
+    if isinstance(next_hint, dict):
+        hint_id = str(next_hint.get("task_id") or "").strip()
+    if not hint_id:
+        hint_id = str(state.get("current_task") or "").strip()
+    if not re.fullmatch(r"P[0-9]+\.[0-9]+", hint_id) or hint_id == "P0.4":
+        return None
+    phase_id = hint_id.split(".", 1)[0]
+    phase = next((item for item in schedule() if item.id == phase_id), None)
+    if phase is None:
+        return None
+    for task in tasks_for(phase):
+        if task.task_id == hint_id:
+            return task if not task.checked else None
+    return None
+
+
 def task_history_context(state: dict[str, object]) -> str:
     recent = state.get("recent_tasks", [])
     if not isinstance(recent, list) or not recent:
@@ -597,9 +640,22 @@ def main() -> int:
         while utcnow() < deadline:
             record_new_chat_audit(state, required=True)
             write_state(state)
-            discovered = all_tasks()
+            hinted = hinted_task(state)
+            if hinted is not None:
+                discovered = [hinted]
+                emit({
+                    "event": "task_discovery_fast_path",
+                    "at": utcnow().isoformat(),
+                    "task_id": hinted.task_id,
+                    "source": "durable_next_or_current_task",
+                })
+            else:
+                discovered = all_tasks()
             p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
             pending = [task for task in discovered if not task.checked and task.task_id != "P0.4"]
+            if hinted is not None and not pending:
+                discovered = all_tasks()
+                pending = [task for task in discovered if not task.checked and task.task_id != "P0.4"]
             if not pending:
                 if utcnow() < deadline:
                     telemetry.sample()

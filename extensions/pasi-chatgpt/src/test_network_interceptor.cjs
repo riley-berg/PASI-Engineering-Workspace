@@ -371,9 +371,13 @@ test('binds operation IDs from lifecycle events', () => {
   const interceptor = source.createInterceptor({target});
   assert.equal(interceptor.bindOperationEventListener(), true);
   listeners.get('PASI_NETWORK_BIND_OPERATION')({
-    detail: JSON.stringify({operationId: 'op-shadow-1'}),
+    detail: 'op-shadow-1',
   });
   assert.equal(interceptor.health().currentOperationId, 'op-shadow-1');
+  listeners.get('PASI_NETWORK_BIND_OPERATION')({
+    detail: JSON.stringify({operationId: 'op-shadow-2'}),
+  });
+  assert.equal(interceptor.health().currentOperationId, 'op-shadow-2');
   assert.equal(interceptor.bindOperationEventListener(), true);
 });
 

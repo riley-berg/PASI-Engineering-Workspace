@@ -160,6 +160,9 @@
 
     if (['completed', 'interrupted', 'context_exhausted', 'usage_limited', 'auth_required', 'provider_error', 'unknown_failure'].includes(state)) {
       resolveNetworkWaiter(networkTerminalWaiters, operationId, data);
+      setTimeout(() => {
+        if (networkGenerationStates.get(operationId) === data) networkGenerationStates.delete(operationId);
+      }, 1000);
       void reportObservation('chatgpt_network_generation', {
         operation_id: operationId,
         state,

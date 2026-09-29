@@ -352,7 +352,8 @@ test('stall detection produces one terminal event and clears its timer', async (
   releaseRead({done: true, value: undefined});
   for (let i = 0; i < 12; i += 1) await Promise.resolve();
 
-  assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'INTERRUPTED']);
+  assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'STALL_DETECTED', 'COMPLETED']);
+  assert.equal(events[1].reason, 'GENERATION_STALLED');
   assert.equal(timers.size(), 1);
 
   interceptor.uninstall();

@@ -136,6 +136,53 @@ test('parses complete SSE lines and preserves an incomplete tail', () => {
   assert.equal(tail, 'data: {"ok":2}');
 });
 
+test('extracts the correlated assistant response from cumulative and delta SSE payloads', () => {
+  assert.deepEqual(
+    source.extractAssistantResponseText({
+      message: {
+        author: {role: 'assistant'},
+        content: {parts: ['Hello ', 'network']}
+      }
+    }),
+    {mode: 'snapshot', text: 'Hello network'}
+  );
+  assert.deepEqual(
+    source.extractAssistantResponseText({delta: 'response'}),
+    {mode: 'delta', text: 'response'}
+  );
+});
+
+test('emits correlated response text on terminal network completion', async () => {
+  const events = [];
+  const target = {
+    fetch: async () =>
+      fakeResponse([
+        'data: {"message":{"author":{"role":"assistant"},"content":{"parts":["NETWORK_CORRELATION_"]}}}\n\n',
+        'data: {"message":{"author":{"role":"assistant"},"content":{"parts":["NETWORK_CORRELATION_OK_2026"]}}}\n\n',
+        'data: [DONE]\n\n'
+      ]),
+  };
+  const interceptor = source.createInterceptor({
+    target,
+    emit: event => events.push(event),
+    setIntervalImpl: () => 1,
+    clearIntervalImpl: () => {},
+  });
+
+  interceptor.bindOperation('op-network-response');
+  interceptor.install();
+  await target.fetch(
+    'https://chatgpt.com/backend-api/f/conversation',
+    {method: 'POST'},
+  );
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+  assert.equal(events[0].operationId, 'op-network-response');
+  assert.equal(events.at(-1).eventType, 'COMPLETED');
+  assert.equal(events.at(-1).operationId, 'op-network-response');
+  assert.equal(events.at(-1).responseText, 'NETWORK_CORRELATION_OK_2026');
+});
+
 test('observes a generation stream without consuming the original response', async () => {
   const events = [];
   const target = {

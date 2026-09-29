@@ -235,6 +235,25 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     if git(worktree, "status", "--porcelain", check=False):
         raise RuntimeError("acceptance worktree is not clean")
 
+def recover_task_worktree(worktree: Path, task: Task) -> None:
+    """Discard only stale, non-committed state from the dedicated acceptance worktree."""
+    status = git(worktree, "status", "--porcelain", "--untracked-files=all", check=False)
+    if not status:
+        return
+    emit({
+        "event": "acceptance_worktree_recovered",
+        "at": utcnow().isoformat(),
+        "task_id": task.task_id,
+        "status_before": status,
+    })
+    git(worktree, "reset", "--hard", "HEAD")
+    git(worktree, "clean", "-fd")
+    remaining = git(worktree, "status", "--porcelain", "--untracked-files=all", check=False)
+    if remaining:
+        raise RuntimeError(
+            f"acceptance worktree could not be recovered for {task.task_id}: {remaining}"
+        )
+
 
 def executor() -> list[str]:
     raw = os.environ.get("PASI_ENGINEERING_EXECUTOR_CMD", "").strip()
@@ -278,6 +297,7 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
         }, indent=2) + "\n",
         encoding="utf-8",
     )
+    recover_task_worktree(worktree, task)
     before = git(worktree, "rev-parse", "HEAD")
     env = os.environ.copy()
     previous = load_run_state().get("previous_task_context", "")

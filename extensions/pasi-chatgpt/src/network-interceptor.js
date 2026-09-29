@@ -25,7 +25,7 @@
 
   function isGenerationRequest(input, init, endpointMarker = ENDPOINT_MARKER) {
     const request = requestDetails(input, init);
-    return request.method === 'POST' && request.url.includes(endpointMarker);
+    return request.method === 'POST' && request.url.split('?')[0].replace(/\/$/, '') === endpointMarker;
   }
 
   function classifyHttpStatus(status) {

@@ -6,6 +6,7 @@ import vm from "node:vm";
 const repoRoot = new URL("../", import.meta.url).pathname;
 const interceptorPath = new URL("../extensions/pasi-chatgpt/src/network_interceptor.js", import.meta.url).pathname;
 const contentPath = new URL("../extensions/pasi-chatgpt/src/content.js", import.meta.url).pathname;
+const recoveryPath = new URL("../extensions/pasi-chatgpt/src/recovery.js", import.meta.url).pathname;
 
 function loadInterceptor({fetchImpl, flags = {}} = {}) {
   const messages = [];
@@ -238,6 +239,16 @@ test("network interceptor is idempotent and has no DOM dependency", () => {
   const firstFetch = runtime.window.fetch;
   vm.runInNewContext(fs.readFileSync(interceptorPath, "utf8"), runtime.sandbox, {filename: interceptorPath});
   assert.strictEqual(runtime.window.fetch, firstFetch);
+});
+
+test("recovery prefers network signals and keeps DOM recovery as an explicit fallback", () => {
+  const source = fs.readFileSync(recoveryPath, "utf8");
+  assert.match(source, /network_recovery_enabled/);
+  assert.match(source, /network_recovery_unavailable/);
+  assert.match(source, /async function inspectNetworkOnly/);
+  assert.match(source, /recovery_mode: 'network_preferred'/);
+  assert.match(source, /verification_source: 'network_interceptor'/);
+  assert.match(source, /recovery_action: 'legacy_dom_fallback'/);
 });
 
 test("DOM actuator retains bounded submission strategies while network lifecycle is independent", () => {

@@ -80,6 +80,40 @@ test("network interceptor classifies the live ChatGPT conversation endpoint", ()
   assert.equal(api.classifyFailure("please log in to continue", 401), "auth_required");
 });
 
+test("network interceptor does not await observer stream before returning fetch response", async () => {
+  let release;
+  const source = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('data: {"message":{"author":{"role":"assistant"},"content":{"parts":["PASI_NONBLOCK"]}}}\n\n'));
+      release = () => controller.close();
+    },
+  });
+
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response(source, {
+      status: 200,
+      headers: {"content-type": "text/event-stream"},
+    }),
+  });
+
+  runtime.dispatch({
+    source: "pasi-network-controller",
+    target: "pasi-network-interceptor",
+    command: "arm",
+    operation_id: "op-nonblocking-1",
+  });
+
+  const startedAt = Date.now();
+  const response = await runtime.window.fetch("https://chatgpt.com/backend-api/f/conversation", {
+    method: "POST",
+  });
+  const elapsed = Date.now() - startedAt;
+
+  assert.ok(response instanceof Response);
+  assert.ok(elapsed < 500, "fetch response was delayed " + elapsed + "ms");
+  release();
+});
+
 test("network interceptor observes SSE without consuming the page response", async () => {
   const frames = [
     'data: {"message":{"author":{"role":"assistant"},"content":{"parts":[""]},"conversation_id":"conv-1"}}\n\n',
@@ -163,6 +197,8 @@ test("network interceptor is idempotent and has no DOM dependency", () => {
   assert.doesNotMatch(source, /MutationObserver/);
   assert.doesNotMatch(source, /querySelector/);
   assert.doesNotMatch(source, /getComputedStyle/);
+  assert.match(source, /void observeResponse\(response, actualMeta\)/);
+  assert.doesNotMatch(source, /await observeResponse\(response, actualMeta\)/);
 
   const runtime = loadInterceptor({
     fetchImpl: async () => new Response("", {status: 200}),

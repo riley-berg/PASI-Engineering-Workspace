@@ -46,6 +46,8 @@ def test_network_interceptor_phase1_contract():
     assert "chatgpt_network_dom_shadow" in controller
     assert "markNetworkDomCompletion" in controller
     assert "assistantResponseEvidence(snapshot, prompt, baseline = '')" in controller
+    assert "const texts = new Set();" in controller
+    assert "snapshot.texts?.has(normalizedText)" in controller
     assert "baselineFingerprint" in controller
     assert "dom_completed" in controller
     assert "dom_response_available" in controller

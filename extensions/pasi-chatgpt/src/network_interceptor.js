@@ -293,7 +293,7 @@
       doneMarker: false,
       failureKind: null,
       conversationId: null,
-      startedAt: now(),
+      startedAt: Number(meta.request_started_at_ms || 0) || now(),
       lastProgressAt: now(),
       stallReportedAt: 0,
       terminal: false
@@ -380,6 +380,7 @@
       request_id: meta.request_id,
       url: meta.url,
       method: meta.method,
+      request_started_at_ms: Number(meta.request_started_at_ms || 0) || now(),
       http_status: Number(response?.status || 0),
       responseObservedAtMs: now()
     });
@@ -481,7 +482,8 @@
     return {
       ...classified,
       url: classified.url?.toString() || "",
-      method: String(init?.method || input?.method || "GET").toUpperCase()
+      method: String(init?.method || input?.method || "GET").toUpperCase(),
+      generation_candidate: classified.likely_generation === true
     };
   }
 
@@ -496,15 +498,19 @@
       const meta = makeMeta(args[0], args[1]);
       let shouldCandidate = meta.method_post && (meta.likely_generation || meta.likely_backend);
       let currentRequestId = null;
+      let requestStartedAtMs = null;
 
       if (shouldCandidate) {
         currentRequestId = requestId();
+        requestStartedAtMs = now();
         post("event", {
           operation_id: armed.operation_id,
           request_id: currentRequestId,
           state: "request",
           url: meta.url,
-          method: meta.method
+          method: meta.method,
+          generation_candidate: meta.generation_candidate === true,
+          request_started_at_ms: requestStartedAtMs
         });
       }
 
@@ -531,7 +537,8 @@
         const actualMeta = {
           ...meta,
           operation_id: armed.operation_id,
-          request_id: currentRequestId
+          request_id: currentRequestId,
+          request_started_at_ms: requestStartedAtMs
         };
         if (shouldTrack(actualMeta, response)) {
           void observeResponse(response, actualMeta).catch((error) => {
@@ -607,10 +614,11 @@
       post("event", { ...request, state: "request" });
 
       const startedAt = now();
+      request.request_started_at_ms = startedAt;
       const onLoad = () => {
         const state = streamState({
           ...request,
-          startedAt,
+          request_started_at_ms: startedAt,
           responseObservedAtMs: now(),
           http_status: Number(this.status || 0)
         });

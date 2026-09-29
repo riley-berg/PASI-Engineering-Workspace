@@ -22,6 +22,24 @@ from scripts.pasi_timeout_policy import load_timeout_policy
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_RESPONSE_TEXT_CHARS = 120_000
+
+def completion_markers_satisfied(response_text: object, markers: object) -> bool:
+    if not isinstance(response_text, str) or not response_text.strip():
+        return False
+    if not isinstance(markers, list):
+        return True
+    configured = [
+        marker.strip()
+        for marker in markers
+        if isinstance(marker, str) and marker.strip()
+    ]
+    if not configured:
+        return True
+    lines = [line.strip() for line in response_text.splitlines()]
+    return any(
+        any(line == marker or line.startswith(marker + ":") for line in lines)
+        for marker in configured
+    )
 MAX_TRANSIENT_FAILURE_RETRIES = 3
 TIMEOUT_POLICY = load_timeout_policy()
 CLAIM_LEASE_SECONDS = TIMEOUT_POLICY["bridge_claim_lease_seconds"]
@@ -1855,15 +1873,29 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if existing_operation.get("operation_type") == "prompt":
+            completion_markers = existing_operation.get("completion_markers")
             persisted_response_verified = (
                 existing_operation.get("response_text_available") is True
                 and isinstance(existing_operation.get("response_text"), str)
                 and bool(str(existing_operation.get("response_text")).strip())
             )
+            candidate_response = (
+                response_text
+                if incoming_response_verified
+                else existing_operation.get("response_text")
+            )
             if not incoming_response_verified and not persisted_response_verified:
                 self._send_json(
                     {
                         "error": "Prompt completion requires verified nonblank response_text."
+                    },
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            if not completion_markers_satisfied(candidate_response, completion_markers):
+                self._send_json(
+                    {
+                        "error": "Prompt completion response does not satisfy the operation completion markers."
                     },
                     HTTPStatus.CONFLICT,
                 )

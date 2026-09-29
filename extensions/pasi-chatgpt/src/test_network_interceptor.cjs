@@ -311,7 +311,7 @@ test('classifies a dropped generation stream as a retryable transport interrupti
   assert.equal(events.at(-1).classification, 'retryable_transport_failure');
 });
 
-test('stall detection produces one terminal event and clears its timer', async () => {
+test('stall detection is non-terminal and clears its timer after uninstall', async () => {
   const events = [];
   const timers = timerHarness();
   let clock = 0;
@@ -358,6 +358,23 @@ test('stall detection produces one terminal event and clears its timer', async (
 
   interceptor.uninstall();
   assert.equal(timers.size(), 0);
+});
+
+test('binds operation IDs from lifecycle events', () => {
+  const listeners = new Map();
+  const target = {
+    fetch: async () => ({ok: true, status: 200}),
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+  };
+  const interceptor = source.createInterceptor({target});
+  assert.equal(interceptor.bindOperationEventListener(), true);
+  listeners.get('PASI_NETWORK_BIND_OPERATION')({
+    detail: JSON.stringify({operationId: 'op-shadow-1'}),
+  });
+  assert.equal(interceptor.health().currentOperationId, 'op-shadow-1');
+  assert.equal(interceptor.bindOperationEventListener(), true);
 });
 
 test('installation is idempotent and health exposes operation state', () => {

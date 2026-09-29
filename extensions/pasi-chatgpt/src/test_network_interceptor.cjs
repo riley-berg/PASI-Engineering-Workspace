@@ -221,7 +221,7 @@ test('survives page fetch reassignment after installation', async () => {
   };
 
   target.fetch = replacement;
-  timers.tick();
+  assert.notEqual(target.fetch, replacement);
 
   const response = await target.fetch(
     'https://chatgpt.com/backend-api/f/conversation',
@@ -375,6 +375,9 @@ test('installation is idempotent and health exposes operation state', () => {
     installed: true,
     trackingRequestId: null,
     currentOperationId: 'op-9',
+    fetchWrapped: true,
+    fetchAccessorInstalled: true,
+    fetchFunctionName: 'interceptedFetch',
   });
 });
 

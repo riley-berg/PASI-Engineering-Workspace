@@ -39,6 +39,9 @@ def test_network_interceptor_phase1_contract():
     assert "chatgpt_network_generation_terminal" in controller
     assert "chatgpt_network_generation_stalled" in controller
     assert "chatgpt_network_dom_shadow" in controller
+    assert "markNetworkDomCompletion" in controller
+    assert "dom_completed" in controller
+    assert "dom_response_available" in controller
     assert "network_shadow: true" in controller
 
     syntax = subprocess.run(

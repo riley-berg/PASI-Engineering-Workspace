@@ -1,4 +1,3 @@
-try { importScripts("vendor/typescript.js"); } catch (_) {}
 importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';

@@ -207,6 +207,7 @@ test("network interceptor observes SSE without consuming the page response", asy
 
   const terminal = await waitForTerminal(runtime.messages);
   assert.equal(terminal?.state, "completed");
+  assert.ok(runtime.messages.some((message) => message?.kind === "event" && message.state === "progress"));
   assert.equal(terminal?.operation_id, "op-network-1");
   assert.equal(terminal?.conversation_id, "conv-1");
   assert.equal(terminal?.response_text, "PASI_NETWORK_OK");
@@ -263,6 +264,8 @@ test("recovery prefers network signals and keeps DOM recovery as an explicit fal
   assert.match(source, /recovery_mode: 'network_preferred'/);
   assert.match(source, /verification_source: 'network_interceptor'/);
   assert.match(source, /recovery_action: 'legacy_dom_fallback'/);
+  assert.match(source, /network_stall_cleared/);
+  assert.match(source, /state === 'progress'/);
 });
 
 test("DOM actuator retains bounded submission strategies while network lifecycle is independent", () => {

@@ -9,6 +9,7 @@
   ]);
   const ENDPOINT_MARKER = ENDPOINT_MARKERS[0];
   const DEFAULT_STALL_THRESHOLD_MS = 8000;
+  const DEFAULT_FETCH_RECONCILE_INTERVAL_MS = 50;
   const TERMINAL_EVENTS = new Set(['COMPLETED', 'INTERRUPTED', 'FAILED']);
 
   function requestDetails(input, init) {
@@ -131,7 +132,11 @@
         ? options.stallThresholdMs
         : DEFAULT_STALL_THRESHOLD_MS;
     const now = typeof options.now === 'function' ? options.now : Date.now;
-    const setIntervalImpl = options.setIntervalImpl || setInterval;
+    const setIntervalImpl = options.setIntervalImpl || ((fn, delay) => {
+      const timer = setInterval(fn, delay);
+      if (typeof timer?.unref === 'function') timer.unref();
+      return timer;
+    });
     const clearIntervalImpl = options.clearIntervalImpl || clearInterval;
     const randomId =
       typeof options.randomId === 'function'
@@ -146,8 +151,7 @@
     const state = {
       installed: false,
       originalFetch: null,
-      fetchDescriptor: null,
-      fetchAccessorInstalled: false,
+      fetchReconcileIntervalId: null,
       currentOperationId: null,
       activeGeneration: null,
       requestCounter: 0,
@@ -343,53 +347,47 @@
       };
     }
 
+    function reconcileFetch() {
+      if (!state.installed || !target) return false;
+      const currentFetch = target.fetch;
+      if (currentFetch === interceptedFetch) return false;
+      if (typeof currentFetch !== 'function') return false;
+
+      state.originalFetch = currentFetch;
+      try {
+        target.fetch = interceptedFetch;
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
     function install() {
       if (state.installed) return false;
       if (!target || typeof target.fetch !== 'function') {
         throw new Error('PASI network interceptor requires fetch');
       }
 
-      const descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
-      state.fetchDescriptor = descriptor || null;
-      const enumerable = descriptor?.enumerable ?? true;
-
       state.originalFetch = target.fetch;
-      if (descriptor?.configurable !== false) {
-        Object.defineProperty(target, 'fetch', {
-          configurable: true,
-          enumerable,
-          get() {
-            return interceptedFetch;
-          },
-          set(nextFetch) {
-            if (typeof nextFetch !== 'function') {
-              state.originalFetch = nextFetch;
-              return;
-            }
-            if (nextFetch !== interceptedFetch) state.originalFetch = nextFetch;
-          },
-        });
-        state.fetchAccessorInstalled = true;
-      } else {
-        target.fetch = interceptedFetch;
-      }
-
+      target.fetch = interceptedFetch;
       state.installed = true;
+      state.fetchReconcileIntervalId = setIntervalImpl(
+        reconcileFetch,
+        DEFAULT_FETCH_RECONCILE_INTERVAL_MS,
+      );
       return true;
     }
 
     function uninstall() {
       if (!state.installed) return false;
 
-      if (state.fetchAccessorInstalled && state.fetchDescriptor) {
-        Object.defineProperty(target, 'fetch', state.fetchDescriptor);
-      } else {
-        target.fetch = state.originalFetch;
+      if (state.fetchReconcileIntervalId !== null) {
+        clearIntervalImpl(state.fetchReconcileIntervalId);
+        state.fetchReconcileIntervalId = null;
       }
 
+      target.fetch = state.originalFetch;
       state.originalFetch = null;
-      state.fetchDescriptor = null;
-      state.fetchAccessorInstalled = false;
       state.installed = false;
       return true;
     }

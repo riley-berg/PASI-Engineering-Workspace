@@ -110,10 +110,11 @@
   }
 
   function extractAssistantResponseText(payload) {
-    const role = String(payload?.message?.author?.role || '').toLowerCase();
+    const message = payload?.message || payload?.v?.message;
+    const role = String(message?.author?.role || '').toLowerCase();
     if (role && role !== 'assistant') return null;
 
-    const parts = payload?.message?.content?.parts;
+    const parts = message?.content?.parts;
     if (Array.isArray(parts)) {
       const textParts = parts
         .map(part => {
@@ -131,10 +132,10 @@
     }
 
     const messageText =
-      typeof payload?.message?.content?.text === 'string'
-        ? payload.message.content.text
-        : typeof payload?.message?.content === 'string'
-          ? payload.message.content
+      typeof message?.content?.text === 'string'
+        ? message.content.text
+        : typeof message?.content === 'string'
+          ? message.content
           : null;
     if (messageText) {
       return {
@@ -148,6 +149,14 @@
     }
     if (typeof payload?.text === 'string' && payload.text) {
       return {mode: 'delta', text: payload.text};
+    }
+
+    if (
+      typeof payload?.p === 'string' &&
+      typeof payload?.v === 'string' &&
+      /\/message\/content\/parts(?:\/0)?$/.test(payload.p)
+    ) {
+      return {mode: 'delta', text: payload.v};
     }
 
     return null;

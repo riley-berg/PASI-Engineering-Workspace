@@ -114,6 +114,38 @@ test("network interceptor does not await observer stream before returning fetch 
   release();
 });
 
+test("ordinary assistant text containing context-limit language is not a context-exhaustion signal", () => {
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+    flags: {PASI_NETWORK_INTERCEPTOR_TEST_HOOKS: true},
+  });
+  const api = runtime.sandbox.PASI_NETWORK_INTERCEPTOR_TEST_API;
+  const state = {responseText: "", diagnostic: "", assistantSeen: false, doneMarker: false, failureKind: null, conversationId: null};
+  api.inspectPayload(state, {
+    message: {
+      author: {role: "assistant"},
+      content: {parts: ["For more information, start a new chat to continue reading about conversation limits."]},
+      status: "finished_successfully",
+    },
+  });
+  assert.equal(state.failureKind, null);
+  assert.equal(state.doneMarker, true);
+});
+
+test("Responses-style completion is a network terminal signal", () => {
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+    flags: {PASI_NETWORK_INTERCEPTOR_TEST_HOOKS: true},
+  });
+  const api = runtime.sandbox.PASI_NETWORK_INTERCEPTOR_TEST_API;
+  const state = {responseText: "", diagnostic: "", assistantSeen: false, doneMarker: false, failureKind: null, conversationId: null};
+  api.inspectPayload(state, {type: "response.output_text.delta", delta: "network response"});
+  api.inspectPayload(state, {type: "response.completed", response: {id: "resp-1"}});
+  assert.equal(state.responseText, "network response");
+  assert.equal(state.doneMarker, true);
+  assert.equal(state.conversationId, "resp-1");
+});
+
 test("network interceptor observes SSE without consuming the page response", async () => {
   const frames = [
     'data: {"message":{"author":{"role":"assistant"},"content":{"parts":[""]},"conversation_id":"conv-1"}}\n\n',
@@ -217,5 +249,7 @@ test("DOM actuator retains bounded submission strategies while network lifecycle
   assert.match(source, /form\.requestSubmit/);
   assert.match(source, /nativeMouseActivate/);
   assert.match(source, /dispatchEnter/);
-  assert.match(source, /waitForResponse/);
+  const promptPath = source.slice(source.indexOf("case 'prompt':"), source.indexOf("default: throw new Error"));
+  assert.match(promptPath, /networkGeneration\.terminalPromise/);
+  assert.doesNotMatch(promptPath, /waitForResponse\(/);
 });

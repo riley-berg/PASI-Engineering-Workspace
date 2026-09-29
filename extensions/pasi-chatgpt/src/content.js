@@ -56,6 +56,161 @@
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
 
+  let networkInterceptorReady = false;
+  let networkInterceptorVersion = null;
+  const networkStartedWaiters = new Map();
+  const networkTerminalWaiters = new Map();
+  const networkGenerationStates = new Map();
+
+  function postNetworkControllerCommand(command, operationId = null) {
+    try {
+      window.postMessage({
+        source: 'pasi-network-controller',
+        target: 'pasi-network-interceptor',
+        command: String(command || ''),
+        operation_id: operationId == null ? null : String(operationId)
+      }, location.origin);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function networkTimeoutPromise(timeoutMs, message) {
+    return new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+  }
+
+  async function ensureNetworkInterceptorReady(timeoutMs = 2000) {
+    if (networkInterceptorReady) return true;
+    const started = Date.now();
+    postNetworkControllerCommand('ping');
+    while (!networkInterceptorReady && Date.now() - started < timeoutMs) {
+      await sleep(10);
+      postNetworkControllerCommand('ping');
+    }
+    if (!networkInterceptorReady) {
+      throw new Error('PASI_NETWORK: interceptor is not installed or responsive');
+    }
+    return true;
+  }
+
+  function resolveNetworkWaiter(map, operationId, value) {
+    const waiter = map.get(operationId);
+    if (!waiter) return;
+    map.delete(operationId);
+    try { waiter(value); } catch (_) {}
+  }
+
+  function rejectNetworkWaiter(map, operationId, error) {
+    const waiter = map.get(operationId);
+    if (!waiter) return;
+    map.delete(operationId);
+    try { error ? waiter(Promise.reject(error)) : waiter(null); } catch (_) {}
+  }
+
+  function handleNetworkInterceptorMessage(event) {
+    if (event?.source !== window) return;
+    const data = event?.data;
+    if (!data || data.source !== 'pasi-network-interceptor') return;
+    if (data.version !== 'pasi-network-v1') return;
+
+    if (data.kind === 'ready') {
+      networkInterceptorReady = true;
+      networkInterceptorVersion = String(data.interceptor_version || data.version || '');
+      return;
+    }
+    if (data.kind !== 'event') return;
+
+    const operationId = typeof data.operation_id === 'string' ? data.operation_id : '';
+    if (!operationId) return;
+
+    const state = String(data.state || '');
+    networkGenerationStates.set(operationId, data);
+
+    if (state === 'request' || state === 'started') {
+      resolveNetworkWaiter(networkStartedWaiters, operationId, data);
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state,
+        request_id: data.request_id || null,
+        url: String(data.url || '').slice(0, 2000),
+        http_status: Number(data.http_status || 0),
+        captured_at: data.captured_at || new Date().toISOString(),
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+      return;
+    }
+
+    if (state === 'stalled') {
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state: 'stalled',
+        request_id: data.request_id || null,
+        reason: data.reason || 'no_stream_progress',
+        last_progress_at_ms: Number(data.last_progress_at_ms || 0),
+        stalled_at_ms: Number(data.stalled_at_ms || Date.now()),
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+      return;
+    }
+
+    if (['completed', 'interrupted', 'context_exhausted', 'usage_limited', 'auth_required', 'provider_error', 'unknown_failure'].includes(state)) {
+      resolveNetworkWaiter(networkTerminalWaiters, operationId, data);
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state,
+        reason: data.reason || null,
+        request_id: data.request_id || null,
+        response_text_available: data.response_text_available === true,
+        response_text_chars: typeof data.response_text === 'string' ? data.response_text.length : 0,
+        conversation_id: data.conversation_id || null,
+        request_started_at_ms: Number(data.request_started_at_ms || 0) || null,
+        response_observed_at_ms: Number(data.response_observed_at_ms || 0) || null,
+        completed_at_ms: Number(data.completed_at_ms || 0) || null,
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+    }
+  }
+
+  window.addEventListener('message', handleNetworkInterceptorMessage);
+
+  async function armNetworkGeneration(operationId) {
+    const id = String(operationId || '').trim();
+    if (!id) throw new Error('PASI_NETWORK: operation id is required to arm the interceptor');
+
+    await ensureNetworkInterceptorReady();
+
+    let startedResolve;
+    let terminalResolve;
+    const startedPromise = new Promise((resolve) => { startedResolve = resolve; });
+    const terminalPromise = new Promise((resolve) => { terminalResolve = resolve; });
+    networkStartedWaiters.set(id, startedResolve);
+    networkTerminalWaiters.set(id, terminalResolve);
+
+    postNetworkControllerCommand('arm', id);
+
+    return {
+      startedPromise,
+      terminalPromise: Promise.race([
+        terminalPromise,
+        networkTimeoutPromise(TIMEOUTS.generation, 'PASI_NETWORK: ChatGPT generation timed out at transport layer')
+      ])
+    };
+  }
+
+  function disarmNetworkGeneration(operationId) {
+    const id = String(operationId || '').trim();
+    if (!id) return;
+    networkStartedWaiters.delete(id);
+    networkTerminalWaiters.delete(id);
+    postNetworkControllerCommand('disarm', id);
+  }
+
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
     immediateOperationQueued = true;
@@ -774,6 +929,8 @@
         composer_present: composerPresent,
         native_controller: true,
         runtime_error_telemetry: true,
+        network_interceptor: networkInterceptorReady ? 'healthy' : 'unavailable',
+        network_interceptor_version: networkInterceptorVersion,
         active_operation_id: activeOperationId
       }, 2000);
 
@@ -1303,6 +1460,7 @@
 
 
   async function submitPrompt(expected, options = {}) {
+    const networkStartedPromise = options.networkStartedPromise || null;
     const fastPath = options.fastPath === true;
     const handoffBox = options.readyBox && options.readyBox.isConnected === true
       ? options.readyBox
@@ -1421,6 +1579,30 @@
       const injectedAtMs = Date.now();
       const fired = await strategies[attempt - 1](readyBox, button);
       if (!fired) continue;
+
+      let networkAck = null;
+      if (networkStartedPromise) {
+        networkAck = await Promise.race([
+          networkStartedPromise,
+          sleep(SUBMISSION_ACK_MS).then(() => null)
+        ]).catch(() => null);
+      }
+
+      if (networkAck) {
+        return {
+          via: 'network_verified',
+          attempt,
+          verified: true,
+          timing: {
+            injected_at_ms: injectedAtMs,
+            ack_at_ms: Date.now(),
+            network_ack_at_ms: Number(networkAck.captured_at ? Date.parse(networkAck.captured_at) : Date.now()) || Date.now(),
+            user_messages_added: countNewUserMessages(userMessages(), snapshot),
+            ack_verified: true,
+            submission_via: 'network_verified'
+          }
+        };
+      }
 
       via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
       const finalVia = via || 'sent_unverified';
@@ -1723,6 +1905,7 @@
     localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
     let finalized = false;
     let chainedOperation = null;
+    let networkGeneration = null;
     try {
       switch (operation.operation_type) {
         case 'new_chat': await newChat(); break;
@@ -1756,6 +1939,7 @@
             : fingerprint();
           const promptText = operationPrompt(operation);
           const assistantSnapshot = snapshotAssistantMessages();
+          networkGeneration = await armNetworkGeneration(operation.operation_id);
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
               operation_id: operation.operation_id,
@@ -1771,7 +1955,8 @@
           localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
           const submission = await submitPrompt(promptText, {
             fastPath: fastHandoff,
-            readyBox: box
+            readyBox: box,
+            networkStartedPromise: networkGeneration?.startedPromise || null
           });
           const browserTiming = { ...(submission.timing || {}) };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
@@ -1813,24 +1998,40 @@
               attempt: submission.attempt
             });
           }
-          let generationStartMs = null;
-          if (!(await waitUntil(() => {
-            const started = generating() || Boolean(assistantResponseEvidence(assistantSnapshot, promptText, baseline));
-            if (started && generationStartMs === null) generationStartMs = Date.now();
-            return started;
-          }, GENERATION_START_WAIT_MS, DOM_POLL_MS))) {
-            throw new Error('PASI_NATIVE: submission accepted but generation did not start');
+          const networkResult = await networkGeneration.terminalPromise;
+          browserTiming.network_request_id = networkResult.request_id || null;
+          browserTiming.network_interceptor_version = networkInterceptorVersion;
+          browserTiming.network_state = networkResult.state || null;
+          browserTiming.network_reason = networkResult.reason || null;
+          browserTiming.network_request_started_at_ms = Number(networkResult.request_started_at_ms || 0) || null;
+          browserTiming.network_response_observed_at_ms = Number(networkResult.response_observed_at_ms || 0) || null;
+          browserTiming.generation_start_ms = browserTiming.network_request_started_at_ms;
+          browserTiming.completed_at_ms = Number(networkResult.completed_at_ms || 0) || Date.now();
+
+          if (networkResult.state === 'context_exhausted') {
+            throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
           }
-          browserTiming.generation_start_ms = generationStartMs;
+          if (networkResult.state === 'usage_limited') {
+            throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
+          }
+          if (networkResult.state === 'auth_required') {
+            throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
+          }
+          if (networkResult.state === 'interrupted') {
+            throw new Error('PASI_NETWORK: generation interrupted: ' + String(networkResult.reason || 'unknown'));
+          }
+          if (networkResult.state !== 'completed') {
+            throw new Error('PASI_NETWORK: generation failed: ' + String(networkResult.state || 'unknown'));
+          }
+
+          const response = typeof networkResult.response_text === 'string'
+            ? networkResult.response_text
+            : '';
+          if (!response.trim()) {
+            throw new Error('PASI_NATIVE: response text unavailable; network completion acknowledgement withheld');
+          }
+
           armM0RecoveryProbe(operation);
-          const response = await waitForResponse(
-            baseline,
-            Array.isArray(operation.completion_markers)
-              ? operation.completion_markers
-              : [],
-            { assistantSnapshot, prompt: promptText }
-          );
-          browserTiming.completed_at_ms = Date.now();
           const completion = await finishOperation(
             operation.operation_id,
             response,
@@ -1888,6 +2089,9 @@
       }
       throw error;
     } finally {
+      if (operation.operation_type === 'prompt') {
+        disarmNetworkGeneration(operation.operation_id);
+      }
       if (leaseTimerId !== null) {
         clearInterval(leaseTimerId);
         leaseTimerId = null;
@@ -2111,7 +2315,9 @@
       findNewChatControl,
       detectorState,
       submitPrompt,
-      waitForResponse
+      waitForResponse,
+      armNetworkGeneration,
+      disarmNetworkGeneration
     });
   } else {
     start();

@@ -211,6 +211,7 @@
       let lastChunkAt = now();
       let chunkCount = 0;
       let buffer = '';
+      let stallReported = false;
 
       try {
         const reader = response.body.getReader();
@@ -222,13 +223,13 @@
             return;
           }
           const elapsed = now() - lastChunkAt;
-          if (elapsed >= stallThresholdMs) {
-            emit('INTERRUPTED', trackingState, {
+          if (elapsed >= stallThresholdMs && !stallReported) {
+            stallReported = true;
+            emit('STALL_DETECTED', trackingState, {
               reason: 'GENERATION_STALLED',
-              classification: 'retryable_transport_failure',
+              classification: 'retryable_transport_signal',
               telemetry: {durationSinceLastChunk: elapsed},
             });
-            if (intervalId !== null) clearIntervalImpl(intervalId);
           }
         };
 

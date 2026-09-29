@@ -470,11 +470,7 @@
     if (meta.method_post && meta.likely_generation) return true;
 
     const contentType = String(response?.headers?.get?.("content-type") || "").toLowerCase();
-    return (
-      meta.method_post &&
-      meta.likely_backend &&
-      (contentType.includes("text/event-stream") || contentType.includes("application/x-ndjson"))
-    );
+    return meta.method_post && meta.likely_generation;
   }
 
   function makeMeta(input, init) {
@@ -496,7 +492,7 @@
       if (!armed) return originalFetch.apply(this, args);
 
       const meta = makeMeta(args[0], args[1]);
-      let shouldCandidate = meta.method_post && (meta.likely_generation || meta.likely_backend);
+      let shouldCandidate = meta.method_post && meta.likely_generation;
       let currentRequestId = null;
       let requestStartedAtMs = null;
 

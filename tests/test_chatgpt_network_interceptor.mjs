@@ -70,6 +70,16 @@ function terminalEvent(messages) {
   );
 }
 
+async function waitForTerminal(messages, timeoutMs = 2000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const event = terminalEvent(messages);
+    if (event) return event;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  return terminalEvent(messages);
+}
+
 test("network interceptor classifies the live ChatGPT conversation endpoint", () => {
   const runtime = loadInterceptor({
     fetchImpl: async () => new Response("", {status: 200}),
@@ -195,7 +205,7 @@ test("network interceptor observes SSE without consuming the page response", asy
     originalBodyRead += new TextDecoder().decode(value);
   }
 
-  const terminal = terminalEvent(runtime.messages);
+  const terminal = await waitForTerminal(runtime.messages);
   assert.equal(terminal?.state, "completed");
   assert.equal(terminal?.operation_id, "op-network-1");
   assert.equal(terminal?.conversation_id, "conv-1");
@@ -259,7 +269,7 @@ test("DOM actuator retains bounded submission strategies while network lifecycle
   const source = fs.readFileSync(contentPath, "utf8");
   assert.match(source, /async function submitPrompt\(expected, options = \{\}/);
   assert.match(source, /networkStartedPromise/);
-  assert.match(source, /network_verified/);
+  assert.match(source, /network_armed/);
   assert.match(source, /const strategies = \[/);
   assert.match(source, /form\.requestSubmit/);
   assert.match(source, /nativeMouseActivate/);

@@ -494,15 +494,20 @@
 
       if (!shouldCandidate) return result;
 
-      return Promise.resolve(result).then(async (response) => {
+      return Promise.resolve(result).then((response) => {
         if (!armed) return response;
-        const actualMeta = {...meta, operation_id: armed.operation_id, request_id: currentRequestId};
-        if (!shouldTrack(actualMeta, response)) return response;
-        try {
-          await observeResponse(response, actualMeta);
-        } catch (error) {
-          const state = streamState(actualMeta);
-          emitTerminal(state, "interrupted", "observer_error", {error: safeString(error?.message || error, 500)});
+        const actualMeta = {
+          ...meta,
+          operation_id: armed.operation_id,
+          request_id: currentRequestId
+        };
+        if (shouldTrack(actualMeta, response)) {
+          void observeResponse(response, actualMeta).catch((error) => {
+            const state = streamState(actualMeta);
+            emitTerminal(state, "interrupted", "observer_error", {
+              error: safeString(error?.message || error, 500)
+            });
+          });
         }
         return response;
       }, (error) => {

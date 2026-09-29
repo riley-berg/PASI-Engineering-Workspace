@@ -57,6 +57,7 @@
   let activeRecoveryState = null;
   const NETWORK_SHADOW_MAX_EVENTS = 32;
   const NETWORK_SHADOW_MAX_REQUESTS = 8;
+  const NETWORK_SHADOW_MAX_OPERATIONS = 16;
   const networkShadowByRequestId = new Map();
   const networkShadowByOperationId = new Map();
   let networkLifecycleListenerInstalled = false;
@@ -776,6 +777,10 @@
     if (request.operationId) {
       let operation = networkShadowByOperationId.get(request.operationId);
       if (!operation) {
+        if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
+          const oldestOperation = networkShadowByOperationId.keys().next().value;
+          if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
+        }
         operation = { requestIds: [], terminal: null, started: null, last: null };
         networkShadowByOperationId.set(request.operationId, operation);
       }

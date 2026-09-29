@@ -118,6 +118,39 @@ async function bridgeJson(path) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'pasi-network-bind-operation') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const operationId = String(message?.operation_id || '').trim();
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      !operationId ||
+      operationId.length > 200
+    ) {
+      sendResponse({ ok: false, bound: false });
+      return undefined;
+    }
+
+    chrome.scripting?.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: (value) => {
+        const interceptor = globalThis.__PASI_NETWORK_INTERCEPTOR__;
+        if (!interceptor || typeof interceptor.bindOperation !== 'function') return false;
+        interceptor.bindOperation(value);
+        return true;
+      },
+      args: [operationId]
+    }).then((results) => {
+      const bound = Array.isArray(results) && results.some((entry) => entry?.result === true);
+      sendResponse({ ok: bound, bound });
+    }).catch(() => {
+      sendResponse({ ok: false, bound: false });
+    });
+    return true;
+  }
+
   if (message?.type === 'pasi-controller-claim') {
     const tabId = sender?.tab?.id;
     if (typeof tabId !== 'number') {

@@ -12,6 +12,8 @@ const sandbox = {
   fetch: async () => ({ok: true, status: 200}),
   TextDecoder,
   URL,
+  setInterval,
+  clearInterval,
 };
 vm.runInNewContext(interceptorSource, sandbox, {filename: interceptorPath});
 const source = sandbox.module.exports;

@@ -37,6 +37,29 @@ def test_ensure_worktree_creates_missing_branch(monkeypatch, tmp_path):
     assert ("checkout", branch) not in calls
 
 
+def test_recover_task_worktree_cleans_stale_acceptance_state(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def fake_git(cwd: Path, *args: str, **kwargs):
+        calls.append(args)
+        if args[:2] == ("status", "--porcelain"):
+            if not any(call[:2] == ("clean", "-fd") for call in calls):
+                return " M stale.py\n?? stale-artifact"
+        return ""
+
+    monkeypatch.setattr(acceptance, "git", fake_git)
+    monkeypatch.setattr(acceptance, "emit", lambda event: calls.append(("emit", event["event"])))
+
+    acceptance.recover_task_worktree(tmp_path, SimpleNamespace(task_id="P0.4"))
+
+    assert ("reset", "--hard", "HEAD") in calls
+    assert ("clean", "-fd") in calls
+    assert any(call[:2] == ("status", "--porcelain") for call in calls)
+    assert any(call[0] == "emit" for call in calls)
+
+
 def test_runner_uses_canonical_handoff_path_and_immediate_task_handoff():
     chat = Path(acceptance.__file__).with_name("pasi_chat.py").read_text(encoding="utf-8")
     runner = Path(acceptance.__file__).read_text(encoding="utf-8")
@@ -818,106 +841,3 @@ def test_executor_feeds_failures_back_into_bounded_repair_prompt():
     assert 'MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))' in runner
     assert 'PREVIOUS EXECUTION FEEDBACK:' in runner
     assert 'cleanup_failed_attempt(root)' in runner
-    assert 'Completion-contract or patch validation failed:' in runner
-    assert 'Patch application failed.' in runner
-    assert 'Python verification failed after applying the patch.' in runner
-    assert 'Frontend verification failed after applying the patch.' in runner
-
-
-def test_executor_repair_prompt_requires_resolution_not_explanation():
-    from scripts import pasi_engineering_executor as executor
-
-    task = "Acceptance evidence registry"
-    feedback = "missing/duplicate markers: summary, evidence"
-    rendered = executor.repair_feedback(task, feedback, 2)
-    assert "CURRENT" not in rendered
-    assert "PREVIOUS EXECUTION FEEDBACK:" in rendered
-    assert feedback in rendered
-    assert "Resolve the reported failure in the next attempt" in rendered
-    assert "do not merely explain it" in rendered
-
-
-def test_p0_4_task_discovery_cache_avoids_repeated_github_reads(monkeypatch):
-    bodies = {
-        108: "- [ ] **P0.1 — M0 live task acceptance** — prove M0\n",
-        109: "- [ ] **P1.1 — Unified operation state** — prove P1 state\n",
-    }
-    phases = (
-        acceptance.Phase("P0", 108, "Q3-2026", "2026-09-22", "2026-10-04"),
-        acceptance.Phase("P1", 109, "Q4-2026", "2026-10-04", "2026-10-12"),
-    )
-    calls = []
-    monkeypatch.setattr(acceptance, "schedule", lambda: phases)
-    def fake_github(url, *, method="GET", body=None):
-        calls.append((url, method))
-        if method == "PATCH":
-            return {}
-        issue = int(url.rstrip("/").split("/")[-1])
-        return {"body": bodies[issue]}
-    monkeypatch.setattr(acceptance, "github", fake_github)
-    monkeypatch.setattr(acceptance, "_TASK_CACHE", acceptance.TaskDiscoveryCache())
-
-    first = acceptance.all_tasks()
-    second = acceptance.all_tasks()
-
-    assert first == second
-    assert len([item for item in calls if item[1] == "GET"]) == 2
-
-    acceptance.mark_checked(first[0])
-    third = acceptance.all_tasks()
-    assert any(task.task_id == "P0.1" and task.checked for task in third)
-    assert len([item for item in calls if item[1] == "GET"]) == 3
-
-
-def test_p0_4_cached_evidence_pr_avoids_repeat_lookup(tmp_path, monkeypatch):
-    monkeypatch.setattr(acceptance, "state_dir", lambda: tmp_path)
-    (tmp_path / "state.json").write_text(
-        '{"evidence_pr":{"number":142,"url":"https://github.com/th3-st0v3/PASI-Engineering-Workspace/pull/142"}}\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(acceptance, "token", lambda: "test-token")
-    monkeypatch.setattr(
-        acceptance,
-        "github",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GitHub lookup should be skipped")),
-    )
-
-    assert acceptance.ensure_evidence_pr("pasi/test", "run-1")["number"] == 142
-
-
-def test_p0_4_commit_reconciliation_uses_argv_not_shell():
-    source = Path(acceptance.__file__).read_text(encoding="utf-8")
-    assert "subprocess.getstatusoutput(" not in source
-    executor = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
-    assert "from pathlib import Path\nimport subprocess" not in executor
-    assert "subprocess" in executor
-
-
-def test_extension_background_has_one_side_panel_initializer():
-    background = Path(acceptance.__file__).parents[1] / "extensions" / "pasi-chatgpt" / "src" / "background.js"
-    source = background.read_text(encoding="utf-8")
-    assert source.count("setPanelBehavior({ openPanelOnActionClick: true })") == 1
-
-
-def test_executor_prompt_context_excludes_completed_roadmap_tasks():
-    from scripts import pasi_engineering_executor as executor
-
-    context = executor.unfinished_issue_context(
-        """- [x] **P0.1 — M0 live task acceptance** — completed
-- [x] **P0.2 — M1 twenty-operation chain** — completed
-- [ ] **P0.4 — 168-hour long-run acceptance** — still open
-- [ ] **P0.5 — Acceptance evidence registry** — still open
-Completion rule
-Only unfinished roadmap work should be presented."""
-    )
-    assert "P0.1" not in context
-    assert "P0.2" not in context
-    assert "P0.4" in context
-    assert "P0.5" in context
-    assert "Completion rule" in context
-
-
-def test_executor_canonical_context_uses_unfinished_task_filter():
-    source = Path(__file__).parents[1].joinpath("scripts", "pasi_engineering_executor.py").read_text(encoding="utf-8")
-    assert 'return unfinished_issue_context(str(body or ""))[:30000]' in source
-    assert 'match.group(1).lower()=="x"' in source

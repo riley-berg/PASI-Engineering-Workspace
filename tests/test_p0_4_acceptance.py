@@ -933,7 +933,7 @@ def test_p0_6_can_be_preverified_from_durable_workflow_policy(monkeypatch, tmp_p
 
 
 def test_runner_bounds_and_surfaces_task_retries():
-    source = Path(__file__).with_name("pasi_168h_acceptance.py").read_text(encoding="utf-8")
+    source = Path(__file__).parents[1].joinpath("scripts", "pasi_168h_acceptance.py").read_text(encoding="utf-8")
     assert "MAX_TASK_ATTEMPTS" in source
     assert "task_bounded_retry_exhausted" in source
     assert "moving to the next eligible task" in source

@@ -156,7 +156,10 @@
       typeof payload?.v === 'string' &&
       /\/message\/content\/parts(?:\/0)?$/.test(payload.p)
     ) {
-      return {mode: 'delta', text: payload.v};
+      return {
+        mode: String(payload?.o || '').toLowerCase() === 'replace' ? 'snapshot' : 'delta',
+        text: payload.v.slice(0, MAX_RESPONSE_TEXT_CHARS),
+      };
     }
 
     return null;

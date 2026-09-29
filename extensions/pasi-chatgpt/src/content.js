@@ -55,6 +55,11 @@
   let immediateOperationQueued = false;
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
+  const NETWORK_SHADOW_MAX_EVENTS = 32;
+  const NETWORK_SHADOW_MAX_REQUESTS = 8;
+  const networkShadowByRequestId = new Map();
+  const networkShadowByOperationId = new Map();
+  let networkLifecycleListenerInstalled = false;
 
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
@@ -690,6 +695,152 @@
         } }
       });
     } catch (_) {}
+  }
+
+  function bindNetworkOperation(operationId) {
+    const value = operationId == null || operationId === '' ? null : String(operationId);
+    if (!value) return false;
+    try {
+      window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
+        detail: value
+      }));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function boundedNetworkEvent(event) {
+    if (!event || typeof event !== 'object') return null;
+    const eventType = typeof event.eventType === 'string' ? event.eventType.slice(0, 40) : '';
+    const requestId = typeof event.requestId === 'string' ? event.requestId.slice(0, 200) : '';
+    if (!eventType || !requestId) return null;
+    const operationId = typeof event.operationId === 'string' && event.operationId
+      ? event.operationId.slice(0, 200)
+      : (activeOperationId ? String(activeOperationId).slice(0, 200) : null);
+    const telemetry = event.telemetry && typeof event.telemetry === 'object'
+      ? {
+          requestUri: typeof event.telemetry.requestUri === 'string'
+            ? event.telemetry.requestUri.slice(0, 1000)
+            : undefined,
+          totalChunksProcessed: Number.isFinite(event.telemetry.totalChunksProcessed)
+            ? event.telemetry.totalChunksProcessed
+            : undefined,
+          durationSinceLastChunk: Number.isFinite(event.telemetry.durationSinceLastChunk)
+            ? event.telemetry.durationSinceLastChunk
+            : undefined,
+          httpStatus: Number.isFinite(event.telemetry.httpStatus)
+            ? event.telemetry.httpStatus
+            : undefined,
+          providerErrorCode: typeof event.telemetry.providerErrorCode === 'string'
+            ? event.telemetry.providerErrorCode.slice(0, 120)
+            : undefined
+        }
+      : {};
+    return {
+      eventType,
+      eventId: typeof event.eventId === 'string' ? event.eventId.slice(0, 200) : null,
+      operationId,
+      requestId,
+      timestamp: Number.isFinite(event.timestamp) ? event.timestamp : Date.now(),
+      reason: typeof event.reason === 'string' ? event.reason.slice(0, 200) : '',
+      classification: typeof event.classification === 'string'
+        ? event.classification.slice(0, 120)
+        : '',
+      telemetry
+    };
+  }
+
+  function rememberNetworkShadow(event) {
+    const bounded = boundedNetworkEvent(event);
+    if (!bounded) return null;
+
+    let request = networkShadowByRequestId.get(bounded.requestId);
+    if (!request) {
+      if (networkShadowByRequestId.size >= NETWORK_SHADOW_MAX_REQUESTS) {
+        const oldest = networkShadowByRequestId.keys().next().value;
+        if (oldest) networkShadowByRequestId.delete(oldest);
+      }
+      request = {
+        requestId: bounded.requestId,
+        operationId: bounded.operationId,
+        events: []
+      };
+      networkShadowByRequestId.set(bounded.requestId, request);
+    }
+
+    request.operationId = bounded.operationId || request.operationId || null;
+    request.events.push(bounded);
+    if (request.events.length > NETWORK_SHADOW_MAX_EVENTS) request.events.shift();
+
+    if (request.operationId) {
+      let operation = networkShadowByOperationId.get(request.operationId);
+      if (!operation) {
+        operation = { requestIds: [], terminal: null, started: null, last: null };
+        networkShadowByOperationId.set(request.operationId, operation);
+      }
+      if (!operation.requestIds.includes(request.requestId)) {
+        operation.requestIds.push(request.requestId);
+        if (operation.requestIds.length > NETWORK_SHADOW_MAX_REQUESTS) operation.requestIds.shift();
+      }
+      if (bounded.eventType === 'STARTED') operation.started = bounded;
+      if (['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)) operation.terminal = bounded;
+      operation.last = bounded;
+    }
+
+    return bounded;
+  }
+
+  function installNetworkLifecycleShadow() {
+    if (networkLifecycleListenerInstalled || typeof window.addEventListener !== 'function') return false;
+    networkLifecycleListenerInstalled = true;
+    window.addEventListener('PASI_NETWORK_LIFECYCLE', (event) => {
+      let payload = event?.detail;
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch (_) {
+          return;
+        }
+      }
+      const bounded = rememberNetworkShadow(payload);
+      if (!bounded) return;
+
+      const kind = bounded.eventType === 'STARTED'
+        ? 'chatgpt_network_generation_started'
+        : bounded.eventType === 'STALL_DETECTED'
+          ? 'chatgpt_network_generation_stalled'
+          : ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
+            ? 'chatgpt_network_generation_terminal'
+            : 'chatgpt_network_lifecycle';
+
+      void reportObservation(kind, {
+        operation_id: bounded.operationId,
+        request_id: bounded.requestId,
+        event_id: bounded.eventId,
+        event_type: bounded.eventType,
+        reason: bounded.reason,
+        classification: bounded.classification,
+        telemetry: bounded.telemetry,
+        network_shadow: true
+      }, 5000);
+
+      if (bounded.operationId) {
+        const summary = networkShadowByOperationId.get(bounded.operationId);
+        if (summary) {
+          void reportObservation('chatgpt_network_dom_shadow', {
+            operation_id: bounded.operationId,
+            network_request_ids: summary.requestIds,
+            network_started: Boolean(summary.started),
+            network_terminal_event: summary.terminal?.eventType || null,
+            network_terminal_reason: summary.terminal?.reason || null,
+            network_last_event: summary.last?.eventType || null,
+            network_shadow: true
+          }, 5000);
+        }
+      }
+    });
+    return true;
   }
 
   function installRuntimeErrorTelemetry() {
@@ -1695,6 +1846,7 @@
 
   async function processOperation(operation) {
     activeOperationId = operation.operation_id;
+    bindNetworkOperation(activeOperationId);
     processing = true;
     if (leaseTimerId !== null) clearInterval(leaseTimerId);
     if (!hasFreshControllerLease()) {
@@ -2054,6 +2206,7 @@
   }
 
   async function start() {
+    installNetworkLifecycleShadow();
     pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
 

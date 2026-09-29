@@ -24,6 +24,7 @@ def test_network_interceptor_phase1_contract():
     assert main_scripts[0]["js"] == ["src/network-interceptor.js"]
 
     assert "world: 'MAIN'" in background
+    assert "vendor/typescript.js" not in background
     assert "files: ['src/network-interceptor.js']" in background
     assert "MutationObserver" not in interceptor.read_text(encoding="utf-8")
     assert "document.querySelector" not in interceptor.read_text(encoding="utf-8")

@@ -177,8 +177,8 @@ test('emits correlated response text on terminal network completion', async () =
   const target = {
     fetch: async () =>
       fakeResponse([
-        'data: {\"p\":\"\",\"o\":\"add\",\"v\":{\"message\":{\"author\":{\"role\":\"assistant\"},\"content\":{\"parts\":[\"NETWORK_CORRELATION_\"]}}}}\\n\\n',
-        'data: {\"p\":\"/message/content/parts/0\",\"o\":\"append\",\"v\":\"OK_2026\"}\\n\\n',
+        'data: {"p":"","o":"add","v":{"message":{"author":{"role":"assistant"},"content":{"parts":["NETWORK_CORRELATION_"]}}}}\n\n',
+        'data: {"p":"/message/content/parts/0","o":"append","v":"OK_2026"}\n\n',
         'data: [DONE]\n\n'
       ]),
   };

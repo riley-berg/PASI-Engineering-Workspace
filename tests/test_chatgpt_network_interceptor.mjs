@@ -7,6 +7,7 @@ const repoRoot = new URL("../", import.meta.url).pathname;
 const interceptorPath = new URL("../extensions/pasi-chatgpt/src/network_interceptor.js", import.meta.url).pathname;
 const contentPath = new URL("../extensions/pasi-chatgpt/src/content.js", import.meta.url).pathname;
 const recoveryPath = new URL("../extensions/pasi-chatgpt/src/recovery.js", import.meta.url).pathname;
+const manifestPath = new URL("../extensions/pasi-chatgpt/manifest.json", import.meta.url).pathname;
 
 function loadInterceptor({fetchImpl, flags = {}} = {}) {
   const messages = [];
@@ -127,6 +128,22 @@ test("network actuator remains disabled by default", () => {
     message.operation_id === "op-actuator-disabled" &&
     message.reason === "feature_disabled"
   ));
+});
+
+test("manifest installs the network interceptor before the isolated controller", () => {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const networkScript = manifest.content_scripts.find((entry) =>
+    Array.isArray(entry.js) && entry.js.includes("src/network_interceptor.js")
+  );
+  assert.ok(networkScript);
+  assert.equal(networkScript.run_at, "document_start");
+  assert.equal(networkScript.world, "MAIN");
+  assert.equal(networkScript.js[0], "src/network_interceptor.js");
+  const isolated = manifest.content_scripts.find((entry) =>
+    Array.isArray(entry.js) && entry.js.includes("src/content.js")
+  );
+  assert.ok(isolated);
+  assert.equal(isolated.world, "ISOLATED");
 });
 
 test("network interceptor classifies the live ChatGPT conversation endpoint", () => {

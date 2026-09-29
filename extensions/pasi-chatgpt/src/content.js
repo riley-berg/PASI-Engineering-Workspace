@@ -130,7 +130,9 @@
     networkGenerationStates.set(operationId, data);
 
     if (state === 'request' || state === 'started') {
-      resolveNetworkWaiter(networkStartedWaiters, operationId, data);
+      if (state === 'started' || data.generation_candidate === true) {
+        resolveNetworkWaiter(networkStartedWaiters, operationId, data);
+      }
       void reportObservation('chatgpt_network_generation', {
         operation_id: operationId,
         state,
@@ -1992,7 +1994,7 @@
             ...(submission.timing || {}),
             network_submission_verified: true,
             network_request_id: networkStarted.request_id || null,
-            network_request_observed_at_ms: Number(networkStarted.captured_at ? Date.parse(networkStarted.captured_at) : Date.now()) || Date.now()
+            network_request_observed_at_ms: Number(networkStarted.request_started_at_ms || (networkStarted.captured_at ? Date.parse(networkStarted.captured_at) : Date.now())) || Date.now()
           };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
           if (

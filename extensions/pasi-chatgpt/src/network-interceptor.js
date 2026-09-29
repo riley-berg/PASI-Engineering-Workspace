@@ -25,7 +25,17 @@
 
   function isGenerationRequest(input, init, endpointMarker = ENDPOINT_MARKER) {
     const request = requestDetails(input, init);
-    return request.method === 'POST' && request.url.split('?')[0].replace(/\/$/, '') === endpointMarker;
+    if (request.method !== 'POST') return false;
+    if (!request.url) return false;
+
+    let pathname;
+    try {
+      pathname = new URL(request.url, target.location?.href || 'https://chatgpt.com').pathname;
+    } catch (_) {
+      return false;
+    }
+
+    return pathname.replace(/\/$/, '') === endpointMarker;
   }
 
   function classifyHttpStatus(status) {

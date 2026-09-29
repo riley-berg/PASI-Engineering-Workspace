@@ -153,6 +153,10 @@
     const state = {
       installed: false,
       originalFetch: null,
+      originalFetchDescriptor: null,
+      fetchGetter: null,
+      fetchSetter: null,
+      fetchAccessorInstalled: false,
       fetchReconcileIntervalId: null,
       currentOperationId: null,
       activeGeneration: null,
@@ -346,21 +350,76 @@
         installed: state.installed,
         trackingRequestId: state.activeGeneration?.requestId || null,
         currentOperationId: state.currentOperationId,
+        fetchWrapped: state.installed && target.fetch === interceptedFetch,
+        fetchAccessorInstalled: state.fetchAccessorInstalled,
+        fetchFunctionName: typeof target.fetch === 'function' ? target.fetch.name : null,
       };
+    }
+
+    function installFetchAccessor() {
+      if (!target || typeof target.fetch !== 'function') return false;
+
+      const descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
+      if (descriptor && !descriptor.configurable) return false;
+
+      state.originalFetch = target.fetch;
+      state.originalFetchDescriptor = descriptor || null;
+      state.fetchGetter = () => interceptedFetch;
+      state.fetchSetter = value => {
+        state.originalFetch = value;
+      };
+
+      try {
+        Object.defineProperty(target, 'fetch', {
+          configurable: true,
+          enumerable: descriptor ? descriptor.enumerable : true,
+          get: state.fetchGetter,
+          set: state.fetchSetter,
+        });
+        state.fetchAccessorInstalled = true;
+        return true;
+      } catch (_) {
+        state.originalFetchDescriptor = null;
+        state.fetchGetter = null;
+        state.fetchSetter = null;
+        return false;
+      }
     }
 
     function reconcileFetch() {
       if (!state.installed || !target) return false;
+
+      const descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
+      if (
+        state.fetchAccessorInstalled &&
+        descriptor?.get === state.fetchGetter &&
+        descriptor?.set === state.fetchSetter
+      ) {
+        return false;
+      }
+
       const currentFetch = target.fetch;
-      if (currentFetch === interceptedFetch) return false;
       if (typeof currentFetch !== 'function') return false;
 
       state.originalFetch = currentFetch;
+      state.originalFetchDescriptor = descriptor || null;
       try {
-        target.fetch = interceptedFetch;
+        Object.defineProperty(target, 'fetch', {
+          configurable: true,
+          enumerable: descriptor ? descriptor.enumerable : true,
+          get: state.fetchGetter || (() => interceptedFetch),
+          set: state.fetchSetter || (value => { state.originalFetch = value; }),
+        });
+        state.fetchAccessorInstalled = true;
         return true;
       } catch (_) {
-        return false;
+        try {
+          target.fetch = interceptedFetch;
+          state.fetchAccessorInstalled = false;
+          return true;
+        } catch (_) {
+          return false;
+        }
       }
     }
 
@@ -370,9 +429,11 @@
         throw new Error('PASI network interceptor requires fetch');
       }
 
-      state.originalFetch = target.fetch;
-      target.fetch = interceptedFetch;
       state.installed = true;
+      if (!installFetchAccessor()) {
+        state.originalFetch = target.fetch;
+        target.fetch = interceptedFetch;
+      }
       state.fetchReconcileIntervalId = setIntervalImpl(
         reconcileFetch,
         DEFAULT_FETCH_RECONCILE_INTERVAL_MS,
@@ -388,8 +449,29 @@
         state.fetchReconcileIntervalId = null;
       }
 
-      target.fetch = state.originalFetch;
+      const descriptor = Object.getOwnPropertyDescriptor(target, 'fetch');
+      const ownsOurAccessor =
+        state.fetchAccessorInstalled &&
+        descriptor?.get === state.fetchGetter &&
+        descriptor?.set === state.fetchSetter;
+
+      try {
+        if (ownsOurAccessor) {
+          if (state.originalFetchDescriptor) {
+            Object.defineProperty(target, 'fetch', state.originalFetchDescriptor);
+          } else {
+            delete target.fetch;
+          }
+        } else if (target.fetch === interceptedFetch) {
+          target.fetch = state.originalFetch;
+        }
+      } catch (_) {}
+
       state.originalFetch = null;
+      state.originalFetchDescriptor = null;
+      state.fetchGetter = null;
+      state.fetchSetter = null;
+      state.fetchAccessorInstalled = false;
       state.installed = false;
       return true;
     }

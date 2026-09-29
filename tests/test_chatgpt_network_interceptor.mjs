@@ -1,0 +1,185 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
+
+const repoRoot = new URL("../", import.meta.url).pathname;
+const interceptorPath = new URL("../extensions/pasi-chatgpt/src/network_interceptor.js", import.meta.url).pathname;
+const contentPath = new URL("../extensions/pasi-chatgpt/src/content.js", import.meta.url).pathname;
+
+function loadInterceptor({fetchImpl, flags = {}} = {}) {
+  const messages = [];
+  const listeners = new Map();
+  const window = {
+    fetch: fetchImpl,
+    postMessage(message) { messages.push(message); },
+    addEventListener(type, listener) {
+      listeners.set(type, listener);
+    },
+  };
+  const sandbox = {
+    window,
+    location: new URL("https://chatgpt.com/c/test"),
+    URL,
+    URLSearchParams,
+    TextDecoder,
+    TextEncoder,
+    Response,
+    ReadableStream,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    Date,
+    Math,
+    JSON,
+    String,
+    Number,
+    Boolean,
+    Object,
+    Array,
+    Map,
+    Set,
+    Promise,
+    crypto: globalThis.crypto,
+    globalThis: null,
+  };
+  sandbox.globalThis = sandbox;
+  Object.assign(sandbox, flags);
+  vm.runInNewContext(fs.readFileSync(interceptorPath, "utf8"), sandbox, {filename: interceptorPath});
+
+  return {
+    sandbox,
+    window,
+    messages,
+    dispatch(message) {
+      listeners.get("message")?.({source: window, data: message});
+    },
+  };
+}
+
+function terminalEvent(messages) {
+  return messages.find((message) =>
+    message?.kind === "event" &&
+    ["completed", "interrupted", "context_exhausted", "usage_limited", "auth_required", "provider_error", "unknown_failure"].includes(message.state)
+  );
+}
+
+test("network interceptor classifies the live ChatGPT conversation endpoint", () => {
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+    flags: {PASI_NETWORK_INTERCEPTOR_TEST_HOOKS: true},
+  });
+  const api = runtime.sandbox.PASI_NETWORK_INTERCEPTOR_TEST_API;
+  assert.equal(api.likelyGenerationPath(new URL("https://chatgpt.com/backend-api/f/conversation")), true);
+  assert.equal(api.likelyGenerationPath(new URL("https://chatgpt.com/backend-api/conversation")), true);
+  assert.equal(api.likelyGenerationPath(new URL("https://chatgpt.com/backend-api/tasks/task-1/stream")), true);
+  assert.equal(api.likelyGenerationPath(new URL("https://chatgpt.com/backend-api/conversations")), false);
+  assert.equal(api.classifyFailure("this conversation has reached its limit", 200), "context_exhausted");
+  assert.equal(api.classifyFailure("usage limit reached", 429), "usage_limited");
+  assert.equal(api.classifyFailure("please log in to continue", 401), "auth_required");
+});
+
+test("network interceptor observes SSE without consuming the page response", async () => {
+  const frames = [
+    'data: {"message":{"author":{"role":"assistant"},"content":{"parts":[""]},"conversation_id":"conv-1"}}\n\n',
+    'data: {"p":"/message/content/parts/0","o":"append","v":"PASI_"}\n\n',
+    'data: {"p":"/message/content/parts/0","o":"append","v":"NETWORK_OK"}\n\n',
+    'data: [DONE]\n\n',
+  ];
+  const encoder = new TextEncoder();
+  let originalBodyRead = "";
+  const source = new ReadableStream({
+    pull(controller) {
+      if (!frames.length) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(frames.shift()));
+    },
+  });
+
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response(source, {
+      status: 200,
+      headers: {"content-type": "text/event-stream"},
+    }),
+  });
+
+  runtime.dispatch({
+    source: "pasi-network-controller",
+    target: "pasi-network-interceptor",
+    command: "arm",
+    operation_id: "op-network-1",
+  });
+
+  const response = await runtime.window.fetch("https://chatgpt.com/backend-api/f/conversation", {
+    method: "POST",
+  });
+
+  const originalReader = response.body.getReader();
+  while (true) {
+    const {done, value} = await originalReader.read();
+    if (done) break;
+    originalBodyRead += new TextDecoder().decode(value);
+  }
+
+  const terminal = terminalEvent(runtime.messages);
+  assert.equal(terminal?.state, "completed");
+  assert.equal(terminal?.operation_id, "op-network-1");
+  assert.equal(terminal?.conversation_id, "conv-1");
+  assert.equal(terminal?.response_text, "PASI_NETWORK_OK");
+  assert.match(originalBodyRead, /PASI_/);
+  assert.match(originalBodyRead, /NETWORK_OK/);
+});
+
+test("network interceptor classifies context exhaustion from a provider error without DOM inspection", async () => {
+  const body = JSON.stringify({error: "This conversation has reached its limit. Start a new chat to continue."});
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response(body, {
+      status: 400,
+      headers: {"content-type": "application/json"},
+    }),
+  });
+
+  runtime.dispatch({
+    source: "pasi-network-controller",
+    target: "pasi-network-interceptor",
+    command: "arm",
+    operation_id: "op-exhausted-1",
+  });
+
+  const response = await runtime.window.fetch("https://chatgpt.com/backend-api/f/conversation", {method: "POST"});
+  assert.equal(await response.text(), body);
+
+  const terminal = terminalEvent(runtime.messages);
+  assert.equal(terminal?.state, "context_exhausted");
+  assert.equal(terminal?.operation_id, "op-exhausted-1");
+});
+
+test("network interceptor is idempotent and has no DOM dependency", () => {
+  const source = fs.readFileSync(interceptorPath, "utf8");
+  assert.doesNotMatch(source, /\bdocument\b/);
+  assert.doesNotMatch(source, /MutationObserver/);
+  assert.doesNotMatch(source, /querySelector/);
+  assert.doesNotMatch(source, /getComputedStyle/);
+
+  const runtime = loadInterceptor({
+    fetchImpl: async () => new Response("", {status: 200}),
+  });
+  const firstFetch = runtime.window.fetch;
+  vm.runInNewContext(fs.readFileSync(interceptorPath, "utf8"), runtime.sandbox, {filename: interceptorPath});
+  assert.strictEqual(runtime.window.fetch, firstFetch);
+});
+
+test("DOM actuator retains bounded submission strategies while network lifecycle is independent", () => {
+  const source = fs.readFileSync(contentPath, "utf8");
+  assert.match(source, /async function submitPrompt\(expected, options = \{\}/);
+  assert.match(source, /networkStartedPromise/);
+  assert.match(source, /network_verified/);
+  assert.match(source, /const strategies = \[/);
+  assert.match(source, /form\.requestSubmit/);
+  assert.match(source, /nativeMouseActivate/);
+  assert.match(source, /dispatchEnter/);
+  assert.match(source, /waitForResponse/);
+});

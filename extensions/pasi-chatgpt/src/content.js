@@ -698,7 +698,7 @@
     } catch (_) {}
   }
 
-  function bindNetworkOperation(operationId) {
+  async function bindNetworkOperation(operationId) {
     const value = operationId == null || operationId === '' ? null : String(operationId);
     if (!value) return false;
 
@@ -710,17 +710,34 @@
       dispatched = true;
     } catch (_) {}
 
-    try {
-      chrome.runtime.sendMessage(
-        { type: 'pasi-network-bind-operation', operation_id: value },
-        () => {
-          void chrome.runtime.lastError;
-        }
-      );
-      dispatched = true;
-    } catch (_) {}
+    if (!globalThis.chrome?.runtime?.sendMessage) return dispatched;
 
-    return dispatched;
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(dispatched);
+      }, 1500);
+
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'pasi-network-bind-operation', operation_id: value },
+          (response) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            void chrome.runtime.lastError;
+            resolve(response?.bound === true || dispatched);
+          }
+        );
+      } catch (_) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(dispatched);
+      }
+    });
   }
 
   function boundedNetworkEvent(event) {
@@ -1918,8 +1935,8 @@
 
   async function processOperation(operation) {
     activeOperationId = operation.operation_id;
-    bindNetworkOperation(activeOperationId);
     processing = true;
+    await bindNetworkOperation(activeOperationId);
     if (leaseTimerId !== null) clearInterval(leaseTimerId);
     if (!hasFreshControllerLease()) {
       const claimed = await controllerClaim();

@@ -153,12 +153,13 @@ test("Responses-style completion is a network terminal signal", () => {
     flags: {PASI_NETWORK_INTERCEPTOR_TEST_HOOKS: true},
   });
   const api = runtime.sandbox.PASI_NETWORK_INTERCEPTOR_TEST_API;
-  const state = {responseText: "", diagnostic: "", assistantSeen: false, doneMarker: false, failureKind: null, conversationId: null};
+  const state = {responseText: "", diagnostic: "", assistantSeen: false, doneMarker: false, failureKind: null, conversationId: null, responseId: null};
   api.inspectPayload(state, {type: "response.output_text.delta", delta: "network response"});
   api.inspectPayload(state, {type: "response.completed", response: {id: "resp-1"}});
   assert.equal(state.responseText, "network response");
   assert.equal(state.doneMarker, true);
-  assert.equal(state.conversationId, "resp-1");
+  assert.equal(state.responseId, "resp-1");
+  assert.equal(state.conversationId, null);
 });
 
 test("network interceptor observes SSE without consuming the page response", async () => {

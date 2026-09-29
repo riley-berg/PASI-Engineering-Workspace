@@ -781,7 +781,16 @@
           const oldestOperation = networkShadowByOperationId.keys().next().value;
           if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
         }
-        operation = { requestIds: [], terminal: null, started: null, last: null };
+        operation = {
+          requestIds: [],
+          terminal: null,
+          started: null,
+          last: null,
+          domCompleted: false,
+          domCompletionAtMs: null,
+          domResponseAvailable: false,
+          domChatUrl: null
+        };
         networkShadowByOperationId.set(request.operationId, operation);
       }
       if (!operation.requestIds.includes(request.requestId)) {
@@ -840,6 +849,10 @@
             network_terminal_event: summary.terminal?.eventType || null,
             network_terminal_reason: summary.terminal?.reason || null,
             network_last_event: summary.last?.eventType || null,
+            dom_completed: summary.domCompleted,
+            dom_completion_at_ms: summary.domCompletionAtMs,
+            dom_response_available: summary.domResponseAvailable,
+            dom_chat_url: summary.domChatUrl,
             network_shadow: true
           }, 5000);
         }
@@ -1739,6 +1752,47 @@
     };
   }
 
+  function markNetworkDomCompletion(operationId, responseText, chatUrlValue) {
+    const id = typeof operationId === 'string' && operationId ? operationId : null;
+    if (!id) return;
+    let summary = networkShadowByOperationId.get(id);
+    if (!summary) {
+      if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
+        const oldestOperation = networkShadowByOperationId.keys().next().value;
+        if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
+      }
+      summary = {
+        requestIds: [],
+        terminal: null,
+        started: null,
+        last: null,
+        domCompleted: false,
+        domCompletionAtMs: null,
+        domResponseAvailable: false,
+        domChatUrl: null
+      };
+      networkShadowByOperationId.set(id, summary);
+    }
+    summary.domCompleted = true;
+    summary.domCompletionAtMs = Date.now();
+    summary.domResponseAvailable = typeof responseText === 'string' && Boolean(responseText.trim());
+    summary.domChatUrl = typeof chatUrlValue === 'string' && chatUrlValue ? chatUrlValue : null;
+
+    void reportObservation('chatgpt_network_dom_shadow', {
+      operation_id: id,
+      network_request_ids: summary.requestIds,
+      network_started: Boolean(summary.started),
+      network_terminal_event: summary.terminal?.eventType || null,
+      network_terminal_reason: summary.terminal?.reason || null,
+      network_last_event: summary.last?.eventType || null,
+      dom_completed: true,
+      dom_completion_at_ms: summary.domCompletionAtMs,
+      dom_response_available: summary.domResponseAvailable,
+      dom_chat_url: summary.domChatUrl,
+      network_shadow: true
+    }, 5000);
+  }
+
   async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null) {
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
@@ -1812,6 +1866,7 @@
               native_controller: true
             }).catch(() => {});
 
+            markNetworkDomCompletion(operationId, responseText, chatUrl());
             setTimeout(publishResponseTelemetry, RESPONSE_TELEMETRY_DEFER_MS);
             return payload;
           } catch (_) {

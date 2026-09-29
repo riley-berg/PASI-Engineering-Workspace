@@ -45,6 +45,8 @@ def test_network_interceptor_phase1_contract():
     assert "chatgpt_network_generation_stalled" in controller
     assert "chatgpt_network_dom_shadow" in controller
     assert "markNetworkDomCompletion" in controller
+    assert "assistantResponseEvidence(snapshot, prompt, baseline = '')" in controller
+    assert "baselineFingerprint" in controller
     assert "dom_completed" in controller
     assert "dom_response_available" in controller
     assert "network_shadow: true" in controller

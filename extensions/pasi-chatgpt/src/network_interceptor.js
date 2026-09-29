@@ -15,6 +15,8 @@
   let originalFetch = null;
   let originalXhrOpen = null;
   let originalXhrSend = null;
+  let lastGenerationTemplate = null;
+  const NETWORK_ACTUATOR_ENABLED = globalThis.PASI_NETWORK_ACTUATOR_ENABLED === true;
 
   function now() {
     return Date.now();
@@ -486,6 +488,183 @@
       : "pasi-net-" + now() + "-" + Math.random().toString(16).slice(2);
   }
 
+  function normalizedHeaders(input) {
+    try {
+      const headers = new Headers(input || {});
+      const result = {};
+      for (const [name, value] of headers.entries()) result[String(name).toLowerCase()] = String(value);
+      return result;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function requestBodyText(input, init) {
+    if (typeof init?.body === "string") return Promise.resolve(init.body);
+    if (init?.body instanceof URLSearchParams) return Promise.resolve(init.body.toString());
+    if (typeof Request === "function" && input instanceof Request) {
+      try {
+        return input.clone().text();
+      } catch (_) {}
+    }
+    return Promise.resolve("");
+  }
+
+  async function captureGenerationTemplate(input, init, meta) {
+    if (!armed || !meta?.likely_generation || !meta.method_post) return;
+    try {
+      let headers = normalizedHeaders(init?.headers);
+      let method = meta.method;
+      let credentials = "include";
+      let body = await requestBodyText(input, init);
+
+      if (typeof Request === "function" && input instanceof Request) {
+        const clone = input.clone();
+        headers = normalizedHeaders(clone.headers);
+        method = clone.method || method;
+        credentials = clone.credentials || credentials;
+        if (!body) body = await clone.text();
+      }
+
+      const payload = JSON.parse(body);
+      if (!payload || typeof payload !== "object" || !Array.isArray(payload.messages)) return;
+      lastGenerationTemplate = {
+        url: meta.url,
+        method,
+        headers,
+        credentials,
+        body,
+        captured_at_ms: now(),
+        operation_id: armed.operation_id
+      };
+      post("template_ready", {
+        operation_id: armed.operation_id,
+        actuator_enabled: NETWORK_ACTUATOR_ENABLED,
+        method,
+        url: meta.url,
+        message_count: payload.messages.length,
+        body_keys: Object.keys(payload).slice(0, 40),
+        has_authorization: Boolean(headers.authorization),
+        has_sentinel_requirements: Boolean(headers["openai-sentinel-chat-requirements-token"]),
+        has_sentinel_proof: Boolean(headers["openai-sentinel-proof-token"]),
+        has_conduit_token: Boolean(headers["x-conduit-token"])
+      });
+    } catch (_) {}
+  }
+
+  function buildDirectConversationBody(template, prompt, conversationId = null, parentMessageId = null) {
+    if (!template?.body) throw new Error("PASI_NETWORK: no captured generation request template");
+    const payload = JSON.parse(template.body);
+    if (!payload || typeof payload !== "object" || !Array.isArray(payload.messages)) {
+      throw new Error("PASI_NETWORK: captured generation request has no reusable messages array");
+    }
+
+    const message = {
+      id: requestId(),
+      author: {role: "user"},
+      content: {content_type: "text", parts: [String(prompt || "")]},
+      metadata: {}
+    };
+    const lastIndex = payload.messages.length - 1;
+    if (lastIndex >= 0 && payload.messages[lastIndex]?.author?.role === "user") {
+      payload.messages[lastIndex] = message;
+    } else {
+      payload.messages.push(message);
+    }
+
+    if (conversationId) payload.conversation_id = String(conversationId);
+    if (parentMessageId) payload.parent_message_id = String(parentMessageId);
+    return payload;
+  }
+
+  function actuatorHeaders(headers) {
+    const forbidden = new Set([
+      "connection",
+      "content-length",
+      "cookie",
+      "host",
+      "origin",
+      "referer",
+      "transfer-encoding",
+      "user-agent"
+    ]);
+    return Object.fromEntries(
+      Object.entries(headers || {}).filter(([name]) => !forbidden.has(String(name).toLowerCase()))
+    );
+  }
+
+  async function directSubmit(operationId, prompt, conversationId = null, parentMessageId = null) {
+    if (!NETWORK_ACTUATOR_ENABLED) {
+      post("actuator_unavailable", {
+        operation_id: String(operationId || ""),
+        reason: "feature_disabled",
+        actuator_version: "pasi-actuator-v1"
+      });
+      return {ok: false, reason: "feature_disabled"};
+    }
+    if (!lastGenerationTemplate) {
+      post("actuator_unavailable", {
+        operation_id: String(operationId || ""),
+        reason: "no_captured_template",
+        actuator_version: "pasi-actuator-v1"
+      });
+      return {ok: false, reason: "no_captured_template"};
+    }
+
+    const requestIdValue = requestId();
+    const requestStartedAtMs = now();
+    const body = buildDirectConversationBody(
+      lastGenerationTemplate,
+      prompt,
+      conversationId,
+      parentMessageId
+    );
+    const meta = {
+      operation_id: String(operationId || ""),
+      request_id: requestIdValue,
+      url: lastGenerationTemplate.url,
+      method: "POST",
+      request_started_at_ms: requestStartedAtMs,
+      likely_generation: true
+    };
+
+    post("actuator_request", {
+      operation_id: meta.operation_id,
+      request_id: requestIdValue,
+      url: meta.url,
+      request_started_at_ms: requestStartedAtMs,
+      actuator_version: "pasi-actuator-v1"
+    });
+
+    try {
+      const response = await originalFetch.call(window, meta.url, {
+        method: "POST",
+        headers: actuatorHeaders(lastGenerationTemplate.headers),
+        body: JSON.stringify(body),
+        credentials: lastGenerationTemplate.credentials || "include"
+      });
+      void observeResponse(response, meta).catch((error) => {
+        post("event", {
+          operation_id: meta.operation_id,
+          request_id: requestIdValue,
+          state: "interrupted",
+          reason: "actuator_observer_error",
+          error: safeString(error?.message || error, 500)
+        });
+      });
+      return {ok: true, request_id: requestIdValue};
+    } catch (error) {
+      post("event", {
+        operation_id: meta.operation_id,
+        request_id: requestIdValue,
+        state: "interrupted",
+        reason: "actuator_request_error",
+        error: safeString(error?.message || error, 500)
+      });
+      return {ok: false, reason: "request_error"};
+    }
+  }
+
   function shouldTrack(meta, response = null) {
     if (!armed || armed.terminal) return false;
     if (meta.method_post && meta.likely_generation) return true;
@@ -520,6 +699,12 @@
       if (shouldCandidate) {
         currentRequestId = requestId();
         requestStartedAtMs = now();
+        void captureGenerationTemplate(args[0], args[1], {
+          ...meta,
+          operation_id: armed?.operation_id || "",
+          request_id: currentRequestId,
+          request_started_at_ms: requestStartedAtMs
+        });
         post("event", {
           operation_id: armed.operation_id,
           request_id: currentRequestId,
@@ -714,6 +899,22 @@
       case "ping":
         ping();
         break;
+      case "direct_submit":
+        void directSubmit(
+          data.operation_id,
+          data.prompt,
+          data.conversation_id || null,
+          data.parent_message_id || null
+        );
+        break;
+      case "actuator_status":
+        post("actuator_status", {
+          actuator_version: "pasi-actuator-v1",
+          enabled: NETWORK_ACTUATOR_ENABLED,
+          template_ready: Boolean(lastGenerationTemplate),
+          template_captured_at_ms: lastGenerationTemplate?.captured_at_ms || null
+        });
+        break;
       default:
         break;
     }
@@ -743,7 +944,9 @@
       usageLimitedText,
       authRequiredText,
       applyPatch,
-      inspectPayload
+      inspectPayload,
+      buildDirectConversationBody,
+      actuatorHeaders
     });
   }
 })();

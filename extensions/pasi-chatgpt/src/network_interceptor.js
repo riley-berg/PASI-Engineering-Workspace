@@ -138,6 +138,10 @@
   function appendRolling(state, text) {
     if (!text) return;
     state.responseText = (state.responseText + text).slice(-MAX_RESPONSE_CHARS);
+  }
+
+  function appendDiagnostic(state, text) {
+    if (!text) return;
     state.diagnostic = (state.diagnostic + text).slice(-MAX_DIAGNOSTIC_CHARS);
   }
 
@@ -178,7 +182,7 @@
 
   function inspectPayload(state, payload) {
     const raw = typeof payload === "string" ? payload : safeString(JSON.stringify(payload));
-    appendRolling(state, raw.slice(0, 4096));
+    appendDiagnostic(state, raw.slice(0, 4096));
     if (contextExhaustedText(raw)) state.failureKind = "context_exhausted";
     else if (usageLimitedText(raw)) state.failureKind = "usage_limited";
     else if (authRequiredText(raw)) state.failureKind = "auth_required";
@@ -383,7 +387,7 @@
     const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
     if (!contentType.includes("text/event-stream") && !likelyGenerationPath(new URL(state.url))) {
       const body = await readBoundedText(response);
-      appendRolling(state, body);
+      appendDiagnostic(state, body);
       if (contextExhaustedText(body) || usageLimitedText(body) || authRequiredText(body)) {
         state.failureKind = classifyFailure(body, state.http_status);
         emitTerminal(state, state.failureKind, "response_body");
@@ -528,6 +532,14 @@
     try {
       window.fetch = wrapped;
     } catch (_) {}
+
+    if (!globalThis.__PASI_NETWORK_FETCH_WATCHDOG__) {
+      globalThis.__PASI_NETWORK_FETCH_WATCHDOG__ = setInterval(() => {
+        if (window.fetch?.__PASI_NETWORK_INTERCEPTOR__ !== true) {
+          installFetch();
+        }
+      }, 1000);
+    }
   }
 
   function installXhr() {

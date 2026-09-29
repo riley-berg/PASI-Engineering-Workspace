@@ -136,7 +136,7 @@ test('parses complete SSE lines and preserves an incomplete tail', () => {
   assert.equal(tail, 'data: {"ok":2}');
 });
 
-test('extracts the correlated assistant response from cumulative and delta SSE payloads', () => {
+test('extracts assistant response from direct, patch-envelope, and delta SSE payloads', () => {
   const snapshot = source.extractAssistantResponseText({
     message: {
       author: {role: 'assistant'},
@@ -145,6 +145,27 @@ test('extracts the correlated assistant response from cumulative and delta SSE p
   });
   assert.equal(snapshot.mode, 'snapshot');
   assert.equal(snapshot.text, 'Hello network');
+
+  const envelope = source.extractAssistantResponseText({
+    p: '',
+    o: 'add',
+    v: {
+      message: {
+        author: {role: 'assistant'},
+        content: {parts: ['Envelope response']}
+      }
+    }
+  });
+  assert.equal(envelope.mode, 'snapshot');
+  assert.equal(envelope.text, 'Envelope response');
+
+  const patch = source.extractAssistantResponseText({
+    p: '/message/content/parts/0',
+    o: 'append',
+    v: 'PATCHED_RESPONSE'
+  });
+  assert.equal(patch.mode, 'delta');
+  assert.equal(patch.text, 'PATCHED_RESPONSE');
 
   const delta = source.extractAssistantResponseText({delta: 'response'});
   assert.equal(delta.mode, 'delta');

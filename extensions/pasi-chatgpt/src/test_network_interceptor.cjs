@@ -189,6 +189,7 @@ test('does not intercept unrelated POST traffic', async () => {
 
 test('survives page fetch reassignment after installation', async () => {
   const events = [];
+  const timers = timerHarness();
   let replacementCalls = 0;
   const target = {
     fetch: async () => ({ok: true, status: 200}),
@@ -196,11 +197,13 @@ test('survives page fetch reassignment after installation', async () => {
   const interceptor = source.createInterceptor({
     target,
     emit: event => events.push(event),
+    setIntervalImpl: timers.setInterval,
+    clearIntervalImpl: timers.clearInterval,
   });
 
   interceptor.install();
 
-  target.fetch = async () => {
+  const replacement = async () => {
     replacementCalls += 1;
     return {
       ok: true,
@@ -217,6 +220,9 @@ test('survives page fetch reassignment after installation', async () => {
     };
   };
 
+  target.fetch = replacement;
+  timers.tick();
+
   const response = await target.fetch(
     'https://chatgpt.com/backend-api/f/conversation',
     {method: 'POST'},
@@ -226,6 +232,26 @@ test('survives page fetch reassignment after installation', async () => {
   assert.equal(replacementCalls, 1);
   assert.equal(response.ok, true);
   assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'COMPLETED']);
+
+  events.length = 0;
+  Object.defineProperty(target, 'fetch', {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: replacement,
+  });
+  timers.tick();
+
+  await target.fetch(
+    'https://chatgpt.com/backend-api/f/conversation',
+    {method: 'POST'},
+  );
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+  assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'COMPLETED']);
+  assert.equal(replacementCalls, 2);
+
+  interceptor.uninstall();
 });
 
 test('classifies terminal context exhaustion even when the final SSE line has no newline', async () => {

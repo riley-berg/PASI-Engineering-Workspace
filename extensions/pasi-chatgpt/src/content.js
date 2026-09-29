@@ -198,7 +198,10 @@
     postNetworkControllerCommand('arm', id);
 
     return {
-      startedPromise,
+      startedPromise: Promise.race([
+        startedPromise,
+        networkTimeoutPromise(GENERATION_START_WAIT_MS, 'PASI_NETWORK: generation request was not observed after bounded submission window')
+      ]),
       terminalPromise: Promise.race([
         terminalPromise,
         networkTimeoutPromise(TIMEOUTS.generation, 'PASI_NETWORK: ChatGPT generation timed out at transport layer')
@@ -1583,26 +1586,17 @@
       const fired = await strategies[attempt - 1](readyBox, button);
       if (!fired) continue;
 
-      let networkAck = null;
       if (networkStartedPromise) {
-        networkAck = await Promise.race([
-          networkStartedPromise,
-          sleep(SUBMISSION_ACK_MS).then(() => null)
-        ]).catch(() => null);
-      }
-
-      if (networkAck) {
         return {
-          via: 'network_verified',
+          via: 'network_armed',
           attempt,
-          verified: true,
+          verified: false,
           timing: {
             injected_at_ms: injectedAtMs,
             ack_at_ms: Date.now(),
-            network_ack_at_ms: Number(networkAck.captured_at ? Date.parse(networkAck.captured_at) : Date.now()) || Date.now(),
             user_messages_added: countNewUserMessages(userMessages(), snapshot),
-            ack_verified: true,
-            submission_via: 'network_verified'
+            ack_verified: false,
+            submission_via: 'network_armed'
           }
         };
       }
@@ -1961,7 +1955,13 @@
             readyBox: box,
             networkStartedPromise: networkGeneration?.startedPromise || null
           });
-          const browserTiming = { ...(submission.timing || {}) };
+          const networkStarted = await networkGeneration.startedPromise;
+          const browserTiming = {
+            ...(submission.timing || {}),
+            network_submission_verified: true,
+            network_request_id: networkStarted.request_id || null,
+            network_request_observed_at_ms: Number(networkStarted.captured_at ? Date.parse(networkStarted.captured_at) : Date.now()) || Date.now()
+          };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
           if (
             Number.isFinite(previousCompletionAckAtMs) &&
@@ -1992,6 +1992,7 @@
             submission_via: submission.via,
             submission_attempt: submission.attempt,
             submission_verified: submission.verified,
+            network_submission_verified: browserTiming.network_submission_verified === true,
             timing: browserTiming
           });
           if (!submission.verified) {

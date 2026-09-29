@@ -21,7 +21,7 @@ jobs:
         run: |
           env -u PYTHONPATH python scripts/pasi_168h_acceptance.py --hours 168 --smoke
           bash -n scripts/run_p0_4_168h.sh
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Frontend tests

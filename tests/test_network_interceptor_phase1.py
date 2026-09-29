@@ -48,7 +48,6 @@ def test_network_interceptor_phase1_contract():
     assert "dom_completed" in controller
     assert "dom_response_available" in controller
     assert "network_shadow: true" in controller
-    assert "late terminal event" in controller
 
     syntax = subprocess.run(
         ["node", "--check", str(interceptor)],

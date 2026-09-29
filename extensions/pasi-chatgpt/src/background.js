@@ -121,12 +121,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'pasi-network-bind-operation') {
     const senderUrl = String(sender?.url || '');
     const tabId = sender?.tab?.id;
-    const operationId = String(message?.operation_id || '').trim();
+    const rawOperationId = message?.operation_id;
+    const operationId = rawOperationId == null ? null : String(rawOperationId).trim();
     if (
       typeof tabId !== 'number' ||
       !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
-      !operationId ||
-      operationId.length > 200
+      (operationId !== null && (!operationId || operationId.length > 200))
     ) {
       sendResponse({ ok: false, bound: false });
       return undefined;

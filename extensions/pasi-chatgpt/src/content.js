@@ -926,7 +926,7 @@
           conversation_context_exhausted: null,
           thinking_enabled: null,
           thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : 'network_active',
-          page_visible: document.visibilityState !== 'hidden',
+          page_visible: null,
           composer_present: null,
           native_controller: true,
           runtime_error_telemetry: true,

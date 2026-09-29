@@ -788,6 +788,9 @@
       classification: typeof event.classification === 'string'
         ? event.classification.slice(0, 120)
         : '',
+      responseText: typeof event.responseText === 'string'
+        ? event.responseText.slice(0, 120000)
+        : '',
       telemetry
     };
   }
@@ -829,7 +832,8 @@
           domCompleted: false,
           domCompletionAtMs: null,
           domResponseAvailable: false,
-          domChatUrl: null
+          domChatUrl: null,
+          responseText: ''
         };
         networkShadowByOperationId.set(request.operationId, operation);
       }
@@ -839,10 +843,19 @@
       }
       if (bounded.eventType === 'STARTED') operation.started = bounded;
       if (['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)) operation.terminal = bounded;
+      if (bounded.responseText) operation.responseText = bounded.responseText;
       operation.last = bounded;
     }
 
     return bounded;
+  }
+
+  function networkResponseEvidence(completionMarkers = []) {
+    if (!activeOperationId) return '';
+    const summary = networkShadowByOperationId.get(activeOperationId);
+    if (!summary || summary.terminal?.eventType !== 'COMPLETED') return '';
+    const text = typeof summary.responseText === 'string' ? summary.responseText : '';
+    return completionMarkersSatisfied(text, completionMarkers) ? text : '';
   }
 
   function installNetworkLifecycleShadow() {
@@ -1702,11 +1715,15 @@
 
   async function waitForResponse(baseline, completionMarkers = [], evidenceContext = null) {
     let sawGeneration = false;
-    const responseEvidence = () => assistantResponseEvidence(
-      evidenceContext?.assistantSnapshot,
-      evidenceContext?.prompt,
-      baseline
-    );
+    const responseEvidence = () => {
+      const networkText = networkResponseEvidence(completionMarkers);
+      if (networkText) return networkText;
+      return assistantResponseEvidence(
+        evidenceContext?.assistantSnapshot,
+        evidenceContext?.prompt,
+        baseline
+      );
+    };
     let generationEndedAt = 0;
     let failureReason = null;
 
@@ -1855,9 +1872,18 @@
     }, 5000);
   }
 
-  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null) {
+  async function finishOperation(
+    operationId,
+    responseText = '',
+    requireResponseText = false,
+    timing = null,
+    completionMarkers = []
+  ) {
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
+    }
+    if (!completionMarkersSatisfied(responseText, completionMarkers)) {
+      throw new Error('PASI_NATIVE: response text does not satisfy completion markers; completion acknowledgement withheld');
     }
     // Response detection is already authoritative for this operation.
     // Conversation signature/count telemetry is recorded independently for
@@ -2109,7 +2135,10 @@
             operation.operation_id,
             response,
             true,
-            browserTiming
+            browserTiming,
+            Array.isArray(operation.completion_markers)
+              ? operation.completion_markers
+              : []
           );
           chainedOperation = completion?.next_operation || null;
           finalized = true;

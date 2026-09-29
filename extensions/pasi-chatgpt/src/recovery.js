@@ -122,6 +122,64 @@
     networkLastReadyAtMs = Date.now();
 
     const state = String(data.state || '');
+    if (state === 'progress') {
+      const current = readRecoveryState();
+      if (current?.operation_id === operationId &&
+          current.verification_source === 'network_interceptor' &&
+          current.network_stalled === true) {
+        const next = { ...current };
+        delete next.network_stalled;
+        delete next.stalled_at_ms;
+        next.network_progress_at_ms = Number(data.progress_at_ms || Date.now());
+        next.recovery_reason = null;
+        writeRecoveryState(next);
+        void report('chatgpt_recovery', {
+          phase: 'network_stall_cleared',
+          operation_id: operationId,
+          recovery_action: 'resume_network_monitoring',
+          network_request_id: data.request_id || null,
+          network_progress_at_ms: next.network_progress_at_ms,
+          verification_source: 'network_interceptor'
+        });
+      }
+      return;
+    }
+
+    if (state === 'context_exhausted' || state === 'usage_limited' || state === 'auth_required' || state === 'interrupted' || state === 'provider_error' || state === 'unknown_failure') {
+      const current = readRecoveryState();
+      if (!current || current.operation_id === operationId) {
+        writeRecoveryState({
+          ...(current || {
+            operation_id: operationId,
+            operation_type: 'prompt',
+            reload_count: 0,
+            phase: 'monitoring'
+          }),
+          operation_id: operationId,
+          verification_source: 'network_interceptor',
+          network_state: state,
+          network_reason: data.reason || null,
+          ...(state === 'context_exhausted' ? { phase: 'context_exhausted' } : {}),
+          ...(state === 'interrupted' ? {
+            phase: 'monitoring',
+            network_recovery: true,
+            recovery_reason: data.reason || 'connection_error',
+            response_stopped_on_loss: true,
+            checkpoint_preserved: true
+          } : {})
+        });
+      }
+      if (state === 'context_exhausted') {
+        void report('chatgpt_recovery', {
+          phase: 'network_context_exhausted',
+          operation_id: operationId,
+          recovery_action: 'verified_context_exhaustion',
+          replacement_reason: 'context_exhausted',
+          verification_source: 'network_interceptor'
+        });
+      }
+    }
+
     if (state === 'stalled') {
       const current = readRecoveryState();
       if (!current || current.operation_id === operationId) {
@@ -157,7 +215,7 @@
       void report('chatgpt_recovery', {
         phase: 'network_terminal',
         operation_id: operationId,
-        recovery_action: 'defer_to_controller',
+        recovery_action: 'network_state_persisted',
         network_state: state,
         reason: data.reason || null,
         verification_source: 'network_interceptor'

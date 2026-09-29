@@ -50,6 +50,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: ChatGPT extension syntax
+        run: |
+          node --check extensions/pasi-chatgpt/src/network_interceptor.js
+          node --check extensions/pasi-chatgpt/src/content.js
+          node --check extensions/pasi-chatgpt/src/recovery.js
       - name: ChatGPT network interceptor tests
         run: node --test tests/test_chatgpt_network_interceptor.mjs
       - name: Frontend tests

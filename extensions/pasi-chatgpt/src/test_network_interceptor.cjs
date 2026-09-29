@@ -1,7 +1,20 @@
 const assert = require('node:assert/strict');
 const {test} = require('node:test');
 
-const source = require('./network-interceptor.js');
+const fs = require('node:fs');
+const vm = require('node:vm');
+
+const interceptorPath = require.resolve('./network-interceptor.js');
+const interceptorSource = fs.readFileSync(interceptorPath, 'utf8');
+const sandbox = {
+  module: {exports: {}},
+  exports: {},
+  fetch: async () => ({ok: true, status: 200}),
+  TextDecoder,
+  URL,
+};
+vm.runInNewContext(interceptorSource, sandbox, {filename: interceptorPath});
+const source = sandbox.module.exports;
 
 function fakeResponse(chunks, {status = 200, ok = true} = {}) {
   const makeReader = () => ({

@@ -8,7 +8,7 @@ def test_network_interceptor_phase1_contract():
     extension = root / "extensions" / "pasi-chatgpt"
     manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
     interceptor = extension / "src" / "network-interceptor.js"
-    node_tests = extension / "src" / "test_network_interceptor.js"
+    node_tests = extension / "src" / "test_network_interceptor.cjs"
     background = (extension / "src" / "background.js").read_text(encoding="utf-8")
 
     assert interceptor.is_file()

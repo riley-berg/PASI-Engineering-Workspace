@@ -382,6 +382,46 @@ test('binds operation IDs from lifecycle events', () => {
   assert.equal(interceptor.bindOperationEventListener(), true);
 });
 
+test('keeps captured operation ID on terminal event after global clear', async () => {
+  const events = [];
+  let releaseRead;
+  const target = {
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      clone() {
+        return {
+          body: {
+            getReader: () => ({
+              read: () => new Promise(resolve => { releaseRead = resolve; }),
+            }),
+          },
+        };
+      },
+    }),
+  };
+  const interceptor = source.createInterceptor({
+    target,
+    emit: event => events.push(event),
+    setIntervalImpl: () => 1,
+    clearIntervalImpl: () => {},
+  });
+  interceptor.install();
+  interceptor.bindOperation('op-captured');
+  await target.fetch(
+    'https://chatgpt.com/backend-api/f/conversation',
+    {method: 'POST'},
+  );
+  interceptor.bindOperation(null);
+  releaseRead({done: true, value: undefined});
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+  assert.equal(events[0].eventType, 'STARTED');
+  assert.equal(events[0].operationId, 'op-captured');
+  assert.equal(events.at(-1).eventType, 'COMPLETED');
+  assert.equal(events.at(-1).operationId, 'op-captured');
+});
+
 test('defers operation correlation clear until active stream terminates', async () => {
   const events = [];
   let releaseRead;

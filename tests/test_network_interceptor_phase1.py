@@ -10,6 +10,7 @@ def test_network_interceptor_phase1_contract():
     interceptor = extension / "src" / "network-interceptor.js"
     node_tests = extension / "src" / "test_network_interceptor.cjs"
     background = (extension / "src" / "background.js").read_text(encoding="utf-8")
+    controller = (extension / "src" / "content.js").read_text(encoding="utf-8")
 
     assert interceptor.is_file()
     assert node_tests.is_file()
@@ -29,6 +30,16 @@ def test_network_interceptor_phase1_contract():
     assert "MutationObserver" not in interceptor.read_text(encoding="utf-8")
     assert "document.querySelector" not in interceptor.read_text(encoding="utf-8")
     assert "document.body" not in interceptor.read_text(encoding="utf-8")
+
+    assert "installNetworkLifecycleShadow" in controller
+    assert "PASI_NETWORK_LIFECYCLE" in controller
+    assert "PASI_NETWORK_BIND_OPERATION" in controller
+    assert "bindNetworkOperation(activeOperationId)" in controller
+    assert "chatgpt_network_generation_started" in controller
+    assert "chatgpt_network_generation_terminal" in controller
+    assert "chatgpt_network_generation_stalled" in controller
+    assert "chatgpt_network_dom_shadow" in controller
+    assert "network_shadow: true" in controller
 
     syntax = subprocess.run(
         ["node", "--check", str(interceptor)],

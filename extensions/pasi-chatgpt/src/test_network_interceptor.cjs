@@ -166,6 +166,7 @@ test('observes a generation stream without consuming the original response', asy
   assert.deepEqual(events.map(event => event.eventType), ['STARTED', 'COMPLETED']);
   assert.equal(events[0].operationId, 'phase1-op');
   assert.equal(events[0].requestId, events[1].requestId);
+  assert.equal(interceptor.health().trackingRequestId, null);
 });
 
 test('does not intercept unrelated POST traffic', async () => {

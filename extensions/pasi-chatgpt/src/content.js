@@ -1832,6 +1832,9 @@
     };
     if (timing && typeof timing === 'object') body.timing = timing;
     if (typeof responseText === 'string') Object.assign(body, completionProgress(responseText));
+    const networkState = typeof timing?.network_state === 'string'
+      ? timing.network_state
+      : null;
     const publishResponseTelemetry = () => {
       void reportObservation('chatgpt_response', {
         chat_url: body.chat_url,
@@ -1839,15 +1842,17 @@
         response_text_available: body.response_text_available,
         ...(typeof responseText === 'string' ? completionProgress(responseText) : {}),
         ...(body.timing ? { timing: body.timing } : {}),
-        conversation_context_exhausted: contextExhausted(),
-        chat_exhausted: contextExhausted(),
-        provider_usage_limited: usageLimited(),
+        conversation_context_exhausted: networkState === 'context_exhausted',
+        chat_exhausted: networkState === 'context_exhausted',
+        provider_usage_limited: networkState === 'usage_limited',
+        network_state: networkState,
         active_operation_id: operationId
       }).catch(() => {});
 
       void reportObservation('chat_response_received', {
         operation_id: operationId,
         phase: 'response_complete',
+        network_state: networkState,
         captured_at: new Date().toISOString()
       });
     };
@@ -1870,21 +1875,15 @@
                 payload.next_operation.__pasi_baseline_fingerprint = fingerprintFromText(responseText);
               }
             }
-            // Publish a fresh conversation signature before the completion
-            // acknowledgement returns to the acceptance runner. The periodic
-            // heartbeat can lag by several seconds, so this is verification
-            // telemetry only and never an acceptance gate.
-            await reportObservation('chatgpt_state', {
+            void reportObservation('chatgpt_state', {
               chat_url: chatUrl(),
-              conversation_context_exhausted: contextExhausted(),
-              chat_exhausted: contextExhausted(),
-              provider_usage_limited: usageLimited(),
+              conversation_context_exhausted: networkState === 'context_exhausted',
+              chat_exhausted: networkState === 'context_exhausted',
+              provider_usage_limited: networkState === 'usage_limited',
+              network_state: networkState,
+              network_request_id: timing?.network_request_id || null,
               github_attached: githubAttached,
               reasoning_mode: reasoningMode,
-              reasoning_capability: reasoningMode === 'unavailable'
-                ? 'unavailable'
-                : (thinkingEnabled() === true ? 'available' : 'unknown'),
-              conversation_signature: conversationSignature(),
               active_operation_id: operationId,
               native_controller: true
             }).catch(() => {});
@@ -1976,15 +1975,12 @@
           // Take the ready composer synchronously on this hot path, with the
           // existing event-driven wait as a bounded fallback if the UI is one
           // render behind.
-          const immediateBox = fastHandoff ? (() => {
-            const current = composer();
-            return current && !generating() ? current : null;
-          })() : null;
+          const immediateBox = fastHandoff ? composer() : null;
           const box = immediateBox || await waitUntil(() => {
             const current = composer();
-            return current && !generating() ? current : null;
+            return current && (fastHandoff || !generating()) ? current : null;
           }, PREVIOUS_RESPONSE_WAIT_MS, DOM_POLL_MS);
-          if (!box) throw new Error(generating() ? 'PASI_NATIVE: previous response still generating' : 'PASI_NATIVE: composer unavailable');
+          if (!box) throw new Error('PASI_NATIVE: composer unavailable');
           const baseline = typeof operation.__pasi_baseline_fingerprint === 'string'
             ? operation.__pasi_baseline_fingerprint
             : fingerprint();

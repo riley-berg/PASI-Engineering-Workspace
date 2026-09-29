@@ -244,13 +244,26 @@ async function injectExistingChatTabs() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
+        files: ['src/network_interceptor.js'],
+        world: 'MAIN',
+        injectImmediately: true
+      });
+    } catch (_) {
+      // Retry later without creating, navigating, or reloading a tab.
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
         files: [
           'src/timeout-config.js',
           'src/detectors.js',
           'src/recovery_progress.js',
           'src/content.js',
           'src/recovery.js'
-        ]
+        ],
+        world: 'ISOLATED',
+        injectImmediately: true
       });
     } catch (_) {
       // Retry later without creating, navigating, or reloading a tab.

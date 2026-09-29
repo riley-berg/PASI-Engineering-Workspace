@@ -733,11 +733,16 @@
       return;
     }
 
-    if (!contextExhausted()) {
+    const networkVerifiedExhaustion =
+      state.verification_source === 'network_interceptor' &&
+      state.network_state === 'context_exhausted';
+
+    if (!networkVerifiedExhaustion && !contextExhausted()) {
       await report('chatgpt_recovery', {
         phase: 'context_recovery_waiting',
         operation_id: operationId,
-        recovery_action: 'wait_for_verified_exhaustion'
+        recovery_action: 'wait_for_verified_exhaustion',
+        verification_source: 'dom_fallback'
       });
       return;
     }

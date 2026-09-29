@@ -915,8 +915,28 @@
         lastKnownChatUrl = currentUrl;
       }
 
-      // One detector pass per heartbeat. Repeated DOM scans here are
-      // unnecessary and can compete with the prompt/response hot path.
+      // During an active network generation, do not run any DOM detector,
+      // composer query, or reasoning selector scan. The network interceptor is
+      // the authoritative lifecycle/transport signal on this hot path.
+      if (processing && networkInterceptorReady) {
+        await reportObservation('chatgpt_health', {
+          chat_url: currentUrl,
+          provider_usage_limited: null,
+          auth_required: null,
+          conversation_context_exhausted: null,
+          thinking_enabled: null,
+          thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : 'network_active',
+          page_visible: document.visibilityState !== 'hidden',
+          composer_present: null,
+          native_controller: true,
+          runtime_error_telemetry: true,
+          network_interceptor: 'healthy',
+          network_interceptor_version: networkInterceptorVersion,
+          active_operation_id: activeOperationId
+        }, 2000);
+        return;
+      }
+
       const detected = detectorState();
       const exhausted = detected.context_exhausted === true;
       const limited = !exhausted && detected.usage_limited === true;

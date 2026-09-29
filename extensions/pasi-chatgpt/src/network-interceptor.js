@@ -126,7 +126,9 @@
     const target = options.target || globalThis;
     const endpointMarkers = Array.isArray(options.endpointMarkers)
       ? options.endpointMarkers.map(String)
-      : [String(options.endpointMarker || ENDPOINT_MARKER)];
+      : options.endpointMarker
+        ? [String(options.endpointMarker)]
+        : [...ENDPOINT_MARKERS];
     const stallThresholdMs =
       Number.isFinite(options.stallThresholdMs) && options.stallThresholdMs > 0
         ? options.stallThresholdMs

@@ -179,7 +179,7 @@
       emitExternal({
         eventType,
         eventId: randomId(),
-        operationId: state.currentOperationId,
+        operationId: trackingState?.operationId ?? state.currentOperationId,
         requestId: trackingState?.requestId || null,
         timestamp: now(),
         ...payload,
@@ -293,6 +293,7 @@
       state.requestCounter += 1;
       const trackingState = {
         requestId: `REQ-${now()}-${state.requestCounter}`,
+        operationId: state.currentOperationId,
         isTerminal: false,
         startTime: now(),
       };

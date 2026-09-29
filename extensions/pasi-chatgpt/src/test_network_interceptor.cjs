@@ -382,6 +382,49 @@ test('binds operation IDs from lifecycle events', () => {
   assert.equal(interceptor.bindOperationEventListener(), true);
 });
 
+test('defers operation correlation clear until active stream terminates', async () => {
+  const events = [];
+  let releaseRead;
+  const target = {
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      clone() {
+        return {
+          body: {
+            getReader: () => ({
+              read: () => new Promise(resolve => { releaseRead = resolve; }),
+            }),
+          },
+        };
+      },
+    }),
+  };
+  const interceptor = source.createInterceptor({
+    target,
+    emit: event => events.push(event),
+    setIntervalImpl: () => 1,
+    clearIntervalImpl: () => {},
+  });
+  interceptor.install();
+  interceptor.bindOperation('op-live');
+  const response = await target.fetch(
+    'https://chatgpt.com/backend-api/f/conversation',
+    {method: 'POST'},
+  );
+  assert.equal(response.ok, true);
+  interceptor.bindOperation(null);
+  assert.equal(interceptor.health().currentOperationId, 'op-live');
+
+  releaseRead({done: true, value: undefined});
+  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+
+  assert.equal(events[0].operationId, 'op-live');
+  assert.equal(events.at(-1).eventType, 'COMPLETED');
+  assert.equal(events.at(-1).operationId, 'op-live');
+  assert.equal(interceptor.health().currentOperationId, null);
+});
+
 test('installation is idempotent and health exposes operation state', () => {
   const target = {fetch: async () => ({ok: true, status: 200})};
   const interceptor = source.createInterceptor({

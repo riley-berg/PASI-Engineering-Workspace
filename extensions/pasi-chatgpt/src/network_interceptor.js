@@ -165,6 +165,11 @@
       return;
     }
 
+    if (/\/message\/status$/.test(path) && typeof value === "string") {
+      if (value === "finished_successfully") state.doneMarker = true;
+      return;
+    }
+
     if (path === "/message" && value && typeof value === "object") {
       const role = value?.author?.role;
       const parts = value?.content?.parts;
@@ -183,9 +188,6 @@
   function inspectPayload(state, payload) {
     const raw = typeof payload === "string" ? payload : safeString(JSON.stringify(payload));
     appendDiagnostic(state, raw.slice(0, 4096));
-    if (contextExhaustedText(raw)) state.failureKind = "context_exhausted";
-    else if (usageLimitedText(raw)) state.failureKind = "usage_limited";
-    else if (authRequiredText(raw)) state.failureKind = "auth_required";
 
     if (raw === "[DONE]") {
       state.doneMarker = true;
@@ -201,6 +203,21 @@
 
     if (!value || typeof value !== "object") return;
 
+    const structuredError = (
+      value.error ||
+      value.detail ||
+      value.response?.error ||
+      value.message?.error
+    );
+    if (structuredError) {
+      state.failureKind = classifyFailure(
+        typeof structuredError === "string"
+          ? structuredError
+          : JSON.stringify(structuredError),
+        500
+      );
+    }
+
     if (value.type === "response.output_text.delta" && typeof value.delta === "string") {
       state.assistantSeen = true;
       appendRolling(state, value.delta);
@@ -209,11 +226,15 @@
       state.assistantSeen = true;
       setResponseText(state, value.text);
     }
-    if (value.type === "error") {
-      state.failureKind = classifyFailure(JSON.stringify(value), 500);
+    if (value.type === "response.completed") {
+      state.doneMarker = true;
+      if (value.response?.id) state.conversationId = String(value.response.id);
     }
-    if (value.type === "response.failed") {
-      state.failureKind = classifyFailure(JSON.stringify(value), 500);
+    if (value.type === "response.failed" || value.type === "response.incomplete" || value.type === "error") {
+      state.failureKind = classifyFailure(
+        JSON.stringify(value.error || value.response?.error || value),
+        500
+      );
     }
 
     if (value.message?.author?.role === "assistant") {
@@ -221,6 +242,9 @@
       if (Array.isArray(parts) && typeof parts[0] === "string") {
         state.assistantSeen = true;
         setResponseText(state, parts[0]);
+      }
+      if (value.message?.status === "finished_successfully") {
+        state.doneMarker = true;
       }
       if (value.conversation_id) state.conversationId = String(value.conversation_id);
     }
@@ -239,7 +263,7 @@
   }
 
   function consumeSseChunk(state, bytes) {
-    const text = new TextDecoder().decode(bytes, {stream: true});
+    const text = new TextDecoder().decode(bytes, {stream: true}).replace(/\r\n/g, "\n");
     state.sseBuffer += text;
 
     let boundary = -1;
@@ -418,8 +442,12 @@
 
       if (state.failureKind) {
         emitTerminal(state, state.failureKind, "stream_payload");
+      } else if (state.doneMarker) {
+        emitTerminal(state, "completed", "done_marker");
+      } else if (state.assistantSeen && state.responseText.trim()) {
+        emitTerminal(state, "interrupted", "stream_end_without_terminal_marker");
       } else {
-        emitTerminal(state, "completed", state.doneMarker ? "done_marker" : "stream_end");
+        emitTerminal(state, "interrupted", "empty_or_incomplete_stream");
       }
     } catch (error) {
       const reason = safeString(error?.message || error, 500);

@@ -547,6 +547,34 @@ def hinted_task(state: dict[str, object]) -> Task | None:
     return None
 
 
+def preverified_task(task: Task, root: Path) -> dict[str, object] | None:
+    if task.task_id != "P0.6":
+        return None
+    try:
+        from scripts.verify_workflow_consolidation import verify
+        result = verify(root)
+    except Exception as exc:
+        emit({
+            "event": "task_preverification_error",
+            "at": utcnow().isoformat(),
+            "task_id": task.task_id,
+            "error": str(exc),
+        })
+        return None
+    if not result.get("valid"):
+        return None
+    commit = git(root, "rev-parse", "HEAD")
+    return {
+        "event": "task_preverified",
+        "at": utcnow().isoformat(),
+        "task_id": task.task_id,
+        "phase": task.phase.id,
+        "issue": task.phase.issue,
+        "commit": commit,
+        "verification": result,
+    }
+
+
 def task_history_context(state: dict[str, object]) -> str:
     recent = state.get("recent_tasks", [])
     if not isinstance(recent, list) or not recent:
@@ -623,14 +651,14 @@ def main() -> int:
     state = existing if same_run else {
         "run_id": run_id, "repo": REPO, "branch": branch, "worktree": str(worktree),
         "started_at": utcnow().isoformat(), "deadline_at": deadline.isoformat(), "status": "running",
-        "completed_tasks": 0, "failed_tasks": 0, "recent_tasks": [], "deferred_tasks": {},
+        "completed_tasks": 0, "failed_tasks": 0, "recent_tasks": [], "deferred_tasks": {}, "blocked_tasks": {},
         "last_completed_task": None,
         "last_operation_metrics": None,
         "p0_4_started_at": utcnow().isoformat(), "p0_4_status": "running",
     }
     state["status"] = "running"
     state["deadline_at"] = deadline.isoformat()
-    state.setdefault("completed_tasks", 0); state.setdefault("failed_tasks", 0); state.setdefault("recent_tasks", []); state.setdefault("deferred_tasks", {})
+    state.setdefault("completed_tasks", 0); state.setdefault("failed_tasks", 0); state.setdefault("recent_tasks", []); state.setdefault("deferred_tasks", {}); state.setdefault("blocked_tasks", {})
     state.setdefault("last_completed_task", None); state.setdefault("last_operation_metrics", None)
     state.setdefault("p0_4_started_at", utcnow().isoformat()); state.setdefault("p0_4_status", "running")
     write_state(state)
@@ -652,10 +680,18 @@ def main() -> int:
             else:
                 discovered = all_tasks()
             p0_4 = next((task for task in discovered if task.task_id == "P0.4"), None)
-            pending = [task for task in discovered if not task.checked and task.task_id != "P0.4"]
+            blocked_tasks = state.get("blocked_tasks", {})
+            blocked_tasks = dict(blocked_tasks) if isinstance(blocked_tasks, dict) else {}
+            pending = [
+                task for task in discovered
+                if not task.checked and task.task_id != "P0.4" and task.task_id not in blocked_tasks
+            ]
             if hinted is not None and not pending:
                 discovered = all_tasks()
-                pending = [task for task in discovered if not task.checked and task.task_id != "P0.4"]
+                pending = [
+                    task for task in discovered
+                    if not task.checked and task.task_id != "P0.4" and task.task_id not in blocked_tasks
+                ]
             if not pending:
                 if utcnow() < deadline:
                     telemetry.sample()
@@ -725,6 +761,32 @@ def main() -> int:
             state["previous_task_context"] = history
             write_state(state)
             try:
+                preverified = preverified_task(task, root)
+                if preverified is not None:
+                    mark_checked(task)
+                    state["completed_tasks"] = int(state.get("completed_tasks", 0)) + 1
+                    state["last_commit"] = preverified["commit"]
+                    state["last_completed_task"] = {
+                        "task_id": task.task_id,
+                        "phase": task.phase.id,
+                        "title": task.title,
+                        "commit": preverified["commit"],
+                        "preverified": True,
+                    }
+                    state["recent_tasks"] = (list(state.get("recent_tasks", [])) + [{
+                        "task_id": task.task_id,
+                        "phase": task.phase.id,
+                        "title": task.title,
+                        "commit": preverified["commit"],
+                        "preverified": True,
+                    }])[-12:]
+                    deferred.pop(task.task_id, None)
+                    state["deferred_tasks"] = deferred
+                    blocked_tasks.pop(task.task_id, None)
+                    state["blocked_tasks"] = blocked_tasks
+                    emit(preverified)
+                    write_state(state)
+                    continue
                 reconciled = reconcile_committed_task(task, worktree, branch, run_id)
                 if reconciled is not None:
                     state["completed_tasks"] = int(state.get("completed_tasks", 0)) + 1
@@ -802,22 +864,123 @@ def main() -> int:
                     emit({"event": "operation_metrics", "at": utcnow().isoformat(), "task_id": task.task_id, "metrics": metrics})
                 write_state(state)
             except subprocess.TimeoutExpired as exc:
-                failure = f"executor timeout: {exc}"; signature = telemetry.record_failure(task, exc)
-                state["failed_tasks"] = int(state.get("failed_tasks", 0)) + 1
-                emit({"event": "task_failed", "at": utcnow().isoformat(), "task_id": task.task_id, "phase": task.phase.id, "error": failure, "failure_signature": signature})
-                count = int(state.get("task_failure_attempts", {}).get(task.task_id, 0)) + 1
-                attempts = dict(state.get("task_failure_attempts", {})); attempts[task.task_id] = count; state["task_failure_attempts"] = attempts
-                delay = TASK_RETRY_BACKOFF_SECONDS[min(count - 1, len(TASK_RETRY_BACKOFF_SECONDS) - 1)]
-                deferred[task.task_id] = (utcnow() + timedelta(seconds=delay)).isoformat(); state["deferred_tasks"] = deferred; state["status"] = "running"; write_state(state)
-            except Exception as exc:
+                failure = f"executor timeout: {exc}"
                 signature = telemetry.record_failure(task, exc)
                 state["failed_tasks"] = int(state.get("failed_tasks", 0)) + 1
-                emit({"event": "task_failed", "at": utcnow().isoformat(), "task_id": task.task_id, "phase": task.phase.id, "error": str(exc), "failure_signature": signature})
-                attempts = dict(state.get("task_failure_attempts", {})); count = int(attempts.get(task.task_id, 0)) + 1; attempts[task.task_id] = count; state["task_failure_attempts"] = attempts
+                emit({
+                    "event": "task_failed",
+                    "at": utcnow().isoformat(),
+                    "task_id": task.task_id,
+                    "phase": task.phase.id,
+                    "error": failure,
+                    "failure_signature": signature,
+                })
+                attempts = dict(state.get("task_failure_attempts", {}))
+                count = int(attempts.get(task.task_id, 0)) + 1
+                attempts[task.task_id] = count
+                state["task_failure_attempts"] = attempts
+                if count >= MAX_TASK_ATTEMPTS:
+                    blocked_tasks[task.task_id] = {
+                        "reason": "max_task_attempts_exceeded",
+                        "attempts": count,
+                        "last_error": failure,
+                        "blocked_at": utcnow().isoformat(),
+                    }
+                    deferred.pop(task.task_id, None)
+                    state["blocked_tasks"] = blocked_tasks
+                    state["deferred_tasks"] = deferred
+                    state["status"] = "running"
+                    emit({
+                        "event": "task_bounded_retry_exhausted",
+                        "at": utcnow().isoformat(),
+                        "task_id": task.task_id,
+                        "attempts": count,
+                        "error": failure,
+                    })
+                    print(
+                        f"[PASI 168h] {task.task_id} exhausted {MAX_TASK_ATTEMPTS} attempts; "
+                        "moving to the next eligible task.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    write_state(state)
+                    continue
                 delay = TASK_RETRY_BACKOFF_SECONDS[min(count - 1, len(TASK_RETRY_BACKOFF_SECONDS) - 1)]
-                deferred[task.task_id] = (utcnow() + timedelta(seconds=delay)).isoformat(); state["deferred_tasks"] = deferred; state["status"] = "running"; write_state(state)
+                deferred[task.task_id] = (utcnow() + timedelta(seconds=delay)).isoformat()
+                state["deferred_tasks"] = deferred
+                state["status"] = "running"
+                write_state(state)
+                print(
+                    f"[PASI 168h] {task.task_id} attempt {count}/{MAX_TASK_ATTEMPTS} timed out; "
+                    f"retrying in {delay:g}s.",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 telemetry.sample()
-                if delay > 0: time.sleep(min(delay, 15.0))
+                if delay > 0:
+                    time.sleep(min(delay, 15.0))
+            except Exception as exc:
+                failure = str(exc) or repr(exc)
+                signature = telemetry.record_failure(task, exc)
+                state["failed_tasks"] = int(state.get("failed_tasks", 0)) + 1
+                emit({
+                    "event": "task_failed",
+                    "at": utcnow().isoformat(),
+                    "task_id": task.task_id,
+                    "phase": task.phase.id,
+                    "error": failure,
+                    "failure_signature": signature,
+                })
+                attempts = dict(state.get("task_failure_attempts", {}))
+                count = int(attempts.get(task.task_id, 0)) + 1
+                attempts[task.task_id] = count
+                state["task_failure_attempts"] = attempts
+                if count >= MAX_TASK_ATTEMPTS:
+                    blocked_tasks[task.task_id] = {
+                        "reason": "max_task_attempts_exceeded",
+                        "attempts": count,
+                        "last_error": failure,
+                        "blocked_at": utcnow().isoformat(),
+                    }
+                    deferred.pop(task.task_id, None)
+                    state["blocked_tasks"] = blocked_tasks
+                    state["deferred_tasks"] = deferred
+                    state["status"] = "running"
+                    emit({
+                        "event": "task_bounded_retry_exhausted",
+                        "at": utcnow().isoformat(),
+                        "task_id": task.task_id,
+                        "attempts": count,
+                        "error": failure,
+                    })
+                    print(
+                        f"[PASI 168h] {task.task_id} exhausted {MAX_TASK_ATTEMPTS} attempts; "
+                        "moving to the next eligible task.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    write_state(state)
+                    continue
+                delay = TASK_RETRY_BACKOFF_SECONDS[min(count - 1, len(TASK_RETRY_BACKOFF_SECONDS) - 1)]
+                deferred[task.task_id] = (utcnow() + timedelta(seconds=delay)).isoformat()
+                state["deferred_tasks"] = deferred
+                state["status"] = "running"
+                write_state(state)
+                print(
+                    f"[PASI 168h] {task.task_id} attempt {count}/{MAX_TASK_ATTEMPTS} failed: "
+                    f"{failure[:1000]}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(
+                    f"[PASI 168h] retrying {task.task_id} in {delay:g}s; "
+                    f"details: {state_dir() / 'last-executor-output.txt'}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                telemetry.sample()
+                if delay > 0:
+                    time.sleep(min(delay, 15.0))
     finally:
         telemetry.stop()
 

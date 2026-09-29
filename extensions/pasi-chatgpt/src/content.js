@@ -885,6 +885,27 @@
           }, 5000);
         }
       }
+      if (
+        bounded.operationId &&
+        ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
+      ) {
+        const summary = networkShadowByOperationId.get(bounded.operationId);
+        if (summary?.domCompleted) {
+          void reportObservation('chatgpt_network_dom_shadow', {
+            operation_id: bounded.operationId,
+            network_request_ids: summary.requestIds,
+            network_started: Boolean(summary.started),
+            network_terminal_event: summary.terminal?.eventType || null,
+            network_terminal_reason: summary.terminal?.reason || null,
+            network_last_event: summary.last?.eventType || null,
+            dom_completed: true,
+            dom_completion_at_ms: summary.domCompletionAtMs,
+            dom_response_available: summary.domResponseAvailable,
+            dom_chat_url: summary.domChatUrl,
+            network_shadow: true
+          }, 5000);
+        }
+      }
     });
     return true;
   }

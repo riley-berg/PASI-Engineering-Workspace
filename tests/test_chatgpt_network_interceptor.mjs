@@ -327,7 +327,17 @@ test("DOM actuator retains bounded submission strategies while network lifecycle
   assert.match(source, /form\.requestSubmit/);
   assert.match(source, /nativeMouseActivate/);
   assert.match(source, /dispatchEnter/);
+  assert.doesNotMatch(source, /async function waitForResponse/);
+  assert.doesNotMatch(source, /assistantResponseEvidence/);
+  assert.doesNotMatch(source, /armM0RecoveryProbe/);
   const promptPath = source.slice(source.indexOf("case 'prompt':"), source.indexOf("default: throw new Error"));
   assert.match(promptPath, /networkGeneration\.terminalPromise/);
   assert.doesNotMatch(promptPath, /waitForResponse\(/);
+  const networkTerminalPath = source.slice(
+    source.indexOf("const networkResult = await networkGeneration.terminalPromise"),
+    source.indexOf("const completion = await finishOperation")
+  );
+  assert.doesNotMatch(networkTerminalPath, /detectorState\(/);
+  assert.doesNotMatch(networkTerminalPath, /thinkingEnabled\(/);
+  assert.doesNotMatch(networkTerminalPath, /generating\(/);
 });

@@ -10,6 +10,7 @@
   const ENDPOINT_MARKER = ENDPOINT_MARKERS[0];
   const DEFAULT_STALL_THRESHOLD_MS = 8000;
   const DEFAULT_FETCH_RECONCILE_INTERVAL_MS = 50;
+  const MAX_RESPONSE_TEXT_CHARS = 120_000;
   const TERMINAL_EVENTS = new Set(['COMPLETED', 'INTERRUPTED', 'FAILED']);
 
   function requestDetails(input, init) {
@@ -108,6 +109,50 @@
     return null;
   }
 
+  function extractAssistantResponseText(payload) {
+    const role = String(payload?.message?.author?.role || '').toLowerCase();
+    if (role && role !== 'assistant') return null;
+
+    const parts = payload?.message?.content?.parts;
+    if (Array.isArray(parts)) {
+      const textParts = parts
+        .map(part => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object' && typeof part.text === 'string') return part.text;
+          return '';
+        })
+        .filter(Boolean);
+      if (textParts.length) {
+        return {
+          mode: 'snapshot',
+          text: textParts.join('').slice(0, MAX_RESPONSE_TEXT_CHARS),
+        };
+      }
+    }
+
+    const messageText =
+      typeof payload?.message?.content?.text === 'string'
+        ? payload.message.content.text
+        : typeof payload?.message?.content === 'string'
+          ? payload.message.content
+          : null;
+    if (messageText) {
+      return {
+        mode: 'snapshot',
+        text: messageText.slice(0, MAX_RESPONSE_TEXT_CHARS),
+      };
+    }
+
+    if (typeof payload?.delta === 'string' && payload.delta) {
+      return {mode: 'delta', text: payload.delta};
+    }
+    if (typeof payload?.text === 'string' && payload.text) {
+      return {mode: 'delta', text: payload.text};
+    }
+
+    return null;
+  }
+
   function parseStreamLines(text, onData) {
     let buffer = String(text || '');
     let newlineIndex;
@@ -195,7 +240,7 @@
       return true;
     }
 
-    function inspectPayload(raw, trackingState) {
+    function inspectPayload(raw, trackingState, responseState) {
       if (raw === '[DONE]') return;
       let parsed;
       try {
@@ -203,6 +248,16 @@
       } catch (_) {
         return;
       }
+
+      const extracted = extractAssistantResponseText(parsed);
+      if (extracted?.text) {
+        if (extracted.mode === 'snapshot') {
+          responseState.text = extracted.text;
+        } else {
+          responseState.text = (responseState.text + extracted.text).slice(0, MAX_RESPONSE_TEXT_CHARS);
+        }
+      }
+
       const classification = classifyPayload(parsed);
       if (classification) emit(classification.eventType, trackingState, classification);
     }
@@ -220,6 +275,7 @@
       let chunkCount = 0;
       let buffer = '';
       let stallReported = false;
+      const responseState = {text: ''};
 
       try {
         const reader = response.body.getReader();
@@ -252,11 +308,12 @@
           if (result.done) {
             buffer += decoder.decode();
             parseStreamLines(buffer + '\n', raw => {
-              if (!trackingState.isTerminal) inspectPayload(raw, trackingState);
+              if (!trackingState.isTerminal) inspectPayload(raw, trackingState, responseState);
             });
             if (!trackingState.isTerminal) {
               emit('COMPLETED', trackingState, {
                 telemetry: {totalChunksProcessed: chunkCount},
+                responseText: responseState.text.slice(0, MAX_RESPONSE_TEXT_CHARS),
               });
             }
             break;
@@ -266,7 +323,7 @@
           chunkCount += 1;
           buffer += decoder.decode(result.value, {stream: true});
           buffer = parseStreamLines(buffer, raw => {
-            if (!trackingState.isTerminal) inspectPayload(raw, trackingState);
+            if (!trackingState.isTerminal) inspectPayload(raw, trackingState, responseState);
           });
         }
       } catch (error) {
@@ -537,11 +594,13 @@
 
   const api = Object.freeze({
     DEFAULT_STALL_THRESHOLD_MS,
+    MAX_RESPONSE_TEXT_CHARS,
     ENDPOINT_MARKER,
     ENDPOINT_MARKERS,
     createInterceptor,
     classifyHttpStatus,
     classifyPayload,
+    extractAssistantResponseText,
     isGenerationRequest,
     parseStreamLines,
   });

@@ -701,14 +701,26 @@
   function bindNetworkOperation(operationId) {
     const value = operationId == null || operationId === '' ? null : String(operationId);
     if (!value) return false;
+
+    let dispatched = false;
     try {
       window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
         detail: value
       }));
-      return true;
-    } catch (_) {
-      return false;
-    }
+      dispatched = true;
+    } catch (_) {}
+
+    try {
+      chrome.runtime.sendMessage(
+        { type: 'pasi-network-bind-operation', operation_id: value },
+        () => {
+          void chrome.runtime.lastError;
+        }
+      );
+      dispatched = true;
+    } catch (_) {}
+
+    return dispatched;
   }
 
   function boundedNetworkEvent(event) {

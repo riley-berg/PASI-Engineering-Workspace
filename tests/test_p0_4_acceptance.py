@@ -37,6 +37,31 @@ def test_ensure_worktree_creates_missing_branch(monkeypatch, tmp_path):
     assert ("checkout", branch) not in calls
 
 
+def test_recover_acceptance_worktree_cleans_stale_startup_state(monkeypatch, tmp_path):
+    calls = []
+    dirty = True
+
+    def fake_git(cwd: Path, *args: str, **kwargs):
+        nonlocal dirty
+        calls.append(args)
+        if args[:2] == ("status", "--porcelain"):
+            if dirty:
+                return " M stale.py\n?? stale-artifact"
+            return ""
+        if args[:2] == ("clean", "-fd"):
+            dirty = False
+        return ""
+
+    monkeypatch.setattr(acceptance, "git", fake_git)
+    monkeypatch.setattr(acceptance, "emit", lambda event: calls.append(("emit", event["event"])))
+
+    acceptance.recover_acceptance_worktree(tmp_path, reason="ensure_worktree_start")
+
+    assert ("reset", "--hard", "HEAD") in calls
+    assert ("clean", "-fd") in calls
+    assert ("emit", "acceptance_worktree_recovered") in calls
+
+
 def test_recover_task_worktree_cleans_stale_acceptance_state(monkeypatch, tmp_path):
     from types import SimpleNamespace
 

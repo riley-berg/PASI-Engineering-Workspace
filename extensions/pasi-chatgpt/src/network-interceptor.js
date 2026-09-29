@@ -159,6 +159,7 @@
       fetchAccessorInstalled: false,
       fetchReconcileIntervalId: null,
       currentOperationId: null,
+      pendingOperationClear: false,
       activeGeneration: null,
       requestCounter: 0,
       operationEventListener: null,
@@ -186,6 +187,10 @@
       });
       if (trackingState && TERMINAL_EVENTS.has(eventType) && state.activeGeneration === trackingState) {
         state.activeGeneration = null;
+        if (state.pendingOperationClear) {
+          state.currentOperationId = null;
+          state.pendingOperationClear = false;
+        }
       }
       return true;
     }
@@ -342,8 +347,22 @@
     }
 
     function bindOperation(operationId) {
-      state.currentOperationId =
-        operationId == null || operationId === '' ? null : String(operationId);
+      const value = operationId == null || operationId === ''
+        ? null
+        : String(operationId);
+
+      if (value === null) {
+        if (state.activeGeneration && !state.activeGeneration.isTerminal) {
+          state.pendingOperationClear = true;
+          return state.currentOperationId;
+        }
+        state.currentOperationId = null;
+        state.pendingOperationClear = false;
+        return null;
+      }
+
+      state.currentOperationId = value;
+      state.pendingOperationClear = false;
       return state.currentOperationId;
     }
 

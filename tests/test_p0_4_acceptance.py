@@ -902,3 +902,39 @@ def test_hint_task_uses_durable_current_task(monkeypatch):
 
     assert task is not None
     assert task.task_id == "P0.8"
+
+
+def test_p0_6_can_be_preverified_from_durable_workflow_policy(monkeypatch, tmp_path):
+    from scripts import pasi_168h_acceptance as acceptance
+
+    phase = acceptance.Phase("P0", 108, "Q3-2026", "2026-09-22", "2026-10-04")
+    task = acceptance.Task(phase, "P0.6", "CI/workflow consolidation", False)
+
+    monkeypatch.setattr(
+        acceptance,
+        "schedule",
+        lambda: (phase,),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "git",
+        lambda cwd, *args, **kwargs: "abc123" if args == ("rev-parse", "HEAD") else "",
+    )
+    monkeypatch.setattr(
+        "scripts.verify_workflow_consolidation.verify",
+        lambda root: {"valid": True, "workflow_count": 4, "errors": []},
+    )
+
+    evidence = acceptance.preverified_task(task, tmp_path)
+
+    assert evidence is not None
+    assert evidence["task_id"] == "P0.6"
+    assert evidence["commit"] == "abc123"
+
+
+def test_runner_bounds_and_surfaces_task_retries():
+    source = Path(__file__).with_name("pasi_168h_acceptance.py").read_text(encoding="utf-8")
+    assert "MAX_TASK_ATTEMPTS" in source
+    assert "task_bounded_retry_exhausted" in source
+    assert "moving to the next eligible task" in source
+    assert "retrying {task.task_id} in" in source

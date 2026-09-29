@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "allow_unlisted_workflows": false,
+  "workflows": {
+    "branch-hygiene.yml": {
+      "name": "branch-hygiene",
+      "role": "branch hygiene"
+    },
+    "github-project-v2.yml": {
+      "name": "github-project-v2",
+      "role": "development control"
+    },
+    "pasi-security-analysis.yml": {
+      "name": "PASI security analysis",
+      "role": "security"
+    },
+    "test.yml": {
+      "name": "test",
+      "role": "test"
+    }
+  }
+}

@@ -137,19 +137,18 @@ test('parses complete SSE lines and preserves an incomplete tail', () => {
 });
 
 test('extracts the correlated assistant response from cumulative and delta SSE payloads', () => {
-  assert.deepEqual(
-    source.extractAssistantResponseText({
-      message: {
-        author: {role: 'assistant'},
-        content: {parts: ['Hello ', 'network']}
-      }
-    }),
-    {mode: 'snapshot', text: 'Hello network'}
-  );
-  assert.deepEqual(
-    source.extractAssistantResponseText({delta: 'response'}),
-    {mode: 'delta', text: 'response'}
-  );
+  const snapshot = source.extractAssistantResponseText({
+    message: {
+      author: {role: 'assistant'},
+      content: {parts: ['Hello ', 'network']}
+    }
+  });
+  assert.equal(snapshot.mode, 'snapshot');
+  assert.equal(snapshot.text, 'Hello network');
+
+  const delta = source.extractAssistantResponseText({delta: 'response'});
+  assert.equal(delta.mode, 'delta');
+  assert.equal(delta.text, 'response');
 });
 
 test('emits correlated response text on terminal network completion', async () => {

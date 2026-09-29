@@ -28,6 +28,7 @@ def test_network_interceptor_phase1_contract():
     assert "vendor/typescript.js" not in background
     assert "files: ['src/network-interceptor.js']" in background
     assert "pasi-network-bind-operation" in background
+    assert "rawOperationId == null" in background
     assert "world: 'MAIN'" in background
     assert "MutationObserver" not in interceptor.read_text(encoding="utf-8")
     assert "document.querySelector" not in interceptor.read_text(encoding="utf-8")
@@ -38,6 +39,7 @@ def test_network_interceptor_phase1_contract():
     assert "PASI_NETWORK_BIND_OPERATION" in controller
     assert "pasi-network-bind-operation" in controller
     assert "bindNetworkOperation(activeOperationId)" in controller
+    assert "void bindNetworkOperation(null)" in controller
     assert "chatgpt_network_generation_started" in controller
     assert "chatgpt_network_generation_terminal" in controller
     assert "chatgpt_network_generation_stalled" in controller

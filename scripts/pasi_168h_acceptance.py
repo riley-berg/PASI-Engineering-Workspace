@@ -207,6 +207,26 @@ def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str
     return output
 
 
+def recover_acceptance_worktree(worktree: Path, *, reason: str) -> None:
+    """Restore the dedicated acceptance worktree to its committed state."""
+    status = git(worktree, "status", "--porcelain", "--untracked-files=all", check=False)
+    if not status:
+        return
+    emit({
+        "event": "acceptance_worktree_recovered",
+        "at": utcnow().isoformat(),
+        "reason": reason,
+        "status_before": status,
+    })
+    git(worktree, "reset", "--hard", "HEAD")
+    git(worktree, "clean", "-fd")
+    remaining = git(worktree, "status", "--porcelain", "--untracked-files=all", check=False)
+    if remaining:
+        raise RuntimeError(
+            f"acceptance worktree could not be recovered: {remaining}"
+        )
+
+
 def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     git(root, "fetch", "origin", "main", timeout=120)
     source_ref = os.environ.get("PASI_168H_SOURCE_REF", "HEAD").strip() or "HEAD"
@@ -214,26 +234,26 @@ def ensure_worktree(root: Path, worktree: Path, branch: str) -> None:
     worktree.parent.mkdir(parents=True, exist_ok=True)
     if not (worktree / ".git").exists():
         git(root, "worktree", "add", "-B", branch, str(worktree), source_ref, timeout=120)
-    elif git(worktree, "branch", "--show-current") != branch:
-        if git(worktree, "status", "--porcelain", check=False):
-            raise RuntimeError("acceptance worktree is not clean")
-        result = subprocess.run(
-            ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
-            cwd=worktree,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            git(worktree, "checkout", branch)
-        else:
-            # A reusable acceptance worktree may still point at an older
-            # timestamped branch. New acceptance runs must always start from
-            # the freshly fetched canonical origin/main.
-            git(worktree, "checkout", "--detach", "origin/main")
-            git(worktree, "checkout", "-b", branch)
-    if git(worktree, "status", "--porcelain", check=False):
-        raise RuntimeError("acceptance worktree is not clean")
+    else:
+        recover_acceptance_worktree(worktree, reason="ensure_worktree_start")
+        if git(worktree, "branch", "--show-current") != branch:
+            result = subprocess.run(
+                ["git", "show-ref", "--verify", f"refs/heads/{branch}"],
+                cwd=worktree,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                git(worktree, "checkout", branch)
+            else:
+                # A reusable acceptance worktree may still point at an older
+                # timestamped branch. New acceptance runs must always start from
+                # the freshly fetched canonical origin/main.
+                git(worktree, "checkout", "--detach", "origin/main")
+                git(worktree, "checkout", "-b", branch)
+        recover_acceptance_worktree(worktree, reason="ensure_worktree_end")
+
 
 def recover_task_worktree(worktree: Path, task: Task) -> None:
     """Discard only stale, non-committed state from the dedicated acceptance worktree."""

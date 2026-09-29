@@ -3,7 +3,11 @@
 
   if (globalThis.__PASI_NETWORK_INTERCEPTOR__) return;
 
-  const ENDPOINT_MARKER = '/backend-api/conversation';
+  const ENDPOINT_MARKERS = Object.freeze([
+    '/backend-api/conversation',
+    '/backend-api/f/conversation',
+  ]);
+  const ENDPOINT_MARKER = ENDPOINT_MARKERS[0];
   const DEFAULT_STALL_THRESHOLD_MS = 8000;
   const TERMINAL_EVENTS = new Set(['COMPLETED', 'INTERRUPTED', 'FAILED']);
 
@@ -23,7 +27,7 @@
     return {url: '', method: String(init?.method || 'GET').toUpperCase()};
   }
 
-  function isGenerationRequest(input, init, endpointMarker = ENDPOINT_MARKER) {
+  function isGenerationRequest(input, init, endpointMarkers = ENDPOINT_MARKERS) {
     const request = requestDetails(input, init);
     if (request.method !== 'POST') return false;
     if (!request.url) return false;
@@ -35,7 +39,9 @@
       return false;
     }
 
-    return pathname.replace(/\/$/, '') === endpointMarker;
+    const normalizedPathname = pathname.replace(/\/$/, '');
+    const markers = Array.isArray(endpointMarkers) ? endpointMarkers : [endpointMarkers];
+    return markers.some(marker => normalizedPathname === String(marker).replace(/\/$/, ''));
   }
 
   function classifyHttpStatus(status) {
@@ -117,7 +123,9 @@
 
   function createInterceptor(options = {}) {
     const target = options.target || globalThis;
-    const endpointMarker = String(options.endpointMarker || ENDPOINT_MARKER);
+    const endpointMarkers = Array.isArray(options.endpointMarkers)
+      ? options.endpointMarkers.map(String)
+      : [String(options.endpointMarker || ENDPOINT_MARKER)];
     const stallThresholdMs =
       Number.isFinite(options.stallThresholdMs) && options.stallThresholdMs > 0
         ? options.stallThresholdMs
@@ -257,7 +265,7 @@
     }
 
     async function interceptedFetch(...args) {
-      if (!isGenerationRequest(args[0], args[1], endpointMarker)) {
+      if (!isGenerationRequest(args[0], args[1], endpointMarkers)) {
         return state.originalFetch.apply(this, args);
       }
 
@@ -375,13 +383,14 @@
       bindOperationEventListener,
       health,
       isGenerationRequest: (input, init) =>
-        isGenerationRequest(input, init, endpointMarker),
+        isGenerationRequest(input, init, endpointMarkers),
     });
   }
 
   const api = Object.freeze({
     DEFAULT_STALL_THRESHOLD_MS,
     ENDPOINT_MARKER,
+    ENDPOINT_MARKERS,
     createInterceptor,
     classifyHttpStatus,
     classifyPayload,

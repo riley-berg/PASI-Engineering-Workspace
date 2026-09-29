@@ -1721,6 +1721,8 @@
       recovery_context: recoveryContext(),
       reload_count: 0,
       phase: 'context_exhausted',
+      verification_source: 'network_interceptor',
+      network_state: 'context_exhausted',
       error: String(error?.message || error)
     }));
   }
@@ -1746,7 +1748,37 @@
       reload_count: 0,
       phase: 'monitoring',
       error: String(error?.message || error),
-      response_recovery: true
+      response_recovery: true,
+      verification_source: 'network_interceptor'
+    }));
+  }
+
+  function rememberNetworkRecovery(operation, error, reason = 'network_error') {
+    let stored = null;
+    try {
+      stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+    } catch (_) {}
+
+    const startedAt = typeof stored?.started_at === 'string'
+      ? stored.started_at
+      : new Date().toISOString();
+
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+      operation_id: operation.operation_id,
+      operation_type: operation.operation_type,
+      started_at: startedAt,
+      started_ms: Date.parse(startedAt) || Date.now(),
+      baseline: typeof stored?.baseline === 'string' ? stored.baseline : '',
+      chat_url: chatUrl(),
+      recovery_context: recoveryContext(),
+      reload_count: 0,
+      phase: 'monitoring',
+      recovery_reason: reason,
+      verification_source: 'network_interceptor',
+      network_recovery: true,
+      response_stopped_on_loss: true,
+      checkpoint_preserved: true,
+      error: String(error?.message || error)
     }));
   }
 
@@ -2073,9 +2105,17 @@
           errorMessage.startsWith('PASI_NATIVE: ChatGPT generation timed out')
         );
 
+      const networkRecoveryEligible =
+        operation.operation_type === 'prompt' &&
+        errorMessage.startsWith('PASI_NETWORK: generation interrupted:');
+
       if (contextRecoveryEligible) {
         activeRecoveryState = null;
         rememberContextRecovery(operation, error);
+        finalized = false;
+      } else if (networkRecoveryEligible) {
+        activeRecoveryState = null;
+        rememberNetworkRecovery(operation, error, 'connection_error');
         finalized = false;
       } else if (responseRecoveryEligible) {
         activeRecoveryState = null;

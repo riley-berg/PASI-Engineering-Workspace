@@ -564,13 +564,6 @@
       window.fetch = wrapped;
     } catch (_) {}
 
-    if (!globalThis.__PASI_NETWORK_FETCH_WATCHDOG__) {
-      globalThis.__PASI_NETWORK_FETCH_WATCHDOG__ = setInterval(() => {
-        if (window.fetch?.__PASI_NETWORK_INTERCEPTOR__ !== true) {
-          installFetch();
-        }
-      }, 1000);
-    }
   }
 
   function installXhr() {
@@ -699,6 +692,14 @@
 
   installFetch();
   installXhr();
+
+  if (!globalThis.__PASI_NETWORK_HOOK_WATCHDOG__) {
+    globalThis.__PASI_NETWORK_HOOK_WATCHDOG__ = setInterval(() => {
+      installFetch();
+      installXhr();
+    }, 1000);
+  }
+
   post("ready", {
     interceptor_version: VERSION,
     installed_at: globalThis.__PASI_NETWORK_INTERCEPTOR_STARTED_AT__

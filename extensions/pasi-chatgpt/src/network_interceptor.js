@@ -286,6 +286,17 @@
 
     if (state.sseBuffer.includes("data: [DONE]")) state.doneMarker = true;
     state.lastProgressAt = now();
+    if (state.lastProgressAt - state.lastProgressEmitAt >= 1000 && !state.terminal) {
+      state.lastProgressEmitAt = state.lastProgressAt;
+      post("event", {
+        operation_id: state.operation_id,
+        request_id: state.request_id,
+        state: "progress",
+        url: state.url,
+        http_status: state.http_status,
+        progress_at_ms: state.lastProgressAt
+      });
+    }
   }
 
   function streamState(meta) {
@@ -302,6 +313,7 @@
       assistantMessageId: null,
       startedAt: Number(meta.request_started_at_ms || 0) || now(),
       lastProgressAt: now(),
+      lastProgressEmitAt: 0,
       stallReportedAt: 0,
       terminal: false
     };
@@ -613,6 +625,14 @@
 
       const startedAt = now();
       request.request_started_at_ms = startedAt;
+      const onProgress = () => {
+        post("event", {
+          ...request,
+          state: "progress",
+          progress_at_ms: now()
+        });
+      };
+      this.addEventListener("progress", onProgress);
       const onLoad = () => {
         const state = streamState({
           ...request,

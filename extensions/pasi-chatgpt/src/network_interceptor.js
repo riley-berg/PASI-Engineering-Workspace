@@ -203,6 +203,10 @@
 
     if (!value || typeof value !== "object") return;
 
+    if (value.conversation_id) state.conversationId = String(value.conversation_id);
+    if (value.message?.conversation_id) state.conversationId = String(value.message.conversation_id);
+    if (value.message?.id) state.assistantMessageId = String(value.message.id);
+
     const structuredError = (
       value.error ||
       value.detail ||
@@ -228,7 +232,8 @@
     }
     if (value.type === "response.completed") {
       state.doneMarker = true;
-      if (value.response?.id) state.conversationId = String(value.response.id);
+      if (value.response?.id) state.responseId = String(value.response.id);
+      if (value.response?.conversation_id) state.conversationId = String(value.response.conversation_id);
     }
     if (value.type === "response.failed" || value.type === "response.incomplete" || value.type === "error") {
       state.failureKind = classifyFailure(
@@ -293,6 +298,8 @@
       doneMarker: false,
       failureKind: null,
       conversationId: null,
+      responseId: null,
+      assistantMessageId: null,
       startedAt: Number(meta.request_started_at_ms || 0) || now(),
       lastProgressAt: now(),
       stallReportedAt: 0,
@@ -314,6 +321,8 @@
       response_text: state.responseText.slice(-MAX_RESPONSE_CHARS),
       response_text_available: Boolean(state.responseText.trim()),
       conversation_id: state.conversationId,
+      response_id: state.responseId,
+      assistant_message_id: state.assistantMessageId,
       request_started_at_ms: state.startedAt,
       response_observed_at_ms: state.responseObservedAtMs || null,
       completed_at_ms: now(),

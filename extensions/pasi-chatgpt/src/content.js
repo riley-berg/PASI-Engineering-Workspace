@@ -595,9 +595,15 @@
 
   function snapshotAssistantMessages() {
     const nodes = assistantMessages();
+    const texts = new Set();
+    for (const node of nodes) {
+      const text = extractAssistant(node);
+      if (text) texts.add(collapseWhitespace(text));
+    }
     return {
       keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
       nodes: new WeakSet(nodes),
+      texts,
       count: nodes.length
     };
   }
@@ -635,6 +641,8 @@
       if (!matchedUsers.some((user) => nodeFollows(user, node))) continue;
       const text = extractAssistant(node);
       if (!text) continue;
+      const normalizedText = collapseWhitespace(text);
+      if (snapshot.texts?.has(normalizedText)) continue;
       if (baselineFingerprint && fingerprintFromText(text) === baselineFingerprint) continue;
       return text;
     }

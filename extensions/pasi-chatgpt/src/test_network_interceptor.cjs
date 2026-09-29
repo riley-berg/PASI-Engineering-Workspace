@@ -271,7 +271,7 @@ test('installation is idempotent and health exposes operation state', () => {
   assert.equal(interceptor.install(), true);
   assert.equal(interceptor.install(), false);
   interceptor.bindOperation('op-9');
-  assert.deepEqual(interceptor.health(), {
+  assert.deepEqual(JSON.parse(JSON.stringify(interceptor.health())), {
     status: 'HEALTHY',
     timestamp: 1234,
     installed: true,

@@ -50,5 +50,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: ChatGPT network interceptor tests
+        run: node --test tests/test_chatgpt_network_interceptor.mjs
       - name: Frontend tests
         run: node --test web/app.test.js

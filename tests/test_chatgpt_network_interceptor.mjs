@@ -29,7 +29,11 @@ function loadInterceptor({fetchImpl, flags = {}} = {}) {
     ReadableStream,
     setTimeout,
     clearTimeout,
-    setInterval,
+    setInterval: (...args) => {
+      const timer = setInterval(...args);
+      timer.unref?.();
+      return timer;
+    },
     clearInterval,
     Date,
     Math,

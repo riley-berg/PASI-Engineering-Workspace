@@ -10,20 +10,32 @@ let controllerClaimTail = Promise.resolve();
 let operationDispatchTail = Promise.resolve();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
+const cdpOperationTimings = new Map();
 
-function cdpNetworkObservation(event) {
+async function cdpNetworkObservation(event) {
   const terminal = ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(event?.eventType);
   const kind = event?.eventType === 'COMPLETED'
     ? 'chatgpt_network_response'
     : 'chatgpt_network_lifecycle';
+
+  const operationId = typeof event?.operationId === 'string' ? event.operationId : '';
+  const controllerId = typeof event?.controllerId === 'string' ? event.controllerId : '';
+  const timing = operationId ? (cdpOperationTimings.get(operationId) || {}) : {};
+  if (event?.eventType === 'STARTED') {
+    timing.generation_start_ms = Number(event.timestamp || Date.now());
+  }
+  if (terminal) {
+    timing.completed_at_ms = Number(event.timestamp || Date.now());
+  }
+
   const observation = {
     schema_version: 'pasi-network-cdp-v1',
     captured_at: new Date().toISOString(),
     data: {
       kind,
       network_source: 'cdp_fetch',
-      active_operation_id: event?.operationId || null,
-      controller_id: event?.controllerId || null,
+      active_operation_id: operationId || null,
+      controller_id: controllerId || null,
       request_id: event?.requestId || null,
       tab_id: Number.isInteger(event?.tabId) ? event.tabId : null,
       request_url: typeof event?.requestUrl === 'string' ? event.requestUrl : null,
@@ -34,35 +46,71 @@ function cdpNetworkObservation(event) {
       response_text_available: typeof event?.responseText === 'string' && Boolean(event.responseText.trim()),
       assistant_message_id: event?.assistantMessageId || null,
       telemetry: event?.telemetry && typeof event.telemetry === 'object' ? event.telemetry : {},
+      timing,
       network_terminal: terminal
     }
   };
 
-  void bridgeFetch('/browser/observation', 'POST', { observation }, 10000);
+  const observed = await bridgeFetch('/browser/observation', 'POST', {observation}, 10000);
 
-  if (
-    terminal &&
-    event?.eventType !== 'COMPLETED' &&
-    typeof event?.operationId === 'string' &&
-    event.operationId &&
-    typeof event?.controllerId === 'string' &&
-    event.controllerId
-  ) {
-    const error = 'PASI_CDP: ' + String(event.reason || event.classification || 'NETWORK_FAILURE');
-    void bridgeFetch('/chat/failed', 'POST', {
-      operation_id: event.operationId,
-      controller_id: event.controllerId,
-      failure_source: 'network',
-      error,
-      recovery_context: {
-        network_request_id: String(event.requestId || '').slice(0, 200),
-        network_classification: String(event.classification || '').slice(0, 120),
-        network_reason: String(event.reason || '').slice(0, 200)
-      }
-    }, 10000);
+  if (!terminal || !operationId || !controllerId) return;
+
+  if (event?.eventType === 'COMPLETED') {
+    let chatUrl = '';
+    try {
+      const tab = await chrome.tabs.get(event.tabId);
+      chatUrl = String(tab?.url || '');
+    } catch (_) {}
+
+    const completionPayload = {
+      operation_id: operationId,
+      controller_id: controllerId,
+      chat_url: chatUrl,
+      response_text: typeof event.responseText === 'string' ? event.responseText : '',
+      response_text_available: typeof event.responseText === 'string' && Boolean(event.responseText.trim()),
+      ack_only: true,
+      claim_next: true
+    };
+    if (Object.keys(timing).length) completionPayload.timing = timing;
+
+    let completion = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      completion = await bridgeFetch('/chat/finished', 'POST', completionPayload, 10000);
+      if (completion.ok) break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    if (completion?.ok) {
+      cdpOperationTimings.delete(operationId);
+      void dispatchNextOperationForController(event.tabId, controllerId);
+      return;
+    }
+
+    if (!observed?.ok) {
+      await bridgeFetch('/chat/failed', 'POST', {
+        operation_id: operationId,
+        controller_id: controllerId,
+        failure_source: 'network',
+        error: 'PASI_CDP: durable completion acknowledgement failed',
+      }, 10000);
+    }
+    return;
   }
-}
 
+  await bridgeFetch('/chat/failed', 'POST', {
+    operation_id: operationId,
+    controller_id: controllerId,
+    failure_source: 'network',
+    error: 'PASI_CDP: ' + String(event.reason || event.classification || 'NETWORK_FAILURE'),
+    recovery_context: {
+      network_request_id: String(event.requestId || '').slice(0, 200),
+      network_classification: String(event.classification || '').slice(0, 120),
+      network_reason: String(event.reason || '').slice(0, 200)
+    }
+  }, 10000);
+  cdpOperationTimings.delete(operationId);
+  void dispatchNextOperationForController(event.tabId, controllerId);
+}
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
   debuggerApi: chrome.debugger,
   onEvent: cdpNetworkObservation
@@ -113,6 +161,55 @@ async function waitForTabNavigation(tabId, timeoutMs = 20000) {
     };
     chrome.tabs.onUpdated.addListener(listener);
   });
+}
+
+async function executePromptOperation(tabId, controllerId, operation) {
+  if (!operation?.operation_id) return false;
+  try {
+    const binding = await cdpNetworkController.bindOperation({
+      tabId,
+      operationId: String(operation.operation_id),
+      controllerId: String(controllerId),
+      prompt: String(operation.prompt || ''),
+      completionMarkers: Array.isArray(operation.completion_markers) ? operation.completion_markers : [],
+      chatUrl: typeof operation.chat_url === 'string' ? operation.chat_url : null
+    });
+    if (binding?.bound !== true) {
+      throw new Error('PASI_NATIVE: CDP operation bind failed');
+    }
+
+    const submission = await cdpNetworkController.submitOperation(
+      tabId,
+      String(operation.operation_id),
+      String(controllerId)
+    );
+    const timing = {
+      injected_at_ms: Number(submission.submittedAtMs || Date.now()),
+      ack_at_ms: Number(submission.enterDispatchedAtMs || Date.now())
+    };
+    if (Number.isFinite(Number(operation.__pasi_completion_ack_at_ms))) {
+      timing.completion_to_prompt_injected_ms = Math.max(
+        0,
+        timing.injected_at_ms - Number(operation.__pasi_completion_ack_at_ms)
+      );
+    }
+    if (Number.isFinite(Number(operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms))) {
+      timing.response_completed_to_prompt_injected_ms = Math.max(
+        0,
+        timing.injected_at_ms - Number(operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms)
+      );
+    }
+    cdpOperationTimings.set(String(operation.operation_id), timing);
+    return true;
+  } catch (error) {
+    await bridgeFetch('/chat/failed', 'POST', {
+      operation_id: String(operation.operation_id),
+      controller_id: String(controllerId),
+      failure_source: 'controller',
+      error: 'PASI_NATIVE: prompt dispatch failed: ' + String(error?.message || error).slice(0, 500)
+    }, 10000);
+    return false;
+  }
 }
 
 async function executeNewChatOperation(tabId, controllerId, operation) {
@@ -186,6 +283,10 @@ async function dispatchNextOperationForController(tabId, controllerId) {
 
     if (operation.operation_type === 'new_chat') {
       return executeNewChatOperation(tabId, controllerId, operation);
+    }
+
+    if (operation.operation_type === 'prompt') {
+      return executePromptOperation(tabId, controllerId, operation);
     }
 
     if (operation.operation_type === 'select_reasoning') {

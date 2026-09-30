@@ -392,6 +392,48 @@ test('classifies provider failures before response-body correlation', async () =
   assert.equal(events.at(-1).reason, 'USAGE_LIMIT_REACHED');
 });
 
+test('CDP recovery can interrupt the active generation request without a page reload', async () => {
+  const debuggerApi = fakeDebugger();
+  const events = [];
+  const controller = source.createController({debuggerApi, onEvent: (event) => events.push(event)});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 14,
+    operationId: 'op-14',
+    controllerId: 'controller-14',
+    prompt: 'interrupt me'
+  });
+
+  await controller.handlePaused(
+    {tabId: 14},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-14',
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST',
+        postData: JSON.stringify({prompt: 'interrupt me'})
+      }
+    }
+  );
+
+  const result = await controller.interruptOperation(
+    14,
+    'op-14',
+    'controller-14'
+  );
+
+  assert.equal(result.interrupted, 1);
+  assert.equal(events.at(-1).eventType, 'FAILED');
+  assert.equal(events.at(-1).reason, 'NETWORK_STREAM_DISCONNECTED');
+  assert.equal(events.at(-1).classification, 'retryable_transport_failure');
+  assert.equal(debuggerApi.commands.some((command) =>
+    command.method === 'Fetch.failRequest' &&
+    command.params.requestId === 'req-14'
+  ), true);
+  assert.equal(controller.health().activeRequests.length, 0);
+});
+
 test('network-health exposes the request-to-task map and controller fence', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

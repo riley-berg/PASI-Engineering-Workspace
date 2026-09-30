@@ -1735,6 +1735,7 @@
         else void notifyControllerReady();
         setTimeout(() => { void reportHealth(); }, 0);
       } else {
+        void notifyControllerReady();
         void reportHealth();
       }
     }

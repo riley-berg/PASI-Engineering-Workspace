@@ -214,7 +214,7 @@ test('emits correlated response text on terminal network completion', async () =
     'https://chatgpt.com/backend-api/f/conversation',
     {method: 'POST'},
   );
-  for (let i = 0; i < 12; i += 1) await Promise.resolve();
+  await new Promise(resolve => setTimeout(resolve, 25));
 
   assert.equal(events[0].operationId, 'op-network-response');
   assert.equal(events.at(-1).eventType, 'COMPLETED');

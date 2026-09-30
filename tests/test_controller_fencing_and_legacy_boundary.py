@@ -110,11 +110,12 @@ def test_next_operation_does_not_skip_past_active_operation(tmp_path):
     assert second_state["status"] == "queued"
 
 
-def test_legacy_dom_controller_isolated_from_active_entry_points():
+def test_legacy_dom_controller_is_inactive_from_the_extension_entry_points():
     root = Path(__file__).resolve().parents[1]
     extension = root / "extensions" / "pasi-chatgpt"
     manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
     legacy = extension / "src" / "legacy" / "dom-controller.js"
+    recovery = extension / "src" / "recovery.js"
     active_content = extension / "src" / "content.js"
     interceptor = extension / "src" / "network-interceptor.js"
     cdp = extension / "src" / "cdp-network-controller.js"
@@ -124,6 +125,7 @@ def test_legacy_dom_controller_isolated_from_active_entry_points():
     assert not interceptor.exists()
     assert cdp.is_file()
     assert legacy.is_file()
+    assert recovery.is_file()
 
     manifest_scripts = [
         script
@@ -131,15 +133,21 @@ def test_legacy_dom_controller_isolated_from_active_entry_points():
         for script in entry.get("js", [])
     ]
     assert "src/content.js" not in manifest_scripts
-    assert "src/legacy/dom-controller.js" in manifest_scripts
-    assert "src/legacy/dom-controller.js" in background
+    assert "src/legacy/dom-controller.js" not in manifest_scripts
+    assert "src/recovery.js" not in manifest_scripts
+    assert "pasi-controller-ready" not in background
+    assert "pasi-dispatch-operation" not in background
 
     legacy_text = legacy.read_text(encoding="utf-8")
     cdp_text = cdp.read_text(encoding="utf-8")
 
-    assert "document.querySelector" in legacy_text
-    assert "MutationObserver" in legacy_text
     assert "debuggerApi.onEvent.addListener(handlePaused)" in cdp_text
     assert "Fetch.takeResponseBodyAsStream" in cdp_text
     assert "MutationObserver" not in cdp_text
     assert "document.querySelector" not in cdp_text
+    assert "submitCdpOperation" not in legacy_text
+    assert "waitForResponse" not in legacy_text
+    assert "finishOperation" not in legacy_text
+    assert "selectThinking" not in legacy_text
+    assert "attachGithub" not in legacy_text
+    assert "newChat" not in legacy_text

@@ -463,6 +463,14 @@ class BridgeState:
             if current is None:
                 return None, None
 
+            if current.get("operation_type") == "prompt" and not completion_markers_satisfied(
+                response_text,
+                current.get("completion_markers"),
+            ):
+                raise ValueError(
+                    "Prompt completion response does not satisfy the operation completion markers."
+                )
+
             if current.get("status") == "completed":
                 chained = self.get_chained_operation(operation_id)
                 return self._hydrate_terminal_response(dict(current)), chained
@@ -641,8 +649,11 @@ class BridgeState:
                     else current
                 )
                 if item.get("response_text_available") is True and isinstance(authoritative, str) and authoritative.strip():
-                    item["response_text"] = authoritative
-                    item["response_text_available"] = True
+                    return dict(item)
+                if not completion_markers_satisfied(
+                    bounded_response,
+                    item.get("completion_markers"),
+                ):
                     return dict(item)
                 item["response_text"] = bounded_response
                 item["response_text_available"] = True
@@ -872,6 +883,11 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
+            if not completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            ):
+                return
             stored_response = self.state_manager.load_terminal_response(operation_id)
             current_response = item.get("response_text")
             if (
@@ -931,6 +947,10 @@ class BridgeState:
             not isinstance(response_text, str)
             or len(response_text) > MAX_RESPONSE_TEXT_CHARS
             or not response_text.strip()
+            or not completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            )
         ):
             return False
 

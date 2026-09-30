@@ -120,6 +120,60 @@ test('CDP reasoning control verifies an existing Thinking state and can enable i
   assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
 });
 
+test('CDP GitHub attachment uses accessibility controls and native input', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  let treeCalls = 0;
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      treeCalls += 1;
+      const node = (backendDOMNodeId, role, name, properties = []) => ({
+        nodeId: 'ax-' + backendDOMNodeId,
+        backendDOMNodeId,
+        role: {type: 'role', value: role},
+        name: {type: 'computedString', value: name},
+        ignored: false,
+        properties
+      });
+      if (treeCalls === 1) {
+        return callback({nodes: [node(101, 'button', 'Add files and more')]});
+      }
+      if (treeCalls === 2) {
+        return callback({nodes: [node(102, 'button', 'GitHub')]});
+      }
+      if (treeCalls === 3) {
+        return callback({nodes: [node(
+          103,
+          'textbox',
+          'Repository',
+          [{name: 'editable', value: {type: 'boolean', value: true}}]
+        )]});
+      }
+      return callback({nodes: [node(104, 'option', 'th3-st0v3/PASI-Engineering-Workspace')]});
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  const result = await controller.ensureGithubRepository(
+    16,
+    'th3-st0v3/PASI-Engineering-Workspace'
+  );
+
+  assert.equal(result.attached, true);
+  assert.equal(result.repository, 'th3-st0v3/PASI-Engineering-Workspace');
+  assert.equal(
+    debuggerApi.commands.some((command) =>
+      command.method === 'Input.insertText' &&
+      command.params.text === 'th3-st0v3/PASI-Engineering-Workspace'
+    ),
+    true
+  );
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
+});
+
 test('CDP submit operation uses native input and never clicks a DOM send control', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

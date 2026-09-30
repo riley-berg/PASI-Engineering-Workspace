@@ -109,6 +109,90 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
+test('CDP submit accepts editable composer AX nodes exposed with newer semantic roles', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 77,
+          role: {type: 'role', value: 'generic'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: ''},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: false}}
+          ]
+        }]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 12,
+    operationId: 'op-12',
+    controllerId: 'controller-12',
+    prompt: '[PASI_OPERATION op-12] Reply with ROLE_OK_2026',
+    completionMarkers: ['ROLE_OK_2026']
+  });
+
+  const result = await controller.submitOperation(12, 'op-12', 'controller-12');
+  assert.equal(result.submitted, true);
+  assert.equal(result.targetKind, 'accessibility_textbox');
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'DOM.focus' && command.params.backendNodeId === 77));
+});
+
+test('CDP submit waits for the accessibility composer to appear after debugger attach', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  let treeCalls = 0;
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      treeCalls += 1;
+      if (treeCalls < 3) return callback({nodes: []});
+      return callback({
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 88,
+          role: {type: 'role', value: 'textbox'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: ''},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: false}}
+          ]
+        }]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 13,
+    operationId: 'op-13',
+    controllerId: 'controller-13',
+    prompt: '[PASI_OPERATION op-13] Reply with DELAYED_COMPOSER_OK_2026',
+    completionMarkers: ['DELAYED_COMPOSER_OK_2026']
+  });
+
+  const result = await controller.submitOperation(13, 'op-13', 'controller-13');
+  assert.equal(result.submitted, true);
+  assert.equal(treeCalls, 3);
+});
+
 test('CDP submit operation refuses to overwrite unrelated editable text', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

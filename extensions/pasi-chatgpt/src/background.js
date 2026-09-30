@@ -347,6 +347,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'pasi-cdp-interrupt-operation') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const operationId = message?.operation_id == null ? '' : String(message.operation_id).trim();
+    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+    const reason = message?.reason == null ? 'NETWORK_STREAM_DISCONNECTED' : String(message.reason).trim();
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\\//.test(senderUrl) ||
+      !operationId ||
+      operationId.length > 200 ||
+      !controllerId ||
+      controllerId.length > 200
+    ) {
+      sendResponse({ok: false, interrupted: 0});
+      return undefined;
+    }
+
+    const binding = cdpNetworkController?.currentBinding?.(tabId);
+    if (
+      !binding ||
+      binding.operationId !== operationId ||
+      binding.controllerId !== controllerId
+    ) {
+      sendResponse({ok: false, interrupted: 0});
+      return undefined;
+    }
+
+    cdpNetworkController.interruptOperation(tabId, operationId, controllerId, reason)
+      .then((result) => sendResponse({
+        ok: Number(result?.interrupted || 0) > 0,
+        ...result
+      }))
+      .catch((error) => sendResponse({
+        ok: false,
+        interrupted: 0,
+        error: String(error?.message || error).slice(0, 500)
+      }));
+    return true;
+  }
+
   if (message?.type === 'pasi-controller-claim') {
     const tabId = sender?.tab?.id;
     const rawControllerId = message?.controller_id;

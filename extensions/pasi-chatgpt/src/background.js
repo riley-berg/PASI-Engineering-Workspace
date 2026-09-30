@@ -263,94 +263,97 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
   }
 }
 
+async function dispatchOperationForController(tabId, controllerId, operation) {
+  if (typeof tabId !== 'number' || !controllerId || !operation?.operation_id) return false;
+
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (_) {
+    return false;
+  }
+  const url = String(tab?.url || '');
+  if (!/^https:\/\/(?:www\\.)?chatgpt\.com(?::\d+)?\//.test(url)) return false;
+
+  if (operation.operation_type === 'new_chat') {
+    return executeNewChatOperation(tabId, controllerId, operation);
+  }
+
+  if (operation.operation_type === 'prompt') {
+    return executePromptOperation(tabId, controllerId, operation);
+  }
+
+  if (operation.operation_type === 'select_reasoning') {
+    try {
+      if (String(operation.prompt || '').trim() !== 'thinking') {
+        throw new Error('PASI_NATIVE: unsupported reasoning mode');
+      }
+      const reasoning = await cdpNetworkController?.ensureReasoningMode?.(tabId, 'thinking');
+      if (reasoning?.enabled !== true) {
+        throw new Error('PASI_NATIVE: Thinking state could not be verified');
+      }
+
+      const completion = await bridgeFetch('/chat/finished', 'POST', {
+        operation_id: String(operation.operation_id),
+        controller_id: String(controllerId),
+        chat_url: url,
+        response_text: '',
+        response_text_available: false,
+        ack_only: true,
+        claim_next: true
+      }, 10000);
+      if (!completion.ok) {
+        throw new Error('PASI_NATIVE: reasoning completion rejected');
+      }
+
+      try {
+        const completedPayload = JSON.parse(completion.text);
+        const next = completedPayload?.next_operation;
+        if (next?.operation_id) {
+          void serializeOperationDispatch(() =>
+            dispatchOperationForController(tabId, controllerId, next)
+          );
+        }
+      } catch (_) {}
+      return true;
+    } catch (error) {
+      await bridgeFetch('/chat/failed', 'POST', {
+        operation_id: String(operation.operation_id),
+        controller_id: String(controllerId),
+        failure_source: 'controller',
+        error: 'PASI_NATIVE: reasoning selection failed: ' + String(error?.message || error).slice(0, 500)
+      }, 10000);
+      return false;
+    }
+  }
+
+  try {
+    const result = await chrome.tabs.sendMessage(tabId, {
+      type: 'pasi-dispatch-operation',
+      operation,
+      controller_id: controllerId
+    });
+    if (result?.accepted === true) return true;
+  } catch (_) {}
+
+  await bridgeFetch('/chat/failed', 'POST', {
+    operation_id: operation.operation_id,
+    controller_id: controllerId,
+    failure_source: 'controller',
+    error: OPERATION_DISPATCH_ERROR
+  }, 10000);
+  return false;
+}
+
 async function dispatchNextOperationForController(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
-    let tab;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch (_) {
-      return false;
-    }
-    const url = String(tab?.url || '');
-    if (!/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\//.test(url)) return false;
-
     const payload = await bridgeJson(
       '/next-operation?controller_id=' + encodeURIComponent(controllerId)
     );
     const operation = payload?.operation;
     if (!operation || !operation.operation_id) return false;
-
-    if (operation.operation_type === 'new_chat') {
-      return executeNewChatOperation(tabId, controllerId, operation);
-    }
-
-    if (operation.operation_type === 'prompt') {
-      return executePromptOperation(tabId, controllerId, operation);
-    }
-
-    if (operation.operation_type === 'select_reasoning') {
-      try {
-        if (String(operation.prompt || '').trim() !== 'thinking') {
-          throw new Error('PASI_NATIVE: unsupported reasoning mode');
-        }
-        const reasoning = await cdpNetworkController?.ensureReasoningMode?.(tabId, 'thinking');
-        if (reasoning?.enabled !== true) {
-          throw new Error('PASI_NATIVE: Thinking state could not be verified');
-        }
-
-        const completion = await bridgeFetch('/chat/finished', 'POST', {
-          operation_id: String(operation.operation_id),
-          controller_id: String(controllerId),
-          chat_url: String(url),
-          response_text: '',
-          response_text_available: false,
-          ack_only: true,
-          claim_next: true
-        }, 10000);
-        if (!completion.ok) {
-          throw new Error('PASI_NATIVE: reasoning completion rejected');
-        }
-
-        try {
-          const completedPayload = JSON.parse(completion.text);
-          const next = completedPayload?.next_operation;
-          if (next?.operation_id) {
-            await chrome.tabs.sendMessage(tabId, {
-              type: 'pasi-dispatch-operation',
-              operation: next,
-              controller_id: controllerId
-            });
-          }
-        } catch (_) {}
-        return true;
-      } catch (error) {
-        await bridgeFetch('/chat/failed', 'POST', {
-          operation_id: String(operation.operation_id),
-          controller_id: String(controllerId),
-          failure_source: 'controller',
-          error: 'PASI_NATIVE: reasoning selection failed: ' + String(error?.message || error).slice(0, 500)
-        }, 10000);
-        return false;
-      }
-    }
-
-    try {
-      const result = await chrome.tabs.sendMessage(tabId, {
-        type: 'pasi-dispatch-operation',
-        operation,
-        controller_id: controllerId
-      });
-      if (result?.accepted === true) return true;
-    } catch (_) {}
-
-    await bridgeFetch('/chat/failed', 'POST', {
-      operation_id: operation.operation_id,
-      controller_id: controllerId,
-      failure_source: 'controller',
-      error: OPERATION_DISPATCH_ERROR
-    }, 10000);
-    return false;
+    return dispatchOperationForController(tabId, controllerId, operation);
   });
 }
 

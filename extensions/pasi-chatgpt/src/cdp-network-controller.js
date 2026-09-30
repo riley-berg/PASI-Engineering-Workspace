@@ -438,6 +438,177 @@
       throw lastError || new Error('CDP submit target unavailable: NO_ACCESSIBLE_COMPOSER');
     }
 
+    function axSelected(node) {
+      for (const name of ['selected', 'checked', 'pressed', 'current']) {
+        const value = axBooleanProperty(node, name);
+        if (value !== null) return value;
+      }
+      return null;
+    }
+
+    function reasoningNameIsThinking(name) {
+      return /\b(?:thinking|think|medium|high|extra high|pro(?: standard| extended)?)\b/i.test(String(name || '')) ||
+        /\bextended\b/i.test(String(name || ''));
+    }
+
+    function reasoningNameIsNonThinking(name) {
+      return /\b(?:instant|auto(?:matic)?)\b/i.test(String(name || ''));
+    }
+
+    function findDirectReasoningAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const allowedRoles = new Set(['button', 'radio', 'menuitem', 'menuitemradio', 'option']);
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!allowedRoles.has(role)) continue;
+        const name = axName(node);
+        if (!reasoningNameIsThinking(name)) continue;
+        const state = axSelected(node);
+        const score =
+          (state === true ? 1000 : 0) +
+          (role === 'radio' || role === 'menuitemradio' ? 100 : 0) +
+          (/\bthinking\b/i.test(name) ? 50 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      return best;
+    }
+
+    function findReasoningMenuAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const allowedRoles = new Set(['radio', 'menuitemradio', 'option', 'menuitem', 'button']);
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!allowedRoles.has(role)) continue;
+        const name = axName(node);
+        if (!reasoningNameIsThinking(name)) continue;
+        const score =
+          (axSelected(node) === true ? 1000 : 0) +
+          (role === 'radio' || role === 'menuitemradio' ? 100 : 0) +
+          (/\b(?:thinking|medium|high)\b/i.test(name) ? 25 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      return best;
+    }
+
+    function findModelPickerAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const allowedRoles = new Set(['button', 'combobox']);
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!allowedRoles.has(role)) continue;
+        const name = axName(node);
+        if (!name || reasoningNameIsNonThinking(name)) continue;
+        const score =
+          (/\b(?:model|intelligence)\b/i.test(name) ? 500 : 0) +
+          (/\b(?:gpt|o[0-9]|codex)\b/i.test(name) ? 200 : 0) +
+          (role === 'combobox' ? 100 : 0);
+        if (score <= 0) continue;
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      return best;
+    }
+
+    async function readAXTree(tabId) {
+      const result = await sendCommand(tabId, 'Accessibility.getFullAXTree');
+      return Array.isArray(result?.nodes) ? result.nodes : [];
+    }
+
+    async function activateAXNode(tabId, node) {
+      const backendNodeId = Number(node?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP reasoning control has no backend node');
+      }
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId});
+      for (const type of ['keyDown', 'keyUp']) {
+        await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type,
+          key: 'Enter',
+          code: 'Enter',
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13
+        });
+      }
+    }
+
+    async function ensureReasoningMode(tabId, mode = 'thinking') {
+      if (String(mode || '').trim().toLowerCase() !== 'thinking') {
+        throw new Error('CDP reasoning mode supports only thinking');
+      }
+      await attachTab(tabId);
+
+      const deadline = now() + 8000;
+      let lastError = null;
+      let openedPicker = false;
+
+      while (now() < deadline) {
+        try {
+          const nodes = await readAXTree(tabId);
+
+          const direct = findDirectReasoningAXNode(nodes);
+          if (direct) {
+            const selected = axSelected(direct);
+            if (selected === true) return {enabled: true, control: axName(direct)};
+            if (selected === false) {
+              await activateAXNode(tabId, direct);
+              await new Promise((resolve) => setTimeout(resolve, 150));
+              const verify = findDirectReasoningAXNode(await readAXTree(tabId));
+              if (verify && axSelected(verify) === true) {
+                return {enabled: true, control: axName(verify)};
+              }
+            }
+          }
+
+          const picker = findModelPickerAXNode(nodes);
+          if (picker && !openedPicker) {
+            await activateAXNode(tabId, picker);
+            openedPicker = true;
+            await new Promise((resolve) => setTimeout(resolve, 150));
+            continue;
+          }
+
+          const menuOption = findReasoningMenuAXNode(nodes);
+          if (menuOption) {
+            const selected = axSelected(menuOption);
+            if (selected === true) return {enabled: true, control: axName(menuOption)};
+            if (selected === false || selected === null) {
+              await activateAXNode(tabId, menuOption);
+              await new Promise((resolve) => setTimeout(resolve, 150));
+              const verify = findDirectReasoningAXNode(await readAXTree(tabId)) ||
+                findReasoningMenuAXNode(await readAXTree(tabId));
+              if (verify && axSelected(verify) === true) {
+                return {enabled: true, control: axName(verify)};
+              }
+            }
+          }
+
+          lastError = new Error('NO_VERIFIED_THINKING_CONTROL');
+        } catch (error) {
+          lastError = error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      throw lastError || new Error('NO_VERIFIED_THINKING_CONTROL');
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -797,6 +968,7 @@
       submitOperation,
       unbindOperation,
       interruptOperation,
+      ensureReasoningMode,
       handlePaused,
       currentBinding,
       health() {

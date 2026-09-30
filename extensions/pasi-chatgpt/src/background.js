@@ -127,13 +127,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender?.tab?.id;
     const rawOperationId = message?.operation_id;
     const operationId = rawOperationId == null ? null : String(rawOperationId).trim();
-    const rawControllerId = message?.controller_id;
-    const controllerId = rawControllerId == null ? `legacy:${tabId}` : String(rawControllerId).trim();
     if (
       typeof tabId !== 'number' ||
       !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
-      !controllerId ||
-      controllerId.length > 200 ||
       (operationId !== null && (!operationId || operationId.length > 200))
     ) {
       sendResponse({ ok: false, bound: false });
@@ -161,7 +157,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === 'pasi-controller-claim') {
     const tabId = sender?.tab?.id;
-    if (typeof tabId !== 'number') {
+    const rawControllerId = message?.controller_id;
+    const controllerId = rawControllerId == null ? `legacy:${tabId}` : String(rawControllerId).trim();
+    if (typeof tabId !== 'number' || !controllerId || controllerId.length > 200) {
       sendResponse({ ok: false, leader: false });
       return undefined;
     }

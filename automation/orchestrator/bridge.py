@@ -425,6 +425,14 @@ class BridgeState:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
 
+            # Queue dispatch is strictly serial. A controller-ready signal may
+            # arrive during extension restart/reinjection while the previously
+            # claimed operation is still active. Never advance to a second
+            # operation until the current one is durably completed (or its claim
+            # lease is swept as stale above).
+            if any(item.get("status") in {"claimed", "generating"} for item in queue):
+                return None
+
             for item in queue:
                 if item.get("status") != "queued":
                     continue

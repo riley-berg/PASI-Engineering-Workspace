@@ -265,3 +265,42 @@ def test_late_dom_response_cannot_replace_authoritative_cdp_response(tmp_path):
     assert stored["response_text"] == "NETWORK_PATCH_OK_2026"
     assert stored["response_source"] == "cdp_fetch_stream"
 
+
+def test_generic_cdp_network_failure_is_transient_and_late_authoritative_response_completes(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-09-30T00:00:00Z",
+            "data": {
+                "kind": "chatgpt_network_response",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-cdp-late-success",
+                "event_type": "COMPLETED",
+                "reason": "RESPONSE_STREAM_FINISHED",
+                "classification": "success",
+                "response_text": "NETWORK_PATCH_OK_2026",
+                "response_text_available": True,
+            },
+        }
+    )
+
+    completed = bridge.fail_operation(
+        operation.operation_id,
+        "PASI_CDP: network failure",
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["response_source"] == "cdp_fetch_stream"
+    assert completed["network_response_authoritative"] is True

@@ -941,7 +941,12 @@ class BridgeState:
                 request_id = data.get("request_id")
                 if isinstance(request_id, str) and request_id:
                     item["network_request_id"] = request_id[:200]
-                if event_type in {"COMPLETED", "INTERRUPTED", "FAILED"}:
+                if event_type == "STARTED":
+                    if item.get("status") == "claimed":
+                        validate_transition("claimed", "generating")
+                        item["status"] = "generating"
+                    item["network_lifecycle_event"] = event_type
+                elif event_type in {"COMPLETED", "INTERRUPTED", "FAILED"}:
                     item["network_terminal_event"] = event_type
                 elif event_type:
                     # Lifecycle events such as STARTED are not terminal

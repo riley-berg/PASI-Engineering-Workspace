@@ -174,20 +174,24 @@
     return false;
   }
 
-  function contextExhausted() {
-    const text = normalize(document.body?.innerText || '');
-    return ['this conversation has reached its limit', 'conversation has reached its limit', 'conversation is too long', 'conversation is full', 'maximum conversation length', 'maximum length for this conversation', 'context limit reached', 'context window limit', 'context length limit', 'start a new chat to continue', 'start a new conversation to continue'].some((marker) => text.includes(marker));
-  }
-
-  function usageLimited() {
-    if (contextExhausted()) return false;
-    const text = normalize(document.body?.innerText || '');
-    return ['current usage limit', 'usage limit reached', 'free tier limit', 'message limit', 'daily limit', 'weekly limit', 'model usage limit'].some((marker) => text.includes(marker));
-  }
-
-  function replacementReason() {
-    if (contextExhausted()) return 'context_exhausted';
-    if (usageLimited()) return 'usage_limited';
+  function networkReplacementReason(operation) {
+    const classification = normalize(operation?.network_classification);
+    const reason = normalize(operation?.network_terminal_reason);
+    if (
+      classification === 'context_exhaustion' ||
+      reason === 'context_exhausted' ||
+      reason.includes('context_exhaust')
+    ) {
+      return 'context_exhausted';
+    }
+    if (
+      classification === 'usage_limit' ||
+      reason === 'usage_limit_reached' ||
+      reason.includes('usage_limit') ||
+      reason.includes('rate_limit')
+    ) {
+      return 'usage_limited';
+    }
     return null;
   }
 
@@ -605,11 +609,11 @@
       return;
     }
 
-    if (!contextExhausted()) {
+    if (networkReplacementReason(current) !== 'context_exhausted') {
       await report('chatgpt_recovery', {
         phase: 'context_recovery_waiting',
         operation_id: operationId,
-        recovery_action: 'wait_for_verified_exhaustion'
+        recovery_action: 'wait_for_verified_network_exhaustion'
       });
       return;
     }
@@ -704,9 +708,9 @@
       return;
     }
 
-    if (usageLimited()) {
+    if (networkReplacementReason(current) === 'usage_limited') {
       await report('chatgpt_recovery', { phase: 'usage_limited', operation_id: operationId, recovery_action: 'retry_runner_after_provider_limit' });
-      await markRetryableFailure(operationId, 'CHAT_USAGE_LIMITED: ChatGPT reported a usage limit; PASI will not delete or replace the conversation solely because usage is exhausted.');
+      await markRetryableFailure(operationId, 'CHAT_USAGE_LIMITED: CDP Fetch reported a provider usage limit; PASI will not delete or replace the conversation solely because usage is exhausted.');
       clearRecoveryState();
       return;
     }
@@ -823,7 +827,7 @@
       });
     }
 
-    const reason = replacementReason();
+    const reason = networkReplacementReason(current);
     if (!reason) {
       const accepted = await markRetryableFailure(
         operationId,
@@ -1077,7 +1081,10 @@
 
     beginProgressTracking(operationId, stateForTimer);
     sampleProgress(stateForTimer);
-    if (contextExhausted()) return;
+    if (networkReplacementReason(current) === 'context_exhausted') {
+      await handleContextExhausted(stateForTimer);
+      return;
+    }
     await preserveOrReload(operationId, stateForTimer);
   }
 

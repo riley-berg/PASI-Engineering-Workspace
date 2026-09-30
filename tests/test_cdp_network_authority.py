@@ -10,73 +10,57 @@ def test_cdp_network_authority_contract():
     cdp = extension / "src" / "cdp-network-controller.js"
     node_tests = extension / "src" / "test_cdp_network_controller.cjs"
     background = (extension / "src" / "background.js").read_text(encoding="utf-8")
-    controller = (extension / "src" / "legacy" / "dom-controller.js").read_text(encoding="utf-8")
 
     assert cdp.is_file()
     assert node_tests.is_file()
     assert not (extension / "src" / "network-interceptor.js").exists()
     assert not (extension / "src" / "test_network_interceptor.cjs").exists()
+    assert not (extension / "src" / "legacy").exists()
+    assert not (extension / "src" / "recovery.js").exists()
+    assert not (extension / "src" / "chatgpt.js").exists()
+    assert not (extension / "src" / "detectors.js").exists()
+    assert not (extension / "src" / "recovery_progress.js").exists()
 
     assert "debugger" in manifest["permissions"]
-    assert all(
-        "src/network-interceptor.js" not in entry.get("js", [])
+    manifest_scripts = [
+        script
         for entry in manifest["content_scripts"]
-    )
+        for script in entry.get("js", [])
+    ]
+    assert "src/network-interceptor.js" not in manifest_scripts
+    assert "src/chatgpt.js" not in manifest_scripts
+    assert "src/detectors.js" not in manifest_scripts
+    assert "src/recovery_progress.js" not in manifest_scripts
+    assert "src/legacy/dom-controller.js" not in manifest_scripts
+    assert "src/recovery.js" not in manifest_scripts
+
+    cdp_text = cdp.read_text(encoding="utf-8")
     assert '"cdp-network-controller.js"' in background
     assert "chrome.debugger" in background
-    assert "debuggerApi.onEvent.addListener(handlePaused)" in cdp.read_text(encoding="utf-8")
-    assert "Fetch.takeResponseBodyAsStream" in cdp.read_text(encoding="utf-8")
-    assert "Fetch.fulfillRequest" in cdp.read_text(encoding="utf-8")
-    assert "requestContainsPrompt" in cdp.read_text(encoding="utf-8")
-    assert "PASI_NETWORK_LIFECYCLE" not in controller
-    assert "networkShadowByOperationId" not in controller
-    assert "installNetworkLifecycleShadow" not in controller
-    assert "bindCdpOperation(activeOperationId)" in controller
-    assert "cdpOperationEvidence(operationId" in controller
-    assert "pasi-cdp-submit-operation" in controller
-    assert "submitPrompt(" not in controller
-    assert "pasi-controller-ready" in background
+    assert "debuggerApi.onEvent.addListener(handlePaused)" in cdp_text
+    assert "Fetch.takeResponseBodyAsStream" in cdp_text
+    assert "Fetch.fulfillRequest" in cdp_text
+    assert "requestContainsPrompt" in cdp_text
+    assert "ensureReasoningMode" in cdp_text
+    assert "ensureGithubRepository" in cdp_text
+    assert "MutationObserver" not in cdp_text
+    assert "document.querySelector" not in cdp_text
+    assert "Runtime.evaluate" not in cdp_text
+    assert "pasi-controller-ready" not in background
+    assert "pasi-dispatch-operation" not in background
+    assert "pasi-network-bind-operation" not in background
+    assert "pasi-cdp-submit-operation" not in background
+    assert "pasi-cdp-interrupt-operation" not in background
+    assert "injectExistingChatTabs" not in background
+    assert "chrome.scripting.executeScript" not in background
+    assert "executePromptOperation" in background
     assert "executeNewChatOperation" in background
-    assert "operation.operation_type === 'new_chat'" in background
+    assert "executeAttachGithubOperation" in background
+    assert "operation.operation_type === 'select_reasoning'" in background
     assert "claim_next: false" in background
-    assert "async function newChat" not in controller
-    assert "case 'new_chat'" not in controller
-    assert "select_reasoning" not in controller
-    assert "reasoningMode" not in controller
-    assert "thinkingEnabled(" not in controller
-    assert "ensureReasoningMode" in background
-    assert "pasi-dispatch-operation" in background
+    assert "chrome.tabs.onActivated" in background
+    assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background
-    assert "function poll()" not in controller
-    assert "setInterval(poll" not in controller
-    assert "chrome.runtime.sendMessage" in controller
-    assert "Accessibility.getFullAXTree" in cdp.read_text(encoding="utf-8")
-    assert "DOM.focus" in cdp.read_text(encoding="utf-8")
-    assert "Input.insertText" in cdp.read_text(encoding="utf-8")
-    assert "Input.dispatchKeyEvent" in cdp.read_text(encoding="utf-8")
-    assert "Runtime.evaluate" not in cdp.read_text(encoding="utf-8")
-    assert "document.querySelector" not in cdp.read_text(encoding="utf-8")
-    assert "form.requestSubmit" not in controller
-    assert "nativeMouseActivate" not in controller
-    assert "sendCandidatesForComposer" not in controller
-    assert "dom_fallback" not in controller
-    recovery = (extension / "src" / "recovery.js").read_text(encoding="utf-8")
-    assert "interruptOperation" in cdp.read_text(encoding="utf-8")
-    assert "pasi-cdp-interrupt-operation" in background
-    assert "location.reload()" not in recovery
-    assert "pasi-cdp-interrupt-operation" in recovery
-    assert "networkReplacementReason(current)" in recovery
-    assert "contextExhausted()" not in recovery
-    assert "usageLimited()" not in recovery
-    wait_start = controller.read_text(encoding="utf-8").index("async function waitForResponse(")
-    wait_end = controller.read_text(encoding="utf-8").index("  function completionProgress", wait_start)
-    wait_source = controller.read_text(encoding="utf-8")[wait_start:wait_end]
-    assert "detectorState()" not in wait_source
-
-    recovery_start = controller.read_text(encoding="utf-8").index("async function recoverInterruptedOperation()")
-    recovery_end = controller.read_text(encoding="utf-8").index("  function recoveryOperationId", recovery_start)
-    recovery_source = controller.read_text(encoding="utf-8")[recovery_start:recovery_end]
-    assert "generating()" not in recovery_source
 
     for source in (cdp, extension / "src" / "background.js"):
         result = subprocess.run(

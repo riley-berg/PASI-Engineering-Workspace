@@ -2,7 +2,6 @@ importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.j
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
-const OPERATION_DISPATCH_ERROR = 'PASI_NATIVE: controller dispatch unavailable';
 let STALE_MS = 45 * 1000;
 let operationDispatchTail = Promise.resolve();
 let cachedBridgeToken = null;
@@ -377,23 +376,15 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
     }
   }
 
-  try {
-    const result = await chrome.tabs.sendMessage(tabId, {
-      type: 'pasi-dispatch-operation',
-      operation,
-      controller_id: controllerId
-    });
-    if (result?.accepted === true) return true;
-  } catch (_) {}
-
   await bridgeFetch('/chat/failed', 'POST', {
     operation_id: operation.operation_id,
     controller_id: controllerId,
     failure_source: 'controller',
-    error: OPERATION_DISPATCH_ERROR
+    error: 'PASI_NATIVE: unsupported operation type: ' + String(operation.operation_type || '')
   }, 10000);
   return false;
 }
+
 
 async function dispatchNextOperationForController(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId) return false;
@@ -635,7 +626,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 chrome.runtime.onStartup.addListener(() => {
   void ensureWatchdogAlarm();
-  void injectExistingChatTabs();
+  void attachExistingChatTabs();
 });
 
 void ensureWatchdogAlarm();

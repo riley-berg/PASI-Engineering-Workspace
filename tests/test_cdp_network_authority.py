@@ -33,6 +33,11 @@ def test_cdp_network_authority_contract():
     assert "installNetworkLifecycleShadow" not in controller
     assert "bindCdpOperation(activeOperationId)" in controller
     assert "cdpOperationEvidence(operationId" in controller
+    assert "pasi-cdp-submit-operation" in controller
+    assert "submitPrompt(" not in controller
+    assert "form.requestSubmit" not in controller
+    assert "nativeMouseActivate" not in controller
+    assert "sendCandidatesForComposer" not in controller
     assert "dom_fallback" in controller
 
     for source in (cdp, extension / "src" / "background.js"):

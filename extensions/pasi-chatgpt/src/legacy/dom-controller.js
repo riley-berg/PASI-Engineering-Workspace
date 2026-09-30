@@ -1355,14 +1355,9 @@
         throw new Error(evidence.error);
       }
 
-      const detected = detectorState();
-      if (detected.context_exhausted === true) {
-        throw new Error('PASI_CDP: CONTEXT_EXHAUSTED: conversation context is exhausted');
-      }
-      if (detected.context_exhausted !== true && detected.usage_limited === true) {
-        throw new Error('PASI_CDP: USAGE_LIMIT_REACHED: ChatGPT provider usage is exhausted or rate limited');
-      }
-
+      // Generation-state and provider-limit decisions are authoritative in
+      // the CDP Fetch lifecycle. Do not consult rendered DOM detectors here:
+      // the network response/terminal event is the only completion authority.
       await sleep(250);
     }
 
@@ -1792,10 +1787,10 @@
             // Keep the active marker so the next controller start can reconcile again.
             return;
           }
-        } else if (!generating()) {
-          // Do not promote a DOM-only snapshot to durable completion. Prompt
-          // completion requires persisted CDP Fetch evidence; otherwise the
-          // active marker remains for the bounded recovery controller.
+        } else {
+          // Do not promote a non-authoritative snapshot to durable completion.
+          // Prompt completion requires persisted CDP Fetch evidence; otherwise
+          // the active marker remains for the bounded recovery controller.
         }
         if (networkAuthoritative) localStorage.removeItem(ACTIVE_KEY);
       } else if (operation.status === 'failed' || operation.status === 'cancelled') {

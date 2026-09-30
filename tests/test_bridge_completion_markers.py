@@ -143,6 +143,45 @@ def test_cdp_network_response_becomes_authoritative_and_overrides_stale_dom_text
     assert completed["response_source"] == "cdp_fetch_stream"
 
 
+def test_operation_state_status_stays_in_sync_with_durable_lifecycle(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+
+    queued = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert queued is not None
+    assert queued["status"] == "queued"
+    assert queued["operation_state"]["status"] == "queued"
+
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+    assert claimed["status"] == "claimed"
+    assert claimed["operation_state"]["status"] == "claimed"
+
+    bridge.save_browser_observation({
+        "schema_version": "pasi-network-cdp-v1",
+        "captured_at": "2026-09-30T00:00:00Z",
+        "data": {
+            "kind": "chatgpt_network_response",
+            "network_source": "cdp_fetch",
+            "active_operation_id": operation.operation_id,
+            "controller_id": "controller-cdp",
+            "request_id": "req-state-sync",
+            "event_type": "COMPLETED",
+            "response_text": "NETWORK_PATCH_OK_2026",
+            "response_text_available": True,
+        },
+    })
+
+    completed = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["operation_state"]["status"] == "completed"
+
+
 def test_cdp_started_event_moves_claimed_operation_to_generating(tmp_path):
     bridge = BridgeState(StateManager(tmp_path / "ai"))
     operation = bridge.queue_operation(

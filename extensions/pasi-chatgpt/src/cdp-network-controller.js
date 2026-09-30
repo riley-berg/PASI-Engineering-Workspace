@@ -671,6 +671,7 @@
       attachTab,
       detachTab,
       bindOperation,
+      submitOperation,
       unbindOperation,
       handlePaused,
       currentBinding,

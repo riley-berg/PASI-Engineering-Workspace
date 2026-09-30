@@ -61,12 +61,6 @@
   let immediateOperationQueued = false;
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
-  const NETWORK_SHADOW_MAX_EVENTS = 32;
-  const NETWORK_SHADOW_MAX_REQUESTS = 8;
-  const NETWORK_SHADOW_MAX_OPERATIONS = 16;
-  const networkShadowByRequestId = new Map();
-  const networkShadowByOperationId = new Map();
-  let networkLifecycleListenerInstalled = false;
 
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
@@ -726,1114 +720,145 @@
     } catch (_) {}
   }
 
-  async function bindNetworkOperation(operationId) {
+  async function bindCdpOperation(operationId) {
     const value = operationId == null || operationId === '' ? null : String(operationId);
 
-    let dispatched = false;
-    try {
-      window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
-        detail: value || ''
-      }));
-      dispatched = true;
-    } catch (_) {}
-
-    if (!globalThis.chrome?.runtime?.sendMessage) return dispatched;
-
+    if (!globalThis.chrome?.runtime?.sendMessage) return false;
     return new Promise((resolve) => {
       let settled = false;
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        resolve(dispatched);
-      }, 1500);
+        resolve(false);
+      }, 2500);
 
       try {
         chrome.runtime.sendMessage(
-          { type: 'pasi-network-bind-operation', operation_id: value },
+          {
+            type: 'pasi-network-bind-operation',
+            operation_id: value,
+            controller_id: CONTROLLER_INSTANCE_ID
+          },
           (response) => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
             void chrome.runtime.lastError;
-            resolve(response?.bound === true || dispatched);
+            resolve(response?.bound === true);
           }
         );
       } catch (_) {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(dispatched);
+        resolve(false);
       }
     });
   }
 
-  function boundedNetworkEvent(event) {
-    if (!event || typeof event !== 'object') return null;
-    const eventType = typeof event.eventType === 'string' ? event.eventType.slice(0, 40) : '';
-    const requestId = typeof event.requestId === 'string' ? event.requestId.slice(0, 200) : '';
-    if (!eventType || !requestId) return null;
-    const operationId = typeof event.operationId === 'string' && event.operationId
-      ? event.operationId.slice(0, 200)
-      : (activeOperationId ? String(activeOperationId).slice(0, 200) : null);
-    const telemetry = event.telemetry && typeof event.telemetry === 'object'
-      ? {
-          requestUri: typeof event.telemetry.requestUri === 'string'
-            ? event.telemetry.requestUri.slice(0, 1000)
-            : undefined,
-          totalChunksProcessed: Number.isFinite(event.telemetry.totalChunksProcessed)
-            ? event.telemetry.totalChunksProcessed
-            : undefined,
-          durationSinceLastChunk: Number.isFinite(event.telemetry.durationSinceLastChunk)
-            ? event.telemetry.durationSinceLastChunk
-            : undefined,
-          httpStatus: Number.isFinite(event.telemetry.httpStatus)
-            ? event.telemetry.httpStatus
-            : undefined,
-          providerErrorCode: typeof event.telemetry.providerErrorCode === 'string'
-            ? event.telemetry.providerErrorCode.slice(0, 120)
-            : undefined
-        }
-      : {};
-    return {
-      eventType,
-      eventId: typeof event.eventId === 'string' ? event.eventId.slice(0, 200) : null,
-      operationId,
-      requestId,
-      timestamp: Number.isFinite(event.timestamp) ? event.timestamp : Date.now(),
-      reason: typeof event.reason === 'string' ? event.reason.slice(0, 200) : '',
-      classification: typeof event.classification === 'string'
-        ? event.classification.slice(0, 120)
-        : '',
-      responseText: typeof event.responseText === 'string'
-        ? event.responseText.slice(0, 120000)
-        : '',
-      telemetry
-    };
-  }
+  async function cdpOperationEvidence(operationId, completionMarkers) {
+    if (!operationId) return {status: 'unavailable'};
+    try {
+      const response = await bridge('/operation?operation_id=' + encodeURIComponent(operationId), {timeout: 2500});
+      if (!response.ok) return {status: 'unavailable'};
+      const payload = response.json();
+      const operation = payload?.operation;
+      if (!operation || operation.operation_id !== operationId) return {status: 'unavailable'};
 
-  function rememberNetworkShadow(event) {
-    const bounded = boundedNetworkEvent(event);
-    if (!bounded) return null;
-
-    let request = networkShadowByRequestId.get(bounded.requestId);
-    if (!request) {
-      if (networkShadowByRequestId.size >= NETWORK_SHADOW_MAX_REQUESTS) {
-        const oldest = networkShadowByRequestId.keys().next().value;
-        if (oldest) networkShadowByRequestId.delete(oldest);
-      }
-      request = {
-        requestId: bounded.requestId,
-        operationId: bounded.operationId,
-        events: []
-      };
-      networkShadowByRequestId.set(bounded.requestId, request);
-    }
-
-    request.operationId = bounded.operationId || request.operationId || null;
-    request.events.push(bounded);
-    if (request.events.length > NETWORK_SHADOW_MAX_EVENTS) request.events.shift();
-
-    if (request.operationId) {
-      let operation = networkShadowByOperationId.get(request.operationId);
-      if (!operation) {
-        if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
-          const oldestOperation = networkShadowByOperationId.keys().next().value;
-          if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
-        }
-        operation = {
-          requestIds: [],
-          terminal: null,
-          started: null,
-          last: null,
-          domCompleted: false,
-          domCompletionAtMs: null,
-          domResponseAvailable: false,
-          domChatUrl: null,
-          responseText: ''
-        };
-        networkShadowByOperationId.set(request.operationId, operation);
-      }
-      if (!operation.requestIds.includes(request.requestId)) {
-        operation.requestIds.push(request.requestId);
-        if (operation.requestIds.length > NETWORK_SHADOW_MAX_REQUESTS) operation.requestIds.shift();
-      }
-      if (bounded.eventType === 'STARTED') operation.started = bounded;
-      if (['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)) operation.terminal = bounded;
-      if (bounded.responseText) operation.responseText = bounded.responseText;
-      operation.last = bounded;
-    }
-
-    return bounded;
-  }
-
-  function networkResponseEvidence(completionMarkers = []) {
-    if (!activeOperationId) return '';
-    const summary = networkShadowByOperationId.get(activeOperationId);
-    if (!summary || summary.terminal?.eventType !== 'COMPLETED') return '';
-    const text = typeof summary.responseText === 'string' ? summary.responseText : '';
-    return completionMarkersSatisfied(text, completionMarkers) ? text : '';
-  }
-
-  function installNetworkLifecycleShadow() {
-    if (networkLifecycleListenerInstalled || typeof window.addEventListener !== 'function') return false;
-    networkLifecycleListenerInstalled = true;
-    window.addEventListener('PASI_NETWORK_LIFECYCLE', (event) => {
-      let payload = event?.detail;
-      if (typeof payload === 'string') {
-        try {
-          payload = JSON.parse(payload);
-        } catch (_) {
-          return;
-        }
-      }
-      const bounded = rememberNetworkShadow(payload);
-      if (!bounded) return;
-
-      const kind = bounded.eventType === 'STARTED'
-        ? 'chatgpt_network_generation_started'
-        : bounded.eventType === 'STALL_DETECTED'
-          ? 'chatgpt_network_generation_stalled'
-          : ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
-            ? 'chatgpt_network_generation_terminal'
-            : 'chatgpt_network_lifecycle';
-
-      void reportObservation(kind, {
-        operation_id: bounded.operationId,
-        request_id: bounded.requestId,
-        event_id: bounded.eventId,
-        event_type: bounded.eventType,
-        reason: bounded.reason,
-        classification: bounded.classification,
-        telemetry: bounded.telemetry,
-        network_shadow: true
-      }, 5000);
-
-      if (bounded.operationId) {
-        const summary = networkShadowByOperationId.get(bounded.operationId);
-        if (summary) {
-          void reportObservation('chatgpt_network_dom_shadow', {
-            operation_id: bounded.operationId,
-            network_request_ids: summary.requestIds,
-            network_started: Boolean(summary.started),
-            network_terminal_event: summary.terminal?.eventType || null,
-            network_terminal_reason: summary.terminal?.reason || null,
-            network_last_event: summary.last?.eventType || null,
-            dom_completed: summary.domCompleted,
-            dom_completion_at_ms: summary.domCompletionAtMs,
-            dom_response_available: summary.domResponseAvailable,
-            dom_chat_url: summary.domChatUrl,
-            network_shadow: true
-          }, 5000);
-        }
-      }
+      const source = String(operation.response_source || '');
+      const authoritative =
+        operation.network_response_authoritative === true ||
+        source === 'cdp_fetch_stream';
       if (
-        bounded.operationId &&
-        ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
+        authoritative &&
+        operation.response_text_available === true &&
+        typeof operation.response_text === 'string' &&
+        completionMarkersSatisfied(operation.response_text, completionMarkers)
       ) {
-        const summary = networkShadowByOperationId.get(bounded.operationId);
-        if (summary?.domCompleted) {
-          void reportObservation('chatgpt_network_dom_shadow', {
-            operation_id: bounded.operationId,
-            network_request_ids: summary.requestIds,
-            network_started: Boolean(summary.started),
-            network_terminal_event: summary.terminal?.eventType || null,
-            network_terminal_reason: summary.terminal?.reason || null,
-            network_last_event: summary.last?.eventType || null,
-            dom_completed: true,
-            dom_completion_at_ms: summary.domCompletionAtMs,
-            dom_response_available: summary.domResponseAvailable,
-            dom_chat_url: summary.domChatUrl,
-            network_shadow: true
-          }, 5000);
-        }
-      }
-    });
-    return true;
-  }
-
-  function installRuntimeErrorTelemetry() {
-    if (globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ === true) return;
-    globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ = true;
-
-    const reportRuntimeError = (source, message, detail = {}) => {
-      const text = String(message || '').slice(0, 2000);
-      const stack = String(detail.stack || '').slice(0, 4000);
-      const sourceUrl = String(detail.sourceUrl || location.href || '').slice(0, 2000);
-      void reportObservation('chatgpt_runtime_error', {
-        chat_url: chatUrl(),
-        active_operation_id: activeOperationId,
-        source,
-        message: text,
-        stack,
-        source_url: sourceUrl,
-        line: Number.isFinite(Number(detail.line)) ? Number(detail.line) : null,
-        column: Number.isFinite(Number(detail.column)) ? Number(detail.column) : null,
-        recovery_defaults_match: /\\bRECOVERY_DEFAULTS\\b/.test(text + '\\n' + stack + '\\n' + sourceUrl),
-        native_controller: true
-      });
-    };
-
-    window.addEventListener('error', (event) => {
-      reportRuntimeError('window_error', event?.message || event?.error?.message, {
-        stack: event?.error?.stack,
-        sourceUrl: event?.filename,
-        line: event?.lineno,
-        column: event?.colno
-      });
-    }, true);
-
-    window.addEventListener('unhandledrejection', (event) => {
-      const reason = event?.reason;
-      reportRuntimeError('unhandled_rejection', reason?.message || String(reason || 'Unhandled promise rejection'), {
-        stack: reason?.stack
-      });
-    }, true);
-  }
-
-  function reportHealth() {
-    if (healthReportInFlight) return healthReportInFlight;
-    healthReportInFlight = (async () => {
-      const currentUrl = chatUrl();
-      if (currentUrl !== lastKnownChatUrl) {
-        if (lastKnownChatUrl !== null || currentUrl !== null) {
-          void reportObservation('chatgpt_chat_changed', {
-            previous_chat_url: lastKnownChatUrl,
-            new_chat_url: currentUrl,
-            active_operation_id: activeOperationId,
-            reason: processing ? 'during_operation' : 'navigation'
-          }, 2000);
-        }
-        if (!processing) {
-          githubAttached = false;
-          githubRepository = null;
-          reasoningMode = null;
-        }
-        lastKnownChatUrl = currentUrl;
+        return {status: 'completed', source: 'cdp_fetch_stream', text: operation.response_text};
       }
 
-      // One detector pass per heartbeat. Repeated DOM scans here are
-      // unnecessary and can compete with the prompt/response hot path.
-      const detected = detectorState();
-      const exhausted = detected.context_exhausted === true;
-      const limited = !exhausted && detected.usage_limited === true;
-      const auth = detected.auth_required === true;
-      const thinking = thinkingEnabled();
-      const composerPresent = Boolean(composer());
-
-      // Health is the freshness signal used by the launcher/watchdog. Keep it
-      // lightweight and bounded so DOM/state telemetry cannot delay it.
-      await reportObservation('chatgpt_health', {
-        chat_url: currentUrl,
-        provider_usage_limited: limited,
-        auth_required: auth,
-        conversation_context_exhausted: exhausted,
-        thinking_enabled: thinking,
-        thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
-        page_visible: document.visibilityState !== 'hidden',
-        composer_present: composerPresent,
-        native_controller: true,
-        runtime_error_telemetry: true,
-        active_operation_id: activeOperationId
-      }, 2000);
-
-      if (Date.now() - lastStateReportAt >= STATE_REPORT_MS) {
-        lastStateReportAt = Date.now();
-        // State telemetry includes a conversation fingerprint and is therefore
-        // intentionally decoupled from the fast health heartbeat.
-        void reportObservation('chatgpt_state', {
-          chat_url: currentUrl,
-          conversation_context_exhausted: exhausted,
-          chat_exhausted: exhausted,
-          provider_usage_limited: limited,
-          github_attached: githubAttached,
-          reasoning_mode: reasoningMode,
-          reasoning_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
-          conversation_signature: conversationSignature(),
-          active_operation_id: activeOperationId,
-          native_controller: true
-        });
-      }
-    })().finally(() => {
-      healthReportInFlight = null;
-    });
-    return healthReportInFlight;
-  }
-
-  async function waitFor(select, timeout) {
-    return waitUntil(select, timeout, DOM_POLL_MS);
-  }
-
-  function findNewChatControl() {
-    const exactSelectors = [
-      'button[data-testid="new-chat-button"]',
-      '[data-testid="new-chat-button"]',
-      'button[aria-label="New chat"]',
-      '[role="button"][aria-label="New chat"]'
-    ];
-    for (const selector of exactSelectors) {
-      for (const element of document.querySelectorAll(selector)) {
-        if (!visible(element) || disabled(element)) continue;
-        if (element.closest?.('nav, aside, [role="navigation"]')) continue;
-        return element;
-      }
-    }
-    for (const element of document.querySelectorAll('button, [role="button"], a')) {
-      if (!visible(element) || disabled(element)) continue;
-      if (element.closest?.('nav, aside, [role="navigation"]')) continue;
-      if (label(element) === 'new chat') return element;
-    }
-    return null;
-  }
-
-  async function newChat() {
-    const previousLocation = location.href;
-    const previousChat = chatUrl();
-    const previousSignature = conversationSignature();
-    const button = await waitFor(() => findLabeled(['new chat'], ['a', 'button', '[role="button"]']), TIMEOUTS.menu);
-    if (!button || disabled(button)) throw new Error('PASI_NATIVE: New chat control unavailable');
-    button.click();
-
-    const ready = await waitFor(() => {
-      const currentChat = chatUrl();
-      const navigated = location.href !== previousLocation;
-      const differentChat = Boolean(previousChat && currentChat && currentChat !== previousChat);
-      const initialChatReady = !previousChat && navigated && currentChat && composer() && !generating() && userMessages().length === 0 && assistantMessages().length === 0 && conversationSignature() !== previousSignature;
-      return composer() && !generating() && (differentChat || initialChatReady);
-    }, TIMEOUTS.menu + 7000);
-    if (!ready) throw new Error('PASI_NATIVE: new chat did not reach a verified ready state');
-
-    const current = chatUrl();
-    if (previousChat && (!current || current === previousChat)) throw new Error('PASI_NATIVE: new chat control did not change conversation identity');
-    reasoningMode = null;
-    githubAttached = false;
-    githubRepository = null;
-    lastKnownChatUrl = current;
-  }
-
-  function isReasoningLabel(value) {
-    const text = normalize(value);
-    return /\b(?:thinking|think|medium|high|extra high|pro(?: standard| extended)?)\b/.test(text) ||
-      /\bextended\b/.test(text);
-  }
-
-  function findThinkingMenuOption() {
-    const modal = firstVisible(['[data-testid="modal-intelligence-menu"]']);
-    if (modal) {
-      const radios = modal.querySelectorAll('button[role="radio"], [role="radio"]');
-      for (const element of radios) {
-        if (visible(element) && isReasoningLabel(label(element))) return element;
-      }
-    }
-
-    const menus = document.querySelectorAll('[role="menu"], [role="listbox"], [role="dialog"]');
-    for (const menu of menus) {
-      if (!visible(menu)) continue;
-      const candidates = menu.querySelectorAll('[role="radio"], [role="option"], [role="menuitemradio"], [role="menuitem"], button');
-      for (const element of candidates) {
-        if (visible(element) && isReasoningLabel(label(element))) return element;
-      }
-    }
-    return null;
-  }
-
-  function findDirectThinkingControl() {
-    const exactLabels = new Set([
-      'thinking',
-      'think',
-      'medium',
-      'high',
-      'extra high',
-      'pro standard',
-      'pro extended'
-    ]);
-    const controls = document.querySelectorAll(
-      'button, [role="button"], [role="option"], [role="menuitem"], [role="menuitemradio"], [role="radio"]'
-    );
-    for (const element of controls) {
-      if (!visible(element) || disabled(element)) continue;
-      const text = label(element);
-      if (exactLabels.has(text)) return element;
-    }
-    return null;
-  }
-
-  async function selectThinking() {
-    const initialState = thinkingEnabled();
-    if (initialState === true) { reasoningMode = 'thinking'; return; }
-
-    // Free/Go and some newer ChatGPT layouts expose a direct Think control in
-    // the composer menu rather than a Thinking option in the model picker.
-    // Check that control before opening the model picker so an already-enabled
-    // reasoning mode is not misclassified as unavailable.
-    const directThinkingControl = findDirectThinkingControl();
-    if (directThinkingControl) {
-      const state = selectionState(directThinkingControl);
-      if (state === true) {
-        reasoningMode = 'thinking';
-        return;
-      }
-      if (state === false) {
-        directThinkingControl.click();
-        await sleep(CLICK_SETTLE_MS);
-        const verified = await waitFor(
-          () => thinkingEnabled() === true ? true : null,
-          THINKING_VERIFY_MS
-        );
-        if (!verified) throw new Error('PASI_NATIVE: Thinking selection could not be verified after direct Think control');
-        reasoningMode = 'thinking';
-        return;
-      }
-    }
-
-    const pill = findModelPill();
-    if (pill) {
-      const mode = currentModelMode();
-      if (mode === 'thinking') { reasoningMode = 'thinking'; return; }
-
-      pill.click();
-      await sleep(CLICK_SETTLE_MS);
-
-      const configure = await waitFor(
-        () => firstVisible(['[data-testid="model-configure-modal"]']) ||
-          findLabeled(['configure'], ['[role="menuitem"]', '[role="option"]', 'button', '[role="button"]']),
-        TIMEOUTS.menu
-      );
-
-      if (configure && visible(configure)) {
-        configure.click();
-        await sleep(CLICK_SETTLE_MS);
-      }
-
-      const thinkingOption = await waitFor(findThinkingMenuOption, TIMEOUTS.menu);
-      if (!thinkingOption || disabled(thinkingOption)) {
-        return markThinkingUnavailable('current ChatGPT account/model does not expose a usable Thinking model option');
-      }
-
-      const optionState = selectionState(thinkingOption);
-      if (optionState === true) {
-        await waitFor(() => currentModelMode() === 'thinking' || thinkingEnabled() === true ? true : null, 3000);
-      } else {
-        thinkingOption.click();
-      }
-
-      const verified = await waitFor(
-        () => currentModelMode() === 'thinking' || thinkingEnabled() === true ? true : null,
-        5000
-      );
-      if (!verified) throw new Error('PASI_NATIVE: Thinking selection could not be verified after model selection');
-      reasoningMode = 'thinking';
-      return;
-    }
-
-    const control = findLabeled(
-      ['thinking', 'think', 'thinking mode'],
-      ['button', '[role="button"]', '[role="option"]', '[role="menuitem"]', '[role="radio"]']
-    );
-
-    if (control && !disabled(control)) {
-      const state = selectionState(control);
-      if (state === true) {
-        reasoningMode = 'thinking';
-        return;
-      }
-      if (state === false) {
-        control.click();
-        await sleep(CLICK_SETTLE_MS);
-        const verified = await waitFor(() => thinkingEnabled() === true ? true : null, THINKING_VERIFY_MS);
-        if (!verified) throw new Error('PASI_NATIVE: Thinking selection could not be verified after toggle');
-        reasoningMode = 'thinking';
-        return;
-      }
-      throw new Error('PASI_NATIVE: Thinking state is ambiguous; refusing to toggle the control');
-    }
-
-    const plus = await waitFor(
-      () => firstVisible([
-        'button[data-testid="composer-plus-btn"]',
-        'button[aria-label="Add files and more"]',
-        'button[aria-label*="Add files"]',
-        'button[aria-label*="Attach"]'
-      ]),
-      TIMEOUTS.menu
-    );
-    if (!plus || disabled(plus)) throw new Error('PASI_NATIVE: Thinking/model selection control unavailable');
-    plus.click();
-    await sleep(CLICK_SETTLE_MS);
-
-    const menuThinking = await waitFor(findThinkingMenuOption, TIMEOUTS.menu);
-    if (!menuThinking || disabled(menuThinking)) {
-      return markThinkingUnavailable('current ChatGPT menu does not expose a usable Thinking option');
-    }
-    const menuState = selectionState(menuThinking);
-    if (menuState === true) {
-      reasoningMode = 'thinking';
-      return;
-    }
-    if (menuState === false) {
-      menuThinking.click();
-      await sleep(CLICK_SETTLE_MS);
-      const verified = await waitFor(() => thinkingEnabled() === true ? true : null, THINKING_VERIFY_MS);
-      if (!verified) throw new Error('PASI_NATIVE: Thinking selection could not be verified after menu selection');
-      reasoningMode = 'thinking';
-      return;
-    }
-    throw new Error('PASI_NATIVE: Thinking state is ambiguous; refusing to toggle the menu control');
-  }
-
-  async function attachGithub(repository) {
-    repository = String(repository || '').trim();
-    if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
-      throw new Error('PASI_NATIVE: GitHub repository must be in owner/name form');
-    }
-    if (githubAttached) {
-      if (githubRepository === repository) return;
-      throw new Error('PASI_NATIVE: GitHub attachment conflicts with the requested repository');
-    }
-    const plus = await waitFor(() => firstVisible(['button[aria-label="Add files and more"]', 'button[aria-label*="Add files"]', 'button[aria-label*="Attach"]']), TIMEOUTS.menu);
-    if (!plus || disabled(plus)) throw new Error('PASI_NATIVE: GitHub menu unavailable');
-    plus.click();
-    const github = await waitFor(() => findLabeled(['github'], ['button', '[role="button"]', '[role="menuitem"]', '[role="option"]']), TIMEOUTS.menu);
-    if (!github) throw new Error('PASI_NATIVE: GitHub app unavailable');
-    github.click();
-    const picker = await waitFor(() => firstVisible(['input[placeholder*="repository" i]', 'input[placeholder*="repo" i]', '[role="dialog"] input[type="text"]']), TIMEOUTS.menu);
-    if (!picker) throw new Error('PASI_NATIVE: repository picker unavailable');
-    setText(picker, repository);
-    const result = await waitFor(() => findLabeled([repository], ['button', '[role="button"]', '[role="option"]', '[role="menuitem"]', 'a']), TIMEOUTS.menu);
-    if (!result) throw new Error('PASI_NATIVE: requested repository unavailable');
-    result.click();
-    await sleep(CLICK_SETTLE_MS);
-    const bodyText = normalize(document.body?.innerText || '');
-    const githubFailureMarkers = [
-      'github connection failed',
-      'github connection error',
-      'failed to connect to github',
-      'could not connect to github',
-      'unable to connect to github',
-      'github connection is unavailable',
-      'github access is unavailable',
-      'github access failed',
-      'github authentication required',
-      'github authentication failed',
-      'reconnect github',
-      'connect your github account',
-      'github needs to be connected',
-      'github app connection failed'
-    ];
-    if (githubFailureMarkers.some((marker) => bodyText.includes(marker))) {
-      throw new Error('PASI_NATIVE: GitHub connection/access unavailable');
-    }
-    githubAttached = true;
-    githubRepository = repository;
-  }
-
-  async function restoreRecoveryContext(context) {
-    if (!context || typeof context !== 'object') return;
-
-    const reasoning = normalize(context.reasoning_mode);
-    if (reasoning) {
-      if (reasoning !== 'thinking' && reasoning !== 'think') {
-        throw new Error('PASI_NATIVE: unsupported recovery reasoning mode');
-      }
-      if (thinkingEnabled() !== true) {
-        const selected = await selectThinking();
-        if (selected === false && reasoningMode !== 'unavailable') {
-          throw new Error('PASI_NATIVE: Thinking state could not be selected during recovery');
-        }
-      }
-    }
-
-    const repository = String(context.github_repository || '').trim();
-    if (!repository) return;
-    if (repository.length > MAX_RECOVERY_CONTEXT_REPOSITORY_CHARS || !/^[^/\s]+\/[^/\s]+$/.test(repository)) {
-      throw new Error('PASI_NATIVE: invalid recovery GitHub repository');
-    }
-    if (githubAttached && githubRepository !== repository) {
-      throw new Error('PASI_NATIVE: recovery GitHub context conflicts with the current attachment');
-    }
-    if (!githubAttached) await attachGithub(repository);
-  }
-
-  function assistants() { return assistantMessages(); }
-
-  function extractAssistant(node) {
-    const markdown = Array.from(node.querySelectorAll?.('.markdown, [class*="markdown"]') || []).filter(visible);
-    for (let i = markdown.length - 1; i >= 0; i -= 1) {
-      const text = String(markdown[i].innerText || markdown[i].textContent || '')
-        .replace(/\r\n?/g, '\n')
-        .replace(/[ \t]+(?=\n)/g, '')
-        .trim();
-      if (text) return text.slice(0, MAX_RESPONSE_TEXT_CHARS);
-    }
-    return messageText(node).slice(0, MAX_RESPONSE_TEXT_CHARS);
-  }
-
-  function latestAssistant() {
-    const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
-    for (let index = nodes.length - 1; index >= 0; index -= 1) {
-      if (visible(nodes[index])) return extractAssistant(nodes[index]);
-    }
-    return '';
-  }
-
-  function fingerprintFromText(value) {
-    return collapseWhitespace(value).slice(-4000);
-  }
-
-  function fingerprint() { return fingerprintFromText(latestAssistant()); }
-
-  function nearbyScopedControls(box) {
-    const controls = [];
-    const seen = new Set();
-    let scope = box?.parentElement || null;
-
-    // ChatGPT has used both form-owned and generic submit controls over time.
-    // Walk only a few ancestors from the active composer so a fallback cannot
-    // bind to an unrelated form elsewhere on the page.
-    for (let depth = 0; scope && depth < 5; depth += 1, scope = scope.parentElement) {
-      const candidates = scope.querySelectorAll(
-        'button[data-testid*="send" i], button[aria-label*="send" i], button[title*="send" i]'
-      );
-      for (const element of candidates) {
-        if (seen.has(element) || !visible(element) || disabled(element)) continue;
-        seen.add(element);
-        controls.push(element);
-      }
-
-      const submits = Array.from(scope.querySelectorAll('button[type="submit"]')).filter(
-        (element) => visible(element) && !disabled(element) && !seen.has(element)
-      );
-      if (submits.length === 1) {
-        seen.add(submits[0]);
-        controls.push(submits[0]);
-      } else if (submits.length > 1 && depth > 0) {
-        // Do not guess among multiple generic submit buttons in a wider
-        // ancestor; the exact composer-scoped selectors above remain safe.
-        break;
-      }
-    }
-    return controls;
-  }
-
-  function sendCandidatesForComposer(box) {
-    const form = box?.closest?.('form') || null;
-    const scope = form || document;
-    const selectors = [
-      'button[data-testid="send-button"]',
-      'button[aria-label="Send prompt"]',
-      'button[aria-label="Send message"]'
-    ];
-    const candidates = [];
-    for (const selector of selectors) {
-      candidates.push(...scope.querySelectorAll(selector));
-    }
-
-    // Generic submit controls are safe only when owned by the exact composer
-    // form or uniquely identified within a small ancestor scope around it.
-    if (form) {
-      candidates.push(...form.querySelectorAll('button[type="submit"]'));
-    }
-    candidates.push(...nearbyScopedControls(box));
-
-    const seen = new Set();
-    return candidates.filter((element) => {
-      if (seen.has(element)) return false;
-      seen.add(element);
-      return visible(element) && !disabled(element);
-    });
-  }
-
-  function labeledSendInScope(scope) {
-    if (!scope) return null;
-    const elements = scope.querySelectorAll('button, [role="button"]');
-    for (const element of elements) {
-      if (!visible(element) || disabled(element)) continue;
-      const text = label(element);
-      if (['send prompt', 'send message', 'send'].some((needle) =>
-        text === needle || text.startsWith(needle + ' ') || text.includes(' ' + needle)
-      )) {
-        return element;
-      }
-    }
-    return null;
-  }
-
-  async function waitForSend(box) {
-    return waitFor(() => {
-      const candidates = sendCandidatesForComposer(box);
-      if (candidates.length) return candidates[0];
-
-      const form = box?.closest?.('form') || null;
-      return labeledSendInScope(form || box?.parentElement || null);
-    }, TIMEOUTS.send);
-  }
-
-  async function ensureThinkingBestEffort() {
-    if (reasoningMode === 'thinking' || reasoningMode === 'unavailable') return reasoningMode;
-    try {
-      if (thinkingEnabled() === true) {
-        reasoningMode = 'thinking';
-        return reasoningMode;
-      }
-      await selectThinking();
-      if (thinkingEnabled() === true) reasoningMode = 'thinking';
-    } catch (error) {
-      reasoningMode = 'unavailable';
-      void reportObservation('chatgpt_reasoning_capability', {
-        chat_url: chatUrl(),
-        thinking_available: false,
-        reasoning_mode: 'unavailable',
-        reason: String(error?.message || error).slice(0, 300),
-        native_controller: true
-      });
-      closeOpenMenus();
-    }
-    return reasoningMode;
-  }
-
-  function closeOpenMenus() {
-    const target = document.activeElement || document.body;
-    for (const type of ['keydown', 'keyup']) {
-      target.dispatchEvent(new KeyboardEvent(type, {
-        key: 'Escape',
-        code: 'Escape',
-        keyCode: 27,
-        which: 27,
-        bubbles: true,
-        cancelable: true,
-        composed: true
-      }));
-    }
-  }
-
-  async function ensurePromptSubmissionReady() {
-    if (authRequired()) throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
-    if (contextExhausted()) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-    if (usageLimited()) throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-    await ensureThinkingBestEffort();
-  }
-
-  function composerContainsPrompt(element, expected) {
-    return Boolean(element) && normalize(readText(element)).includes(normalize(expected));
-  }
-
-  function dispatchEnter(element) {
-    element.focus();
-    const init = {
-      key: 'Enter',
-      code: 'Enter',
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true,
-      composed: true
-    };
-    element.dispatchEvent(new KeyboardEvent('keydown', init));
-    element.dispatchEvent(new KeyboardEvent('keypress', init));
-    element.dispatchEvent(new KeyboardEvent('keyup', { ...init, cancelable: false }));
-  }
-
-  function nativeMouseActivate(element) {
-    if (!element) return false;
-    element.focus();
-    const init = {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      view: window,
-      button: 0,
-      buttons: 1,
-      detail: 1
-    };
-    try {
-      if (typeof PointerEvent === 'function') {
-        element.dispatchEvent(new PointerEvent('pointerdown', { ...init, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+      if (
+        operation.network_terminal_event &&
+        operation.network_terminal_event !== 'COMPLETED'
+      ) {
+        const reason = String(operation.network_terminal_reason || operation.failure_reason || 'network failure');
+        return {status: 'failed', error: 'PASI_CDP: ' + reason};
       }
     } catch (_) {}
-    element.dispatchEvent(new MouseEvent('mousedown', init));
-    try {
-      if (typeof PointerEvent === 'function') {
-        element.dispatchEvent(new PointerEvent('pointerup', { ...init, pointerId: 1, pointerType: 'mouse', buttons: 0, isPrimary: true }));
-      }
-    } catch (_) {}
-    element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
-    element.click();
-    return true;
+    return {status: 'pending'};
   }
 
-
-  async function submitPrompt(expected, options = {}) {
-    const fastPath = options.fastPath === true;
-    const handoffBox = options.readyBox && options.readyBox.isConnected === true
-      ? options.readyBox
-      : null;
-    const snapshot = snapshotUserMessages();
-    const { head, tail } = promptFingerprints(expected);
-    const newMessageState = () => classifyNewUserMessages(userMessages(), snapshot, head, tail, messageText);
-    const accepted = () => {
-      const state = newMessageState();
-      if (state === 'match') return 'verified';
-      if (state === 'new_unmatched' && generating()) return 'new_message_generating';
-      return null;
-    };
-
-    const strategies = [
-      async (box, button) => {
-        if (generating()) return false;
-        const form = (button || box).closest?.('form') || box.closest?.('form') || null;
-        if (!form || typeof form.requestSubmit !== 'function') return false;
-        try {
-          const type = String(button?.getAttribute?.('type') || 'submit').toLowerCase();
-          if (!button || type === 'submit') form.requestSubmit(button || undefined);
-          else form.requestSubmit();
-          return true;
-        } catch (_) {
-          return false;
-        }
-      },
-      async (_box, button) => {
-        if (generating() || !button || disabled(button)) return false;
-        nativeMouseActivate(button);
-        return true;
-      },
-      async (box) => {
-        if (generating() || !composerContainsPrompt(box, expected)) return false;
-        dispatchEnter(box);
-        return true;
-      }
-    ];
-
-    for (let attempt = 1; attempt <= strategies.length; attempt += 1) {
-      let via = accepted();
-      if (via) return {
-        via,
-        attempt,
-        verified: via === 'verified',
-        timing: {
-          injected_at_ms: null,
-          ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
-          ack_verified: via === 'verified',
-          submission_via: via
-        }
-      };
-
-      if (fastPath) {
-        const detected = detectorState();
-        if (detected.auth_required === true) throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
-        if (detected.context_exhausted === true) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-        if (detected.context_exhausted !== true && detected.usage_limited === true) {
-          throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-        }
-        if (reasoningMode !== 'thinking' && reasoningMode !== 'unavailable') await ensureThinkingBestEffort();
-      } else {
-        await ensurePromptSubmissionReady();
-      }
-      const box = handoffBox || composer();
-      const composerEmptied = !box || !composerContainsPrompt(box, expected);
-      if ((attempt > 1 && composerEmptied) || generating() || newMessageState()) {
-        via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
-        const finalVia = via || 'sent_unverified';
-        return {
-          via: finalVia,
-          attempt,
-          verified: via === 'verified',
-          timing: {
-            injected_at_ms: null,
-            ack_at_ms: Date.now(),
-            user_messages_added: countNewUserMessages(userMessages(), snapshot),
-            ack_verified: via === 'verified',
-            submission_via: finalVia
-          }
-        };
-      }
-
-      let readyBox = box;
-      if (!readyBox) throw new Error('PASI_NATIVE: composer disappeared');
-
-      if (!composerContainsPrompt(readyBox, expected)) {
-        if (normalize(readText(readyBox))) {
-          throw new Error('PASI_NATIVE: composer holds unrelated text; refusing to overwrite');
-        }
-        insertText(readyBox, expected);
-        readyBox = await waitUntil(() => {
-          const current = composer();
-          return current && composerContainsPrompt(current, expected) ? current : null;
-        }, 2000, DOM_POLL_MS) || composer();
-      }
-
-      if (!readyBox || !composerContainsPrompt(readyBox, expected)) {
-        if (attempt < strategies.length) continue;
-        throw new Error('PASI_NATIVE: composer lost the requested prompt before submission after bounded recovery');
-      }
-
-      const immediateButton = sendCandidatesForComposer(readyBox)[0] ||
-        labeledSendInScope(readyBox.closest?.('form') || readyBox.parentElement || null);
-      const button = immediateButton || await waitForSend(readyBox);
-      if (!button) {
-        if (attempt < strategies.length) continue;
-        throw new Error('PASI_NATIVE: send control unavailable');
-      }
-
-      // Once a send strategy has fired, never invoke another send mechanism:
-      // the delayed acknowledgement may simply trail the real submission, and
-      // a second click can duplicate work.
-      const injectedAtMs = Date.now();
-      const fired = await strategies[attempt - 1](readyBox, button);
-      if (!fired) continue;
-
-      via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
-      const finalVia = via || 'sent_unverified';
-      return {
-        via: finalVia,
-        attempt,
-        verified: via === 'verified',
-        timing: {
-          injected_at_ms: injectedAtMs,
-          ack_at_ms: Date.now(),
-          user_messages_added: countNewUserMessages(userMessages(), snapshot),
-          ack_verified: via === 'verified',
-          submission_via: finalVia
-        }
-      };
-    }
-
-    if (contextExhausted()) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-    if (usageLimited()) throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-    throw new Error('PASI_NATIVE: prompt submission could not be verified after bounded attempts');
-  }
-
-
-  function freshCompletionHandoff(operation) {
-    const ackAt = Number(operation?.__pasi_completion_ack_at_ms);
-    if (!Number.isFinite(ackAt) || ackAt <= 0) return false;
-    const age = Date.now() - ackAt;
-    return age >= 0 && age <= HANDOFF_ACK_MAX_AGE_MS;
-  }
-
-  function operationPrompt(operation) {
-    return `[PASI_OPERATION ${operation.operation_id}]\n${operation.prompt}`;
-  }
-
-  function completionMarkersSatisfied(responseText, markers) {
-    const text = typeof responseText === 'string' ? responseText : '';
-    if (!text.trim()) return false;
-    const configured = Array.isArray(markers)
-      ? markers
-          .filter((marker) => typeof marker === 'string' && marker.trim())
-          .map((marker) => marker.trim())
-      : [];
-    if (!configured.length) return true;
-    const lines = text.split(/\r?\n/).map((line) => line.trim());
-    return configured.some((marker) =>
-      lines.some((line) => line === marker || line.startsWith(marker + ':'))
-    );
-  }
-
-  async function waitForResponse(baseline, completionMarkers = [], evidenceContext = null) {
+  async function waitForResponse(operationId, baseline, completionMarkers = [], evidenceContext = null) {
     let sawGeneration = false;
-    const responseEvidence = () => {
-      const networkText = networkResponseEvidence(completionMarkers);
-      if (networkText) return networkText;
-      return assistantResponseEvidence(
-        evidenceContext?.assistantSnapshot,
-        evidenceContext?.prompt,
-        baseline
-      );
-    };
     let generationEndedAt = 0;
     let failureReason = null;
+    let networkResponse = '';
+    let networkFailure = null;
+    let networkPollActive = true;
 
-    const response = await waitUntil(() => {
-      // While generation is active, the stop control is the only state needed
-      // for this hot loop. Avoid a full failure-marker DOM scan on every mutation.
-      if (generating()) {
-        sawGeneration = true;
-        generationEndedAt = 0;
-        return null;
+    const networkPoll = (async () => {
+      const startedAt = Date.now();
+      while (networkPollActive && Date.now() - startedAt < TIMEOUTS.generation) {
+        const evidence = await cdpOperationEvidence(operationId, completionMarkers);
+        if (evidence.status === 'completed') {
+          networkResponse = evidence.text;
+          return;
+        }
+        if (evidence.status === 'failed') {
+          networkFailure = evidence.error;
+          return;
+        }
+        await sleep(250);
       }
+    })();
 
-      const detected = detectorState();
-      if (detected.context_exhausted === true) {
-        failureReason = 'CHAT_EXHAUSTED: conversation context is exhausted';
-        return null;
-      }
-      if (
-        detected.context_exhausted !== true &&
-        detected.usage_limited === true
-      ) {
-        failureReason = 'CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited';
-        return null;
-      }
+    try {
+      const response = await waitUntil(() => {
+        if (networkResponse) return networkResponse;
+        if (networkFailure) return null;
 
-      if (sawGeneration) {
-        if (!generationEndedAt) generationEndedAt = Date.now();
-        if (Date.now() - generationEndedAt < RESPONSE_SETTLE_MS) return null;
-        const responseText = responseEvidence();
-        return responseText && completionMarkersSatisfied(responseText, completionMarkers)
+        if (generating()) {
+          sawGeneration = true;
+          generationEndedAt = 0;
+          return null;
+        }
+
+        const detected = detectorState();
+        if (detected.context_exhausted === true) {
+          failureReason = 'CHAT_EXHAUSTED: conversation context is exhausted';
+          return null;
+        }
+        if (detected.context_exhausted !== true && detected.usage_limited === true) {
+          failureReason = 'CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited';
+          return null;
+        }
+
+        const responseText = assistantResponseEvidence(
+          evidenceContext?.assistantSnapshot,
+          evidenceContext?.prompt,
+          baseline
+        );
+        if (sawGeneration) {
+          if (!generationEndedAt) generationEndedAt = Date.now();
+          if (Date.now() - generationEndedAt < RESPONSE_SETTLE_MS) return null;
+        }
+        return completionMarkersSatisfied(responseText, completionMarkers)
           ? responseText
           : null;
-      }
+      }, TIMEOUTS.generation, DOM_POLL_MS);
 
-      const responseText = responseEvidence();
-      return completionMarkersSatisfied(responseText, completionMarkers)
-        ? responseText
-        : null;
-    }, TIMEOUTS.generation, DOM_POLL_MS);
-
-    if (failureReason) throw new Error(failureReason);
-    if (response) return response;
-    throw new Error('PASI_NATIVE: ChatGPT generation timed out');
+      if (networkResponse) return networkResponse;
+      if (networkFailure) throw new Error(networkFailure);
+      if (failureReason) throw new Error(failureReason);
+      if (response) return response;
+      throw new Error('PASI_NATIVE: ChatGPT generation timed out');
+    } finally {
+      networkPollActive = false;
+      await networkPoll.catch(() => undefined);
+    }
   }
 
-
-  function rememberContextRecovery(operation, error) {
-    let stored = null;
-    try {
-      stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
-    } catch (_) {}
-
-    const startedAt = typeof stored?.started_at === 'string'
-      ? stored.started_at
-      : new Date().toISOString();
-
-    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
-      operation_id: operation.operation_id,
-      operation_type: operation.operation_type,
-      started_at: startedAt,
-      started_ms: Date.parse(startedAt) || Date.now(),
-      baseline: fingerprint(),
-      chat_url: chatUrl(),
-      recovery_context: recoveryContext(),
-      reload_count: 0,
-      phase: 'context_exhausted',
-      error: String(error?.message || error)
-    }));
-  }
-
-  function rememberResponseRecovery(operation, error) {
-    let stored = null;
-    try {
-      stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
-    } catch (_) {}
-
-    const startedAt = typeof stored?.started_at === 'string'
-      ? stored.started_at
-      : new Date().toISOString();
-
-    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
-      operation_id: operation.operation_id,
-      operation_type: operation.operation_type,
-      started_at: startedAt,
-      started_ms: Date.parse(startedAt) || Date.now(),
-      baseline: typeof stored?.baseline === 'string' ? stored.baseline : fingerprint(),
-      chat_url: chatUrl(),
-      recovery_context: recoveryContext(),
-      reload_count: 0,
-      phase: 'monitoring',
-      error: String(error?.message || error),
-      response_recovery: true
-    }));
-  }
 
   function completionProgress(responseText) {
     const text = typeof responseText === 'string' ? responseText : '';
@@ -1845,47 +870,6 @@
       repository_progress: progressMatch ? progressMatch[1].trim().toLowerCase() : null,
       next_task: nextTaskMatch ? nextTaskMatch[1].trim() : null
     };
-  }
-
-  function markNetworkDomCompletion(operationId, responseText, chatUrlValue) {
-    const id = typeof operationId === 'string' && operationId ? operationId : null;
-    if (!id) return;
-    let summary = networkShadowByOperationId.get(id);
-    if (!summary) {
-      if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
-        const oldestOperation = networkShadowByOperationId.keys().next().value;
-        if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
-      }
-      summary = {
-        requestIds: [],
-        terminal: null,
-        started: null,
-        last: null,
-        domCompleted: false,
-        domCompletionAtMs: null,
-        domResponseAvailable: false,
-        domChatUrl: null
-      };
-      networkShadowByOperationId.set(id, summary);
-    }
-    summary.domCompleted = true;
-    summary.domCompletionAtMs = Date.now();
-    summary.domResponseAvailable = typeof responseText === 'string' && Boolean(responseText.trim());
-    summary.domChatUrl = typeof chatUrlValue === 'string' && chatUrlValue ? chatUrlValue : null;
-
-    void reportObservation('chatgpt_network_dom_shadow', {
-      operation_id: id,
-      network_request_ids: summary.requestIds,
-      network_started: Boolean(summary.started),
-      network_terminal_event: summary.terminal?.eventType || null,
-      network_terminal_reason: summary.terminal?.reason || null,
-      network_last_event: summary.last?.eventType || null,
-      dom_completed: true,
-      dom_completion_at_ms: summary.domCompletionAtMs,
-      dom_response_available: summary.domResponseAvailable,
-      dom_chat_url: summary.domChatUrl,
-      network_shadow: true
-    }, 5000);
   }
 
   async function finishOperation(
@@ -1970,7 +954,6 @@
               native_controller: true
             }).catch(() => {});
 
-            markNetworkDomCompletion(operationId, responseText, chatUrl());
             setTimeout(publishResponseTelemetry, RESPONSE_TELEMETRY_DEFER_MS);
             return payload;
           } catch (_) {
@@ -2001,7 +984,15 @@
 
   async function failOperation(operationId, error) {
     try {
-      const response = await bridge('/chat/failed', { method: 'POST', body: { operation_id: operationId, error: String(error?.message || error) } });
+      const response = await bridge('/chat/failed', {
+        method: 'POST',
+        body: {
+          operation_id: operationId,
+          controller_id: CONTROLLER_INSTANCE_ID,
+          failure_source: 'dom_fallback',
+          error: String(error?.message || error)
+        }
+      });
       return response.ok;
     } catch (_) {
       return false;
@@ -2011,7 +1002,6 @@
   async function processOperation(operation) {
     activeOperationId = operation.operation_id;
     processing = true;
-    await bindNetworkOperation(activeOperationId);
     if (leaseTimerId !== null) clearInterval(leaseTimerId);
     if (!hasFreshControllerLease()) {
       const claimed = await controllerClaim();
@@ -2020,6 +1010,13 @@
         processing = false;
         return;
       }
+    }
+    if (!(await bindCdpOperation(activeOperationId))) {
+      activeOperationId = null;
+      processing = false;
+      controllerLeader = false;
+      controllerClaimedAt = 0;
+      throw new Error('PASI_NATIVE: CDP network binding unavailable');
     }
     leaseTimerId = setInterval(() => {
       controllerClaim({ force: true }).catch(() => {
@@ -2144,6 +1141,11 @@
             Array.isArray(operation.completion_markers)
               ? operation.completion_markers
               : [],
+            operation.operation_id,
+            baseline,
+            Array.isArray(operation.completion_markers)
+              ? operation.completion_markers
+              : [],
             { assistantSnapshot, prompt: promptText }
           );
           browserTiming.completed_at_ms = Date.now();
@@ -2207,7 +1209,7 @@
       }
       throw error;
     } finally {
-      void bindNetworkOperation(null);
+      void bindCdpOperation(null);
       if (leaseTimerId !== null) {
         clearInterval(leaseTimerId);
         leaseTimerId = null;
@@ -2374,7 +1376,6 @@
   }
 
   async function start() {
-    installNetworkLifecycleShadow();
     pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
 

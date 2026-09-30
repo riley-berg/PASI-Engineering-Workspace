@@ -11,6 +11,7 @@
     } catch (_) {}
     return `ctrl-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   })();
+  globalThis.PASI_NATIVE_CONTROLLER_ID = CONTROLLER_INSTANCE_ID;
   const PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1';
   const TIMEOUT_POLICY = globalThis.PASI_TIMEOUT_POLICY?.get?.() || {};
   const POLL_MS = TIMEOUT_POLICY.pollMs || 2000;

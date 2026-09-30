@@ -23,6 +23,7 @@
   const MISSING_OPERATION_GRACE_MS = 60 * 1000;
   const MISSING_OPERATION_REPORT_MS = 10 * 1000;
   const RECOVERY_VERSION = '1.0.6';
+  const CONTROLLER_INSTANCE_ID = String(globalThis.PASI_NATIVE_CONTROLLER_ID || '');
   const MAX_RESPONSE_TEXT_CHARS = 120_000;
   let inspecting = false;
   let progressTracker = null;
@@ -41,6 +42,12 @@
       throw new Error('PASI_NATIVE: extension messaging API unavailable');
     }
     const timeoutMs = Number(options.timeout || 5000);
+    const pathValue = String(path || '');
+    const bodyValue = options.body ?? null;
+    const controllerBoundRoute = /^\/chat\/(?:claim|heartbeat|finished|failed|cancel)$/.test(pathValue);
+    const requestBody = controllerBoundRoute && bodyValue && typeof bodyValue === 'object' && CONTROLLER_INSTANCE_ID
+      ? { ...bodyValue, controller_id: CONTROLLER_INSTANCE_ID }
+      : bodyValue;
     return new Promise((resolve, reject) => {
       let settled = false;
       const timerId = setTimeout(() => {
@@ -53,7 +60,7 @@
           type: 'pasi-bridge-request',
           path: String(path || ''),
           method: String(options.method || 'GET').toUpperCase(),
-          body: options.body ?? null
+          body: requestBody
         }, (response) => {
           if (settled) return;
           settled = true;
@@ -450,53 +457,16 @@
   }
 
   async function finishExisting(operationId, responseText) {
-    const bounded = String(responseText || '').slice(0, MAX_RESPONSE_TEXT_CHARS);
-    const available = Boolean(bounded.trim());
-    if (!available) return false;
-
-    await report('chatgpt_response', {
-      active_operation_id: operationId,
-      response_text: bounded,
-      response_text_available: true,
-      chat_exhausted: contextExhausted(),
-      recovery_action: 'preserve_response'
-    });
-
-    let lastError = null;
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        const finished = await bridge('/chat/finished', {
-          method: 'POST',
-          body: {
-            operation_id: operationId,
-            chat_url: location.href,
-            response_text: bounded,
-            response_text_available: true
-          }
-        });
-        if (finished.ok) return true;
-        const acknowledged = await operation(operationId);
-        if (
-          acknowledged?.status === 'completed' &&
-          acknowledged?.response_text_available === true &&
-          typeof acknowledged?.response_text === 'string' &&
-          Boolean(acknowledged.response_text.trim())
-        ) {
-          return true;
-        }
-        lastError = new Error(`bridge completion failed: HTTP ${finished.status}`);
-      } catch (error) {
-        lastError = error;
-      }
-      if (attempt < 3) await sleep(Math.min(POLL_MS, 500));
-    }
-    await report('chatgpt_recovery', {
-      phase: 'completion_ack_failed',
-      operation_id: operationId,
-      recovery_action: 'retry_runner',
-      error: String(lastError?.message || lastError || 'unknown completion acknowledgement failure')
-    });
-    return false;
+    void responseText;
+    const current = await operation(operationId);
+    return Boolean(
+      current &&
+      current.network_response_authoritative === true &&
+      current.response_source === 'cdp_fetch_stream' &&
+      current.response_text_available === true &&
+      typeof current.response_text === 'string' &&
+      Boolean(current.response_text.trim())
+    );
   }
 
   async function markRetryableFailure(operationId, message, recoveryContext = null) {
@@ -534,11 +504,9 @@
   }
 
   async function finishVisibleResponse(operationId, current, baseline) {
+    void baseline;
     if (!current || current.operation_type !== 'prompt') return false;
-    if (await finishPersistedResponse(current)) return true;
-    const response = latestAssistantForOperation(current);
-    if (generating() || !response) return false;
-    return finishExisting(operationId, response);
+    return finishPersistedResponse(current);
   }
 
   async function handleContextExhausted(state) {
@@ -697,16 +665,7 @@
       return;
     }
 
-    if (state.recovery_reason !== 'connection_error') {
-      const response = latestAssistant();
-      const currentFingerprint = fingerprint();
-      if (!generating() && response && currentFingerprint !== String(state.baseline || '')) {
-        if (await finishExisting(operationId, response)) {
-          clearRecoveryState();
-          return true;
-        }
-      }
-    }
+    // Prompt completion remains CDP-authoritative; recovery never promotes DOM text.
 
     const startedMs = Number(state.started_ms || Date.now());
     beginProgressTracking(operationId, state);
@@ -782,16 +741,7 @@
       return;
     }
 
-    if (state.recovery_reason !== 'connection_error') {
-      const response = latestAssistant();
-      const currentFingerprint = fingerprint();
-      if (!generating() && response && currentFingerprint !== String(state.baseline || '')) {
-        if (await finishExisting(operationId, response)) {
-          clearRecoveryState();
-          return;
-        }
-      }
-    }
+    // Prompt completion remains CDP-authoritative; recovery never promotes DOM text.
 
     const reloadAt = Date.parse(String(state.reload_at || ''));
     if (Number.isFinite(reloadAt) && Date.now() - reloadAt < RECOVERY_GRACE_MS) {

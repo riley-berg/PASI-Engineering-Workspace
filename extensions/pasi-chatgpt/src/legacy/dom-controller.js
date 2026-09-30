@@ -720,6 +720,108 @@
     } catch (_) {}
   }
 
+  function installRuntimeErrorTelemetry() {
+    if (globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ === true) return;
+    globalThis.__PASI_RUNTIME_ERROR_TELEMETRY_INSTALLED__ = true;
+
+    const reportRuntimeError = (source, message, detail = {}) => {
+      const text = String(message || '').slice(0, 2000);
+      const stack = String(detail.stack || '').slice(0, 4000);
+      const sourceUrl = String(detail.sourceUrl || location.href || '').slice(0, 2000);
+      void reportObservation('chatgpt_runtime_error', {
+        chat_url: chatUrl(),
+        active_operation_id: activeOperationId,
+        source,
+        message: text,
+        stack,
+        source_url: sourceUrl,
+        line: Number.isFinite(Number(detail.line)) ? Number(detail.line) : null,
+        column: Number.isFinite(Number(detail.column)) ? Number(detail.column) : null,
+        recovery_defaults_match: /\bRECOVERY_DEFAULTS\b/.test(text + '\n' + stack + '\n' + sourceUrl),
+        native_controller: true
+      });
+    };
+
+    window.addEventListener('error', (event) => {
+      reportRuntimeError('window_error', event?.message || event?.error?.message, {
+        stack: event?.error?.stack,
+        sourceUrl: event?.filename,
+        line: event?.lineno,
+        column: event?.colno
+      });
+    }, true);
+
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      reportRuntimeError('unhandled_rejection', reason?.message || String(reason || 'Unhandled promise rejection'), {
+        stack: reason?.stack
+      });
+    }, true);
+  }
+
+  function reportHealth() {
+    if (healthReportInFlight) return healthReportInFlight;
+    healthReportInFlight = (async () => {
+      const currentUrl = chatUrl();
+      if (currentUrl !== lastKnownChatUrl) {
+        if (lastKnownChatUrl !== null || currentUrl !== null) {
+          void reportObservation('chatgpt_chat_changed', {
+            previous_chat_url: lastKnownChatUrl,
+            new_chat_url: currentUrl,
+            active_operation_id: activeOperationId,
+            reason: processing ? 'during_operation' : 'navigation'
+          }, 2000);
+        }
+        if (!processing) {
+          githubAttached = false;
+          githubRepository = null;
+          reasoningMode = null;
+        }
+        lastKnownChatUrl = currentUrl;
+      }
+
+      const detected = detectorState();
+      const exhausted = detected.context_exhausted === true;
+      const limited = !exhausted && detected.usage_limited === true;
+      const auth = detected.auth_required === true;
+      const thinking = thinkingEnabled();
+      const composerPresent = Boolean(composer());
+
+      await reportObservation('chatgpt_health', {
+        chat_url: currentUrl,
+        provider_usage_limited: limited,
+        auth_required: auth,
+        conversation_context_exhausted: exhausted,
+        thinking_enabled: thinking,
+        thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
+        page_visible: document.visibilityState !== 'hidden',
+        composer_present: composerPresent,
+        native_controller: true,
+        runtime_error_telemetry: true,
+        active_operation_id: activeOperationId
+      }, 2000);
+
+      if (Date.now() - lastStateReportAt >= STATE_REPORT_MS) {
+        lastStateReportAt = Date.now();
+        void reportObservation('chatgpt_state', {
+          chat_url: currentUrl,
+          conversation_context_exhausted: exhausted,
+          chat_exhausted: exhausted,
+          provider_usage_limited: limited,
+          github_attached: githubAttached,
+          reasoning_mode: reasoningMode,
+          reasoning_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
+          conversation_signature: conversationSignature(),
+          active_operation_id: activeOperationId,
+          native_controller: true
+        });
+      }
+    })().finally(() => {
+      healthReportInFlight = null;
+    });
+    return healthReportInFlight;
+  }
+
   async function bindCdpOperation(operationId) {
     const value = operationId == null || operationId === '' ? null : String(operationId);
 

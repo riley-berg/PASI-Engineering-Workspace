@@ -35,12 +35,22 @@ function fakeDebugger() {
     detach(_debuggee, callback) { callback(); },
     sendCommand(_debuggee, method, params, callback) {
       commands.push({method, params});
-      if (method === 'Runtime.evaluate') {
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus') return callback({});
+      if (method === 'Accessibility.getFullAXTree') {
         return callback({
-          result: {
-            type: 'object',
-            value: {focused: true, kind: 'textarea'}
-          }
+          nodes: [{
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 42,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: ''},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}},
+              {name: 'focused', value: {type: 'boolean', value: false}}
+            ]
+          }]
         });
       }
       if (method === 'Input.insertText' || method === 'Input.dispatchKeyEvent') return callback({});
@@ -84,13 +94,11 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   const result = await controller.submitOperation(6, 'op-6', 'controller-6');
   assert.equal(result.submitted, true);
   assert.equal(result.submissionMethod, 'cdp_input');
-  assert.equal(result.targetKind, 'textarea');
+  assert.equal(result.targetKind, 'accessibility_textbox');
 
-  const runtime = debuggerApi.commands.find((command) => command.method === 'Runtime.evaluate');
-  assert.ok(runtime);
-  assert.match(runtime.params.expression, /textarea/);
-  assert.match(runtime.params.expression, /contenteditable/);
-  assert.doesNotMatch(runtime.params.expression, /send-button/i);
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'Accessibility.getFullAXTree'));
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'DOM.focus' && command.params.backendNodeId === 42));
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
 
   const insertIndex = debuggerApi.commands.findIndex((command) => command.method === 'Input.insertText');
   assert.ok(insertIndex >= 0);
@@ -115,14 +123,25 @@ test('CDP submit operation refuses to overwrite unrelated editable text', async 
 
   debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
     this.commands.push({method, params});
-    if (method === 'Runtime.evaluate') {
+    if (method === 'Accessibility.getFullAXTree') {
       return callback({
-        result: {
-          type: 'object',
-          value: {focused: true, kind: 'textarea', currentText: 'user draft'}
-        }
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 42,
+          role: {type: 'role', value: 'textbox'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: 'user draft'},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: true}}
+          ]
+        }]
       });
     }
+    if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus') return callback({});
+    if (method === 'Input.insertText' || method === 'Input.dispatchKeyEvent') return callback({});
     if (method === 'Fetch.enable') return callback({});
     callback({});
   };

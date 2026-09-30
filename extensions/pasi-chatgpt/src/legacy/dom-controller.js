@@ -1676,6 +1676,24 @@
     if (!completionMarkersSatisfied(responseText, completionMarkers)) {
       throw new Error('PASI_NATIVE: response text does not satisfy completion markers; completion acknowledgement withheld');
     }
+    if (completionMarkers.length) {
+      try {
+        const operationResponse = await bridge('/operation?operation_id=' + encodeURIComponent(operationId), {timeout: 2500});
+        const operationPayload = operationResponse.ok ? operationResponse.json() : null;
+        const operation = operationPayload?.operation;
+        const networkAuthoritative = (
+          operation?.network_response_authoritative === true &&
+          operation?.response_source === 'cdp_fetch_stream' &&
+          operation?.response_text_available === true
+        );
+        if (!networkAuthoritative) {
+          throw new Error('PASI_CDP: authoritative network response evidence unavailable');
+        }
+      } catch (error) {
+        if (String(error?.message || error).startsWith('PASI_CDP:')) throw error;
+        throw new Error('PASI_CDP: authoritative network response evidence unavailable');
+      }
+    }
     // Response detection is already authoritative for this operation.
     // Conversation signature/count telemetry is recorded independently for
     // verification and diagnostics, but it must never block durable completion.
@@ -2068,11 +2086,13 @@
 
       if (operation.status === 'completed') {
         const responseText = typeof operation.response_text === 'string' ? operation.response_text : '';
-        // Persisted nonblank response text is the evidence. A stale
-        // controller availability flag must not discard it during restart
-        // reconciliation; blank text remains fail-closed.
-        const responseAvailable = Boolean(responseText.trim());
-        if (responseAvailable) {
+        const networkAuthoritative = (
+          operation.network_response_authoritative === true &&
+          operation.response_source === 'cdp_fetch_stream' &&
+          operation.response_text_available === true &&
+          Boolean(responseText.trim())
+        );
+        if (networkAuthoritative) {
           try {
             await finishOperation(stored.operation_id, responseText, true);
           } catch (_) {
@@ -2080,19 +2100,11 @@
             return;
           }
         } else if (!generating()) {
-          const baseline = typeof stored?.baseline === 'string' ? stored.baseline : fingerprint();
-          const visibleResponse = latestAssistant();
-          const visibleFingerprint = fingerprint();
-          if (visibleResponse && visibleFingerprint !== baseline) {
-            try {
-              await finishOperation(stored.operation_id, visibleResponse, true);
-            } catch (_) {
-              // Keep the active marker so recovery.js can retry against the same operation.
-              return;
-            }
-          }
+          // Do not promote a DOM-only snapshot to durable completion. Prompt
+          // completion requires persisted CDP Fetch evidence; otherwise the
+          // active marker remains for the bounded recovery controller.
         }
-        localStorage.removeItem(ACTIVE_KEY);
+        if (networkAuthoritative) localStorage.removeItem(ACTIVE_KEY);
       } else if (operation.status === 'failed' || operation.status === 'cancelled') {
         localStorage.removeItem(ACTIVE_KEY);
       }

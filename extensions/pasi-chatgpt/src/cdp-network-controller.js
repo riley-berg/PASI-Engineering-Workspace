@@ -277,6 +277,7 @@
               if (!/already attached|another debugger/i.test(String(error?.message || error))) throw error;
             }
           }
+          await sendCommand(tabId, 'Accessibility.enable');
           await sendCommand(tabId, 'Fetch.enable', {
             patterns: GENERATION_ENDPOINTS.flatMap((urlPattern) => ([
               {urlPattern: '*' + urlPattern, requestStage: 'Request'},
@@ -305,6 +306,9 @@
         if (state.enabled) await sendCommand(tabId, 'Fetch.disable');
       } catch (_) {}
       try {
+        await sendCommand(tabId, 'Accessibility.disable');
+      } catch (_) {}
+      try {
         if (typeof debuggerApi?.detach === 'function') {
           await new Promise((resolve) => {
             try { debuggerApi.detach({tabId}, () => resolve()); } catch (_) { resolve(); }
@@ -319,85 +323,83 @@
       return tabs.get(tabId)?.binding || null;
     }
 
-    async function focusEditableTarget(tabId) {
-      const expression = `() => {
-        const isEditable = (element) => {
-          if (!element || element.disabled === true) return false;
-          if (element.getAttribute?.('aria-hidden') === 'true') return false;
-          return element.isContentEditable === true ||
-            element.tagName === 'TEXTAREA' ||
-            element.tagName === 'INPUT' ||
-            element.getAttribute?.('role') === 'textbox';
-        };
-        const visible = (element) => {
-          if (!isEditable(element)) return false;
-          try { return element.getClientRects().length > 0; } catch (_) { return false; }
-        };
-        const metadata = (element) => [
-          element.getAttribute?.('aria-label'),
-          element.getAttribute?.('placeholder'),
-          element.getAttribute?.('title')
-        ].filter(Boolean).join(' ').toLowerCase();
-        const composerScore = (element) => {
-          if (!visible(element)) return -1;
-          const tag = String(element.tagName || '').toUpperCase();
-          const role = String(element.getAttribute?.('role') || '').toLowerCase();
-          const baseScore = element.isContentEditable === true || tag === 'TEXTAREA'
-            ? 100
-            : role === 'textbox'
-              ? 80
-              : 10;
-          const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(metadata(element));
-          return baseScore + (semantic ? 25 : 0);
-        };
-
-        const active = document.activeElement;
-        const readValue = (element) => String(
-          element?.value ??
-          element?.innerText ??
-          element?.textContent ??
-          ''
-        ).trim();
-
-        if (visible(active) && composerScore(active) >= 100) {
-          active.focus();
-          return {
-            focused: true,
-            kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase(),
-            source: 'active',
-            currentText: readValue(active)
-          };
-        }
-
-        const candidates = Array.from(document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"], input'));
-        let target = null;
-        let bestScore = -1;
-        for (const candidate of candidates) {
-          const score = composerScore(candidate);
-          if (score > bestScore) {
-            bestScore = score;
-            target = candidate;
-          }
-        }
-        if (!target || bestScore < 100) return {focused: false, reason: 'NO_COMPOSER_EDITABLE_TARGET'};
-        target.focus();
-        return {
-          focused: document.activeElement === target,
-          kind: target.isContentEditable ? 'contenteditable' : String(target.tagName || '').toLowerCase(),
-          source: 'semantic_editable',
-          currentText: readValue(target)
-        };
-      })()`;
-      const result = await sendCommand(tabId, 'Runtime.evaluate', {
-        expression,
-        returnByValue: true,
-        awaitPromise: false
-      });
-      const value = result?.result?.value;
-      if (!value?.focused) {
-        throw new Error('CDP submit target unavailable: ' + String(value?.reason || 'focus failed'));
+    function axValue(value) {
+      if (value == null) return '';
+      if (typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
+        return String(value.value ?? '');
       }
-      return value;
+      return String(value);
+    }
+
+    function axProperty(node, name) {
+      const properties = Array.isArray(node?.properties) ? node.properties : [];
+      const property = properties.find((entry) => axValue(entry?.name).toLowerCase() === String(name).toLowerCase());
+      return property ? property.value : null;
+    }
+
+    function axRole(node) {
+      return axValue(node?.role).toLowerCase();
+    }
+
+    function axName(node) {
+      return axValue(node?.name);
+    }
+
+    function axBooleanProperty(node, name) {
+      const value = axProperty(node, name);
+      if (typeof value === 'boolean') return value;
+      const normalized = axValue(value).toLowerCase();
+      if (normalized === 'true') return true;
+      if (normalized === 'false') return false;
+      return null;
+    }
+
+    function findComposerAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        if (axRole(node) !== 'textbox') continue;
+        const editable = axBooleanProperty(node, 'editable');
+        const multiline = axBooleanProperty(node, 'multiline');
+        if (editable === false) continue;
+
+        const name = axName(node).toLowerCase();
+        const focused = axBooleanProperty(node, 'focused') === true;
+        const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(name);
+        const score =
+          (focused ? 1000 : 0) +
+          (multiline === true ? 250 : 0) +
+          (editable === true ? 100 : 0) +
+          (semantic ? 50 : 0);
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      if (!best) throw new Error('CDP submit target unavailable: NO_ACCESSIBLE_COMPOSER');
+      const backendNodeId = Number(best.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP submit target unavailable: ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE');
+      }
+      return {
+        backendNodeId,
+        kind: 'accessibility_textbox',
+        name: axName(best),
+        currentText: axValue(best.value),
+        focused: axBooleanProperty(best, 'focused') === true
+      };
+    }
+
+    async function focusEditableTarget(tabId) {
+      const result = await sendCommand(tabId, 'Accessibility.getFullAXTree');
+      const target = findComposerAXNode(result?.nodes);
+      if (!target.focused) {
+        await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.backendNodeId});
+      }
+      return target;
     }
 
     async function submitOperation(tabId, operationId, controllerId) {

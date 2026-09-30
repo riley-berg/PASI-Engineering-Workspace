@@ -101,6 +101,39 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
+test('CDP submit operation refuses to overwrite unrelated editable text', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 5,
+    operationId: 'op-5',
+    controllerId: 'controller-5',
+    prompt: '[PASI_OPERATION op-5]\\nReply with NETWORK_PATCH_OK_2026',
+    completionMarkers: ['NETWORK_PATCH_OK_2026']
+  });
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    this.commands.push({method, params});
+    if (method === 'Runtime.evaluate') {
+      return callback({
+        result: {
+          type: 'object',
+          value: {focused: true, kind: 'textarea', currentText: 'user draft'}
+        }
+      });
+    }
+    if (method === 'Fetch.enable') return callback({});
+    callback({});
+  };
+
+  await assert.rejects(
+    controller.submitOperation(5, 'op-5', 'controller-5'),
+    /unrelated draft text/
+  );
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Input.insertText'), false);
+});
+
 test('request-to-task correlation binds the exact POST generation request', async () => {
   const debuggerApi = fakeDebugger();
   const events = [];

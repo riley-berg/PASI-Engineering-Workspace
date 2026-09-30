@@ -501,13 +501,18 @@ class BridgeState:
                     )
                 current["controller_id"] = controller_id
 
-            if current.get("operation_type") == "prompt" and not completion_markers_satisfied(
-                response_text,
-                current.get("completion_markers"),
-            ):
-                raise ValueError(
-                    "Prompt completion response does not satisfy the operation completion markers."
-                )
+            if current.get("operation_type") == "prompt":
+                if current.get("network_response_authoritative") is not True:
+                    raise ValueError(
+                        "Prompt completion requires authoritative CDP response evidence."
+                    )
+                if not completion_markers_satisfied(
+                    response_text,
+                    current.get("completion_markers"),
+                ):
+                    raise ValueError(
+                        "Prompt completion response does not satisfy the operation completion markers."
+                    )
 
             if current.get("status") == "completed":
                 chained = self.get_chained_operation(operation_id)

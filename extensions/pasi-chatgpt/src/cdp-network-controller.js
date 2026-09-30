@@ -708,33 +708,6 @@
       throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
     }
     async function submitOperation(tabId, operationId, controllerId) {
-');
-      while (now() < deadline) {
-        try {
-          const nodes = await readAXTree(tabId);
-          if (stage === 'plus') {
-            const plus = findAXNodeByPattern(nodes, /add files and more|add files|attach/i, new Set(['button', 'menuitem']));
-            if (plus) { await activateAXNode(tabId, plus); stage = 'github'; continue; }
-          }
-          if (stage === 'github') {
-            const github = findAXNodeByPattern(nodes, /github/i, new Set(['button', 'menuitem', 'option', 'link']));
-            if (github) { await activateAXNode(tabId, github); stage = 'repository'; continue; }
-          }
-          if (stage === 'repository') {
-            const editable = findEditableAXNode(nodes);
-            if (editable) { await fillAXNode(tabId, editable, target); stage = 'select'; continue; }
-          }
-          if (stage === 'select') {
-            const result = findAXNodeByPattern(nodes, new RegExp(escaped, 'i'), new Set(['button', 'option', 'menuitem', 'link']));
-            if (result) { await activateAXNode(tabId, result); return {attached: true, repository: target}; }
-          }
-          lastError = new Error('WAITING_FOR_GITHUB_' + stage.toUpperCase());
-        } catch (error) { lastError = error; }
-        await new Promise((resolve) => setTimeout(resolve, 200));
-      }
-      throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
-    }
-    async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
       if (state.binding.operationId !== String(operationId)) {

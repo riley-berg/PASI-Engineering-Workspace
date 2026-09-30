@@ -1736,31 +1736,11 @@
     }
   }
 
-  async function waitForConversationDomReady() {
-    let previousUsers = -1;
-    let previousAssistants = -1;
-    let stableSamples = 0;
-
-    await waitUntil(() => {
-      if (!chatUrl()) return null;
-
-      const users = userMessages().length;
-      const assistants = assistantMessages().length;
-      if (users === previousUsers && assistants === previousAssistants) {
-        stableSamples += 1;
-      } else {
-        previousUsers = users;
-        previousAssistants = assistants;
-        stableSamples = 0;
-      }
-
-      // Require several consecutive identical DOM samples so an existing
-      // conversation is not reported as 0:0 while ChatGPT is still hydrating.
-      return composer() && stableSamples >= 3;
-    }, 10000, DOM_POLL_MS);
-
-    // Give late React/streamed message nodes one additional render turn.
-    await sleep(100);
+  async function waitForChatRouteReady() {
+    // document_idle guarantees the extension script is running after the
+    // document has been loaded. Readiness only needs a valid ChatGPT route;
+    // CDP performs the actual composer discovery when an operation is sent.
+    await waitUntil(() => chatUrl(), 10000, DOM_POLL_MS);
   }
 
   async function recoverInterruptedOperation() {
@@ -1827,7 +1807,7 @@
     // Wait for the active conversation DOM to settle before the first state
     // snapshot. Otherwise an already-populated chat can transiently report
     // 0:0 and become the M1 baseline.
-    await waitForConversationDomReady();
+    await waitForChatRouteReady();
     if (extensionContextInvalidated) return;
     lastStateReportAt = 0;
     await reportHealth();

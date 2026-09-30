@@ -625,6 +625,24 @@
       return best;
     }
 
+    function findAXNodeByText(nodes, text, roles) {
+      const needle = String(text || '').trim().toLowerCase();
+      if (!needle) return null;
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (roles && !roles.has(role)) continue;
+        const name = axName(node).toLowerCase();
+        if (!name.includes(needle)) continue;
+        const score = role === 'button' ? 100 : 50;
+        if (score > bestScore) { bestScore = score; best = node; }
+      }
+      return best;
+    }
+
     function findEditableAXNode(nodes) {
       const candidates = Array.isArray(nodes) ? nodes : [];
       const roles = new Set(['textbox', 'searchbox', 'combobox', 'generic']);
@@ -664,7 +682,32 @@
       const deadline = now() + 12000;
       let stage = 'plus';
       let lastError = null;
-      const escaped = target.replace(/[.*+?^${}()|[\\]\\]/g, '\\    async function submitOperation(tabId, operationId, controllerId) {
+      while (now() < deadline) {
+        try {
+          const nodes = await readAXTree(tabId);
+          if (stage === 'plus') {
+            const plus = findAXNodeByPattern(nodes, /add files and more|add files|attach/i, new Set(['button', 'menuitem']));
+            if (plus) { await activateAXNode(tabId, plus); stage = 'github'; continue; }
+          }
+          if (stage === 'github') {
+            const github = findAXNodeByPattern(nodes, /github/i, new Set(['button', 'menuitem', 'option', 'link']));
+            if (github) { await activateAXNode(tabId, github); stage = 'repository'; continue; }
+          }
+          if (stage === 'repository') {
+            const editable = findEditableAXNode(nodes);
+            if (editable) { await fillAXNode(tabId, editable, target); stage = 'select'; continue; }
+          }
+          if (stage === 'select') {
+            const result = findAXNodeByText(nodes, target, new Set(['button', 'option', 'menuitem', 'link']));
+            if (result) { await activateAXNode(tabId, result); return {attached: true, repository: target}; }
+          }
+          lastError = new Error('WAITING_FOR_GITHUB_' + stage.toUpperCase());
+        } catch (error) { lastError = error; }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
+    }
+    async function submitOperation(tabId, operationId, controllerId) {
 ');
       while (now() < deadline) {
         try {

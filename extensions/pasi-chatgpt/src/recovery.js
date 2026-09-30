@@ -393,9 +393,56 @@
     };
   }
 
+  async function interruptCdpOperation(operationId, reason = 'NETWORK_STREAM_DISCONNECTED') {
+    const controllerId = String(globalThis.PASI_NATIVE_CONTROLLER_ID || '').trim();
+    if (!controllerId || !globalThis.chrome?.runtime?.sendMessage) return false;
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(false);
+      }, 3000);
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'pasi-cdp-interrupt-operation',
+            operation_id: String(operationId),
+            controller_id: controllerId,
+            reason: String(reason || 'NETWORK_STREAM_DISCONNECTED')
+          },
+          (response) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            const runtimeError = chrome.runtime.lastError;
+            resolve(!runtimeError && response?.ok === true && Number(response?.interrupted || 0) > 0);
+          }
+        );
+      } catch (_) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(false);
+      }
+    });
+  }
+
   async function triggerConnectionLoss(operationId, source = 'controlled_probe') {
     const current = readRecoveryState();
     if (current?.operation_id && current.operation_id !== operationId) return false;
+    const interrupted = await interruptCdpOperation(operationId);
+    if (!interrupted) {
+      await report('chatgpt_recovery', {
+        phase: 'connection_loss_not_interrupted',
+        operation_id: operationId,
+        recovery_action: 'wait_for_network_terminal',
+        recovery_reason: 'connection_error',
+        recovery_source: source
+      });
+      return false;
+    }
+
     const now = Date.now();
     const state = {
       ...(current || {
@@ -403,14 +450,14 @@
         operation_type: 'prompt',
         started_at: new Date(now).toISOString(),
         started_ms: now,
-        baseline: fingerprint(),
+        baseline: '',
         chat_url: location.href,
         reload_count: 0,
         phase: 'monitoring'
       }),
       operation_id: operationId,
-      phase: 'reloaded',
-      reload_at: new Date(now).toISOString(),
+      phase: 'connection_error',
+      interrupted_at: new Date(now).toISOString(),
       recovery_reason: 'connection_error',
       recovery_started_at_ms: now,
       recovery_source: source,
@@ -421,14 +468,13 @@
     await report('chatgpt_recovery', {
       phase: 'connection_lost',
       operation_id: operationId,
-      recovery_action: 'stop_generation',
+      recovery_action: 'interrupt_generation',
       recovery_reason: 'connection_error',
       recovery_source: source,
       response_stopped_on_loss: true,
       checkpoint_preserved: true,
       resume_phase: 'response_generation'
     });
-    location.reload();
     return true;
   }
 
@@ -684,36 +730,47 @@
 
     if (decision.recover) {
       const recoveryStartedAtMs = Date.now();
+      const interrupted = await interruptCdpOperation(operationId);
+      if (!interrupted) {
+        await report('chatgpt_recovery', {
+          phase: 'recovery_deferred',
+          operation_id: operationId,
+          recovery_action: 'wait_for_network_terminal',
+          recovery_reason: decision.reason,
+          age_ms: decision.ageMs,
+          idle_ms: decision.idleMs
+        });
+        return false;
+      }
+
       const next = {
         ...state,
         recovery_context: state.recovery_context || recoveryContextFromActiveState(),
-        reload_count: Number(state.reload_count || 0) + 1,
-        phase: 'reloaded',
-        reload_at: new Date().toISOString(),
+        reload_count: Number(state.reload_count || 0),
+        phase: 'connection_error',
+        interrupted_at: new Date().toISOString(),
         recovery_reason: decision.reason,
         recovery_started_at_ms: recoveryStartedAtMs,
         recovery_last_progress_ms: progressTracker?.lastProgressMs ?? startedMs
       };
       writeRecoveryState(next);
       await report('chatgpt_recovery', {
-        phase: decision.reason === 'connection_error' ? 'connection_lost' : 'reloading',
+        phase: 'generation_interrupted',
         operation_id: operationId,
-        recovery_action: decision.reason === 'connection_error' ? 'stop_generation' : 'reload_page',
-        reload_count: next.reload_count,
+        recovery_action: 'interrupt_generation',
         recovery_reason: decision.reason,
         age_ms: decision.ageMs,
         idle_ms: decision.idleMs,
         recovery_started_at_ms: recoveryStartedAtMs,
-        response_stopped_on_loss: decision.reason === 'connection_error',
-        checkpoint_preserved: decision.reason === 'connection_error',
-        resume_phase: decision.reason === 'connection_error' ? 'response_generation' : undefined,
+        response_stopped_on_loss: true,
+        checkpoint_preserved: true,
+        resume_phase: 'response_generation',
         generation_timeout_ms: GENERATION_TIMEOUT_MS,
         recovery_trigger_ms: RECOVERY_TRIGGER_MS,
         hard_ceiling_ms: RECOVERY_HARD_CEILING_MS
       });
       progressOperationId = null;
       progressTracker = null;
-      location.reload();
       return true;
     }
 
@@ -905,6 +962,20 @@
         writeRecoveryState(recoveredState);
         state = recoveredState;
       }
+      if (
+        current.status === 'queued' &&
+        ['connection_error', 'interrupted'].includes(String(state.phase || ''))
+      ) {
+        await report('chatgpt_recovery', {
+          phase: 'ready_for_retry',
+          operation_id: state.operation_id,
+          recovery_action: 'same_operation_requeued',
+          recovery_reason: state.recovery_reason || 'connection_error'
+        });
+        clearRecoveryState();
+        return;
+      }
+
       if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
         if (await finishVisibleResponse(state.operation_id, current, state.baseline)) {
           clearInterruptedState();

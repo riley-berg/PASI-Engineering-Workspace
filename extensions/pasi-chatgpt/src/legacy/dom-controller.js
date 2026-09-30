@@ -62,6 +62,23 @@
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
 
+  // Keep the controller's conversation fingerprint available from the outer
+  // controller scope. The legacy helper restoration can contain nested
+  // compatibility scopes, but core health/recovery telemetry must never lose
+  // this dependency.
+  function fingerprint() {
+    const nodes = document.querySelectorAll('[data-message-author-role="assistant"]');
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const node = nodes[index];
+      if (!node) continue;
+      const text = String(node.innerText || node.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (text) return text.slice(-4000);
+    }
+    return '';
+  }
+
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
     immediateOperationQueued = true;

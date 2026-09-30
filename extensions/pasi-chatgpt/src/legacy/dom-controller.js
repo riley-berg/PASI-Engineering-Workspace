@@ -941,6 +941,7 @@
         const verified = await waitFor(
           () => thinkingEnabled() === true ? true : null,
           THINKING_VERIFY_MS
+        );
         if (!verified) throw new Error('PASI_NATIVE: Thinking selection could not be verified after direct Think control');
         reasoningMode = 'thinking';
         return;
@@ -1171,6 +1172,7 @@
         // Do not guess among multiple generic submit buttons in a wider
         // ancestor; the exact composer-scoped selectors above remain safe.
         break;
+      }
     }
     return controls;
   }
@@ -1200,6 +1202,8 @@
       if (seen.has(element)) return false;
       seen.add(element);
       return visible(element) && !disabled(element);
+    });
+  }
 
   function labeledSendInScope(scope) {
     if (!scope) return null;
@@ -1228,6 +1232,7 @@
 
   async function ensureThinkingBestEffort() {
     if (reasoningMode === 'thinking' || reasoningMode === 'unavailable') return reasoningMode;
+    try {
       if (thinkingEnabled() === true) {
         reasoningMode = 'thinking';
         return reasoningMode;
@@ -1305,14 +1310,18 @@
     try {
       if (typeof PointerEvent === 'function') {
         element.dispatchEvent(new PointerEvent('pointerdown', { ...init, pointerId: 1, pointerType: 'mouse', isPrimary: true }));
+      }
     } catch (_) {}
     element.dispatchEvent(new MouseEvent('mousedown', init));
     try {
       if (typeof PointerEvent === 'function') {
         element.dispatchEvent(new PointerEvent('pointerup', { ...init, pointerId: 1, pointerType: 'mouse', buttons: 0, isPrimary: true }));
+      }
+    } catch (_) {}
     element.dispatchEvent(new MouseEvent('mouseup', { ...init, buttons: 0 }));
     element.click();
     return true;
+  }
 
   async function submitPrompt(expected, options = {}) {
     const fastPath = options.fastPath === true;
@@ -1341,6 +1350,7 @@
           return true;
         } catch (_) {
           return false;
+        }
       },
       async (_box, button) => {
         if (generating() || !button || disabled(button)) return false;
@@ -1351,6 +1361,7 @@
         if (generating() || !composerContainsPrompt(box, expected)) return false;
         dispatchEnter(box);
         return true;
+      }
     ];
     for (let attempt = 1; attempt <= strategies.length; attempt += 1) {
       let via = accepted();
@@ -1364,12 +1375,15 @@
           user_messages_added: countNewUserMessages(userMessages(), snapshot),
           ack_verified: via === 'verified',
           submission_via: via
+        }
       };
       if (fastPath) {
+        const detected = detectorState();
         if (detected.auth_required === true) throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
         if (detected.context_exhausted === true) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
         if (detected.context_exhausted !== true && detected.usage_limited === true) {
           throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
+        }
         if (reasoningMode !== 'thinking' && reasoningMode !== 'unavailable') await ensureThinkingBestEffort();
       } else {
         await ensurePromptSubmissionReady();
@@ -1399,6 +1413,7 @@
       if (!composerContainsPrompt(readyBox, expected)) {
         if (normalize(readText(readyBox))) {
           throw new Error('PASI_NATIVE: composer holds unrelated text; refusing to overwrite');
+        }
         insertText(readyBox, expected);
         readyBox = await waitUntil(() => {
           const current = composer();
@@ -1437,6 +1452,7 @@
           user_messages_added: countNewUserMessages(userMessages(), snapshot),
           ack_verified: via === 'verified',
           submission_via: finalVia
+        }
       };
     }
 
@@ -1493,6 +1509,7 @@
       phase: 'context_exhausted',
       error: String(error?.message || error)
     }));
+  }
 
   function rememberResponseRecovery(operation, error) {
     let stored = null;

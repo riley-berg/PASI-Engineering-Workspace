@@ -10,7 +10,7 @@ def test_network_interceptor_phase1_contract():
     interceptor = extension / "src" / "network-interceptor.js"
     node_tests = extension / "src" / "test_network_interceptor.cjs"
     background = (extension / "src" / "background.js").read_text(encoding="utf-8")
-    controller = (extension / "src" / "content.js").read_text(encoding="utf-8")
+    controller = (extension / "src" / "legacy" / "dom-controller.js").read_text(encoding="utf-8")
 
     assert interceptor.is_file()
     assert node_tests.is_file()
@@ -27,6 +27,7 @@ def test_network_interceptor_phase1_contract():
     assert "world: 'MAIN'" in background
     assert "vendor/typescript.js" not in background
     assert "files: ['src/network-interceptor.js']" in background
+    assert "src/legacy/dom-controller.js" in background
     assert "pasi-network-bind-operation" in background
     assert "rawOperationId == null" in background
     assert "world: 'MAIN'" in background

@@ -358,20 +358,33 @@
       const candidates = Array.isArray(nodes) ? nodes : [];
       let best = null;
       let bestScore = -1;
+      const editableRoles = new Set(['textbox', 'searchbox', 'combobox']);
+
       for (const node of candidates) {
         if (!node || node.ignored === true) continue;
-        if (axRole(node) !== 'textbox') continue;
+
+        const role = axRole(node);
         const editable = axBooleanProperty(node, 'editable');
         const multiline = axBooleanProperty(node, 'multiline');
-        if (editable === false) continue;
+        const readonly = axBooleanProperty(node, 'readonly');
+        if (readonly === true || editable === false) continue;
 
+        // Chromium normally exposes ChatGPT's contenteditable composer as a
+        // textbox, but newer layouts can expose the same control as a
+        // searchbox/combobox or as a generic editable AX node. Editability
+        // plus semantic context are stronger signals than the exact role.
         const name = axName(node).toLowerCase();
-        const focused = axBooleanProperty(node, 'focused') === true;
         const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(name);
+        const focused = axBooleanProperty(node, 'focused') === true;
+        const supportedRole = editableRoles.has(role);
+        const genericEditable = editable === true || multiline === true;
+        if (!supportedRole && !genericEditable && !semantic) continue;
+
         const score =
           (focused ? 1000 : 0) +
           (multiline === true ? 250 : 0) +
-          (editable === true ? 100 : 0) +
+          (editable === true ? 200 : 0) +
+          (supportedRole ? 100 : 0) +
           (semantic ? 50 : 0);
 
         if (score > bestScore) {
@@ -379,6 +392,7 @@
           best = node;
         }
       }
+
       if (!best) throw new Error('CDP submit target unavailable: NO_ACCESSIBLE_COMPOSER');
       const backendNodeId = Number(best.backendDOMNodeId);
       if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
@@ -394,12 +408,33 @@
     }
 
     async function focusEditableTarget(tabId) {
-      const result = await sendCommand(tabId, 'Accessibility.getFullAXTree');
-      const target = findComposerAXNode(result?.nodes);
-      if (!target.focused) {
-        await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.backendNodeId});
+      const timeoutMs = 8000;
+      const retryMs = 200;
+      const startedAt = now();
+      let lastError = null;
+
+      while (now() - startedAt <= timeoutMs) {
+        try {
+          const result = await sendCommand(tabId, 'Accessibility.getFullAXTree');
+          const target = findComposerAXNode(result?.nodes);
+          if (!target.focused) {
+            await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.backendNodeId});
+          }
+          return target;
+        } catch (error) {
+          lastError = error;
+          const message = String(error?.message || error);
+          if (
+            !message.includes('NO_ACCESSIBLE_COMPOSER') &&
+            !message.includes('ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE')
+          ) {
+            throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryMs));
+        }
       }
-      return target;
+
+      throw lastError || new Error('CDP submit target unavailable: NO_ACCESSIBLE_COMPOSER');
     }
 
     async function submitOperation(tabId, operationId, controllerId) {

@@ -53,7 +53,9 @@ function fakeDebugger() {
       if (method === 'Fetch.getResponseBody') return callback({body: '', base64Encoded: false});
       callback({});
     },
-    emit(sourceValue, method, params) { for (const listener of events) listener(sourceValue, method, params); },
+    async emit(sourceValue, method, params) {
+      await Promise.all([...events].map((listener) => listener(sourceValue, method, params)));
+    },
     detachEmit(sourceValue, reason) { for (const listener of detachEvents) listener(sourceValue, reason); }
   };
 }
@@ -72,7 +74,7 @@ test('request-to-task correlation binds the exact POST generation request', asyn
     chatUrl: 'https://chatgpt.com/c/test'
   });
 
-  debuggerApi.emit(
+  await debuggerApi.emit(
     {tabId: 7},
     'Fetch.requestPaused',
     {

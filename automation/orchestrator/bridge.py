@@ -425,11 +425,25 @@ class BridgeState:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
 
+            # A completion acknowledgement may durably claim the next
+            # operation before the worker has delivered it. Allow the same
+            # controller to redeliver that claimed-but-not-started operation
+            # after a service-worker restart or dispatch failure. Once CDP emits
+            # STARTED, the item becomes generating and this path is closed.
+            now = time.time()
+            for item in queue:
+                if (
+                    item.get("status") == "claimed"
+                    and item.get("controller_id") == controller_id
+                    and not item.get("network_request_id")
+                    and not item.get("network_lifecycle_event")
+                    and now - float(item.get("claimed_at", 0) or 0) >= 5
+                ):
+                    return dict(item)
+
             # Queue dispatch is strictly serial. A controller-ready signal may
-            # arrive during extension restart/reinjection while the previously
-            # claimed operation is still active. Never advance to a second
-            # operation until the current one is durably completed (or its claim
-            # lease is swept as stale above).
+            # arrive while the current operation is active. Never advance to a
+            # second operation until the current one is durably completed.
             if any(item.get("status") in {"claimed", "generating"} for item in queue):
                 return None
 

@@ -417,6 +417,44 @@ class BridgeState:
 
         return None
 
+    def _recover_orphaned_claims_locked(
+        self,
+        queue: list[dict[str, Any]],
+        controller_id: str | None,
+    ) -> bool:
+        if not controller_id:
+            return False
+
+        observation = self.state_manager.load_browser_state()
+        data = observation.get("data") if isinstance(observation, dict) else None
+        if not isinstance(data, dict):
+            return False
+        if data.get("active_operation_id") is not None:
+            return False
+
+        captured_at = self._browser_observation_time(observation)
+        if captured_at is None or time.time() - captured_at > TIMEOUT_POLICY["stale_seconds"]:
+            return False
+
+        now = time.time()
+        changed = False
+        for item in queue:
+            status = str(item.get("status", ""))
+            owner = item.get("controller_id")
+            if status not in {"claimed", "generating"} or owner == controller_id:
+                continue
+            validate_transition(status, "queued")
+            item["status"] = "queued"
+            item.pop("claimed_at", None)
+            item["reclaimed_at"] = now
+            item["failure_reason"] = "stale_controller_recovered"
+            item["updated_at"] = now
+            changed = True
+
+        if changed:
+            self._save_queue(queue)
+        return changed
+
     def claim_next_operation(
         self,
         controller_id: str | None = None,
@@ -424,6 +462,7 @@ class BridgeState:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
+            self._recover_orphaned_claims_locked(queue, controller_id)
 
             # Queue dispatch is strictly serial. A controller-ready signal may
             # arrive during extension restart/reinjection while the previously

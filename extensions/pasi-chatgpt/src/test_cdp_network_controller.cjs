@@ -77,7 +77,7 @@ test('CDP submit operation uses native input and never clicks a DOM send control
     tabId: 6,
     operationId: 'op-6',
     controllerId: 'controller-6',
-    prompt: '[PASI_OPERATION op-6]\\nReply with NETWORK_PATCH_OK_2026',
+    prompt: '[PASI_OPERATION op-6]\nReply with NETWORK_PATCH_OK_2026',
     completionMarkers: ['NETWORK_PATCH_OK_2026']
   });
 
@@ -94,7 +94,7 @@ test('CDP submit operation uses native input and never clicks a DOM send control
 
   const insertIndex = debuggerApi.commands.findIndex((command) => command.method === 'Input.insertText');
   assert.ok(insertIndex >= 0);
-  assert.equal(debuggerApi.commands[insertIndex].params.text, '[PASI_OPERATION op-6]\\nReply with NETWORK_PATCH_OK_2026');
+  assert.equal(debuggerApi.commands[insertIndex].params.text, '[PASI_OPERATION op-6]\nReply with NETWORK_PATCH_OK_2026');
 
   const keyEvents = debuggerApi.commands.filter((command) => command.method === 'Input.dispatchKeyEvent');
   assert.deepEqual(keyEvents.map((command) => command.params.type), ['keyDown', 'keyUp']);

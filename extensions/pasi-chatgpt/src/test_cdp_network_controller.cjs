@@ -74,7 +74,7 @@ test('request-to-task correlation binds the exact POST generation request', asyn
     chatUrl: 'https://chatgpt.com/c/test'
   });
 
-  await debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 7},
     'Fetch.requestPaused',
     {
@@ -106,7 +106,7 @@ test('response stream is captured before browser continuation and stale snapshot
     completionMarkers: ['NETWORK_PATCH_OK_2026']
   });
 
-  debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 8},
     'Fetch.requestPaused',
     {
@@ -120,7 +120,7 @@ test('response stream is captured before browser continuation and stale snapshot
   );
   await new Promise((resolve) => setImmediate(resolve));
 
-  debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 8},
     'Fetch.requestPaused',
     {
@@ -159,7 +159,7 @@ test('unmatched generation requests are never assigned to a task', async () => {
     completionMarkers: ['OK']
   });
 
-  debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 9},
     'Fetch.requestPaused',
     {
@@ -188,7 +188,7 @@ test('classifies provider failures before response-body correlation', async () =
     prompt: 'expected prompt'
   });
 
-  debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 10},
     'Fetch.requestPaused',
     {
@@ -201,7 +201,7 @@ test('classifies provider failures before response-body correlation', async () =
     }
   );
   await new Promise((resolve) => setImmediate(resolve));
-  debuggerApi.emit(
+  await controller.handlePaused(
     {tabId: 10},
     'Fetch.requestPaused',
     {

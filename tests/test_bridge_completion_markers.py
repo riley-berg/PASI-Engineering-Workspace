@@ -143,6 +143,43 @@ def test_cdp_network_response_becomes_authoritative_and_overrides_stale_dom_text
     assert completed["response_source"] == "cdp_fetch_stream"
 
 
+def test_cdp_started_event_is_lifecycle_not_terminal_failure(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-09-30T00:00:00Z",
+            "data": {
+                "kind": "chatgpt_network_lifecycle",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-cdp-started",
+                "event_type": "STARTED",
+                "reason": None,
+                "classification": None,
+                "response_text": "",
+                "response_text_available": False,
+            },
+        }
+    )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["status"] == "claimed"
+    assert stored["network_lifecycle_event"] == "STARTED"
+    assert stored.get("network_terminal_event") is None
+    assert stored.get("network_failure_source") is None
+
+
 def test_cdp_completed_event_without_matching_marker_cannot_authorize_completion(tmp_path):
     bridge = BridgeState(StateManager(tmp_path / "ai"))
     operation = bridge.queue_operation(

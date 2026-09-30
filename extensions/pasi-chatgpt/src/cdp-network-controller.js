@@ -459,7 +459,8 @@
       return event;
     }
 
-    async function handlePaused(source, params) {
+    async function handlePaused(source, method, params) {
+      if (method !== 'Fetch.requestPaused') return;
       const tabId = source?.tabId;
       if (!Number.isInteger(tabId) || !params?.requestId) return;
       const request = params.request || {};

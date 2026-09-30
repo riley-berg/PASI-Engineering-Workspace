@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import CONFIG, ensure_runtime_directories
 from .models import ChatOperation
+from .operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
 from scripts.pasi_timeout_policy import load_timeout_policy
@@ -210,6 +211,15 @@ class BridgeState:
         return queue
 
     def _save_queue(self, queue: list[dict[str, Any]]) -> None:
+        # The nested operation_state is a derived canonical view of the same
+        # queue item. Refresh it on every durable queue write so it cannot
+        # remain at the initial "queued" status after claim/generation/completion.
+        for item in queue:
+            try:
+                item["operation_state"] = OperationState.from_chat_operation(item).to_dict()
+            except Exception:
+                item.pop("operation_state", None)
+
         has_inline_terminal_responses = False
         for item in queue:
             if item.get("status") not in TERMINAL_QUEUE_STATUSES:

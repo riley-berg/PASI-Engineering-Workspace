@@ -271,11 +271,11 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
     const navigation = waitForTabNavigation(tabId);
     await chrome.tabs.update(tabId, {url: 'https://chatgpt.com/'});
     const finalUrl = await navigation;
-    if (!finalUrl || !/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\//.test(finalUrl)) {
+    if (!finalUrl || !/^https:\/\/(?:www\.)?chatgpt\\.com(?::\d+)?\//.test(finalUrl)) {
       throw new Error('PASI_NATIVE: new chat navigation ended outside ChatGPT');
     }
     if (
-      /^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\/c\//.test(previousUrl) &&
+      /^https:\/\/(?:www\.)?chatgpt\\.com(?::\d+)?\/c\//.test(previousUrl) &&
       finalUrl === previousUrl
     ) {
       throw new Error('PASI_NATIVE: new chat navigation did not change conversation identity');
@@ -318,7 +318,7 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
     return false;
   }
   const url = String(tab?.url || '');
-  if (!/^https:\/\/(?:www\\.)?chatgpt\.com(?::\d+)?\//.test(url)) return false;
+  if (!/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(url)) return false;
 
   if (operation.operation_type === 'new_chat') {
     return executeNewChatOperation(tabId, controllerId, operation);
@@ -550,7 +550,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 function isChatGPTUrl(url) {
-  return /^https:\/\/(?:www\\.)?chatgpt\.com(?::\\d+)?\//.test(String(url || ''));
+  return /^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(String(url || ''));
 }
 
 function controllerIdForTab(tabId) {

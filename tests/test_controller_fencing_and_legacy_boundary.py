@@ -145,3 +145,46 @@ def test_legacy_dom_controller_is_inactive_from_the_extension_entry_points():
     assert "ensureReasoningMode" in cdp_text
     assert "ensureGithubRepository" in cdp_text
 
+
+
+def test_next_operation_redelivers_same_controller_claimed_handoff_after_grace(tmp_path):
+    import time
+
+    bridge = _bridge(tmp_path)
+    operation = bridge.queue_operation("prompt", "handoff")
+    claimed = bridge.claim_operation(operation.operation_id, "controller-a")
+    assert claimed is not None
+
+    queue = bridge._load_queue()
+    for item in queue:
+        if item.get("operation_id") == operation.operation_id:
+            item["claimed_at"] = time.time() - 6
+            bridge._save_queue(queue)
+            break
+
+    redelivered = bridge.claim_next_operation("controller-a")
+    assert redelivered is not None
+    assert redelivered["operation_id"] == operation.operation_id
+    assert redelivered["controller_id"] == "controller-a"
+
+
+def test_next_operation_does_not_redeliver_started_generation(tmp_path):
+    bridge = _bridge(tmp_path)
+    operation = bridge.queue_operation("prompt", "active")
+    claimed = bridge.claim_operation(operation.operation_id, "controller-a")
+    assert claimed is not None
+
+    bridge.save_browser_observation({
+        "schema_version": "pasi-network-cdp-v1",
+        "captured_at": "2026-09-30T00:00:00Z",
+        "data": {
+            "kind": "chatgpt_network_lifecycle",
+            "network_source": "cdp_fetch",
+            "active_operation_id": operation.operation_id,
+            "controller_id": "controller-a",
+            "request_id": "req-active",
+            "event_type": "STARTED",
+        },
+    })
+
+    assert bridge.claim_next_operation("controller-a") is None

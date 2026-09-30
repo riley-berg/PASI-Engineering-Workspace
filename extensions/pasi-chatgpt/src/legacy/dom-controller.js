@@ -797,53 +797,6 @@
     return waitUntil(select, timeout, DOM_POLL_MS);
   }
 
-  function findNewChatControl() {
-    const exactSelectors = [
-      'button[data-testid="new-chat-button"]',
-      '[data-testid="new-chat-button"]',
-      'button[aria-label="New chat"]',
-      '[role="button"][aria-label="New chat"]'
-    ];
-    for (const selector of exactSelectors) {
-      for (const element of document.querySelectorAll(selector)) {
-        if (!visible(element) || disabled(element)) continue;
-        if (element.closest?.('nav, aside, [role="navigation"]')) continue;
-        return element;
-      }
-    }
-    for (const element of document.querySelectorAll('button, [role="button"], a')) {
-      if (!visible(element) || disabled(element)) continue;
-      if (element.closest?.('nav, aside, [role="navigation"]')) continue;
-      if (label(element) === 'new chat') return element;
-    }
-    return null;
-  }
-
-  async function newChat() {
-    const previousLocation = location.href;
-    const previousChat = chatUrl();
-    const previousSignature = conversationSignature();
-    const button = await waitFor(() => findLabeled(['new chat'], ['a', 'button', '[role="button"]']), TIMEOUTS.menu);
-    if (!button || disabled(button)) throw new Error('PASI_NATIVE: New chat control unavailable');
-    button.click();
-
-    const ready = await waitFor(() => {
-      const currentChat = chatUrl();
-      const navigated = location.href !== previousLocation;
-      const differentChat = Boolean(previousChat && currentChat && currentChat !== previousChat);
-      const initialChatReady = !previousChat && navigated && currentChat && composer() && !generating() && userMessages().length === 0 && assistantMessages().length === 0 && conversationSignature() !== previousSignature;
-      return composer() && !generating() && (differentChat || initialChatReady);
-    }, TIMEOUTS.menu + 7000);
-    if (!ready) throw new Error('PASI_NATIVE: new chat did not reach a verified ready state');
-
-    const current = chatUrl();
-    if (previousChat && (!current || current === previousChat)) throw new Error('PASI_NATIVE: new chat control did not change conversation identity');
-    reasoningMode = null;
-    githubAttached = false;
-    githubRepository = null;
-    lastKnownChatUrl = current;
-  }
-
   function isReasoningLabel(value) {
     const text = normalize(value);
     return /\b(?:thinking|think|medium|high|extra high|pro(?: standard| extended)?)\b/.test(text) ||
@@ -1567,7 +1520,6 @@
     let chainedOperation = null;
     try {
       switch (operation.operation_type) {
-        case 'new_chat': await newChat(); break;
         case 'select_reasoning': await ensureThinkingBestEffort(); break;
         case 'attach_github': await attachGithub(operation.prompt); break;
         case 'prompt': {
@@ -1906,7 +1858,6 @@
       assistantResponseEvidence,
       conversationSignature,
       operationPrompt,
-      findNewChatControl,
       detectorState,
       waitForResponse
     });

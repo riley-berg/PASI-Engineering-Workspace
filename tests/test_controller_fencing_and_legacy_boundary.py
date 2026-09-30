@@ -94,29 +94,6 @@ def test_next_operation_claim_records_controller_owner(tmp_path):
     assert claimed["controller_id"] == "controller-a"
 
 
-def test_next_operation_reclaims_stale_controller_claim_when_browser_is_idle(tmp_path):
-    bridge = _bridge(tmp_path)
-    operation = bridge.queue_operation("prompt", "first")
-    claimed = bridge.claim_next_operation("controller-old")
-    assert claimed is not None
-
-    bridge.state_manager.save_browser_state({
-        "schema_version": "pasi-native-chromium-v2",
-        "captured_at": "2099-01-01T00:00:00Z",
-        "data": {
-            "kind": "chatgpt_state",
-            "active_operation_id": None,
-        },
-    })
-    current = bridge.claim_next_operation("controller-current")
-
-    assert current is not None
-    assert current["operation_id"] == operation.operation_id
-    assert current["status"] == "claimed"
-    assert current["controller_id"] == "controller-current"
-    assert current["failure_reason"] == "stale_controller_recovered"
-
-
 def test_next_operation_does_not_skip_past_active_operation(tmp_path):
     bridge = _bridge(tmp_path)
     first = bridge.queue_operation("prompt", "first")

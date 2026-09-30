@@ -41,6 +41,10 @@ def test_cdp_network_authority_contract():
     assert "claim_next: false" in background
     assert "async function newChat" not in controller
     assert "case 'new_chat'" not in controller
+    assert "select_reasoning" not in controller
+    assert "reasoningMode" not in controller
+    assert "thinkingEnabled(" not in controller
+    assert "ensureReasoningMode" in background
     assert "pasi-dispatch-operation" in background
     assert "chrome.alarms.onAlarm" in background
     assert "function poll()" not in controller

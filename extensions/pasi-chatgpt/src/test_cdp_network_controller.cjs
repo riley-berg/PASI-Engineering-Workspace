@@ -35,6 +35,15 @@ function fakeDebugger() {
     detach(_debuggee, callback) { callback(); },
     sendCommand(_debuggee, method, params, callback) {
       commands.push({method, params});
+      if (method === 'Runtime.evaluate') {
+        return callback({
+          result: {
+            type: 'object',
+            value: {focused: true, kind: 'textarea'}
+          }
+        });
+      }
+      if (method === 'Input.insertText' || method === 'Input.dispatchKeyEvent') return callback({});
       if (method === 'Fetch.enable' || method === 'Fetch.continueRequest' || method === 'Fetch.continueResponse' || method === 'Fetch.failRequest') return callback({});
       if (method === 'Fetch.fulfillRequest') return callback({});
       if (method === 'Fetch.takeResponseBodyAsStream') {
@@ -59,6 +68,38 @@ function fakeDebugger() {
     detachEmit(sourceValue, reason) { for (const listener of detachEvents) listener(sourceValue, reason); }
   };
 }
+
+test('CDP submit operation uses native input and never clicks a DOM send control', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 6,
+    operationId: 'op-6',
+    controllerId: 'controller-6',
+    prompt: '[PASI_OPERATION op-6]\\nReply with NETWORK_PATCH_OK_2026',
+    completionMarkers: ['NETWORK_PATCH_OK_2026']
+  });
+
+  const result = await controller.submitOperation(6, 'op-6', 'controller-6');
+  assert.equal(result.submitted, true);
+  assert.equal(result.submissionMethod, 'cdp_input');
+  assert.equal(result.targetKind, 'textarea');
+
+  const runtime = debuggerApi.commands.find((command) => command.method === 'Runtime.evaluate');
+  assert.ok(runtime);
+  assert.match(runtime.params.expression, /textarea/);
+  assert.match(runtime.params.expression, /contenteditable/);
+  assert.doesNotMatch(runtime.params.expression, /send-button/i);
+
+  const insertIndex = debuggerApi.commands.findIndex((command) => command.method === 'Input.insertText');
+  assert.ok(insertIndex >= 0);
+  assert.equal(debuggerApi.commands[insertIndex].params.text, '[PASI_OPERATION op-6]\\nReply with NETWORK_PATCH_OK_2026');
+
+  const keyEvents = debuggerApi.commands.filter((command) => command.method === 'Input.dispatchKeyEvent');
+  assert.deepEqual(keyEvents.map((command) => command.params.type), ['keyDown', 'keyUp']);
+  assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
+});
 
 test('request-to-task correlation binds the exact POST generation request', async () => {
   const debuggerApi = fakeDebugger();

@@ -35,6 +35,12 @@ def test_cdp_network_authority_contract():
     assert "cdpOperationEvidence(operationId" in controller
     assert "pasi-cdp-submit-operation" in controller
     assert "submitPrompt(" not in controller
+    assert "pasi-controller-ready" in background
+    assert "pasi-dispatch-operation" in background
+    assert "chrome.alarms.onAlarm" in background
+    assert "function poll()" not in controller
+    assert "setInterval(poll" not in controller
+    assert "chrome.runtime.sendMessage" in controller
     assert "Accessibility.getFullAXTree" in cdp.read_text(encoding="utf-8")
     assert "DOM.focus" in cdp.read_text(encoding="utf-8")
     assert "Input.insertText" in cdp.read_text(encoding="utf-8")

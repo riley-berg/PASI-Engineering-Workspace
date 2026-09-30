@@ -514,7 +514,13 @@ async function inspect() {
   const matchingTab = tabs.find((tab) => sameChatConversationUrl(tab.url, targetChatUrl));
   if (matchingTab && typeof matchingTab.id === 'number') {
     try {
-      await chrome.tabs.sendMessage(matchingTab.id, { type: 'pasi-controller-ready', source: 'watchdog' });
+      const response = await chrome.tabs.sendMessage(matchingTab.id, {
+        type: 'pasi-controller-status',
+        source: 'watchdog'
+      });
+      if (response?.ready === true && response?.controller_id) {
+        void dispatchNextOperationForController(matchingTab.id, String(response.controller_id));
+      }
     } catch (_) {
       // Existing-tab injection will be retried on the next watchdog pass.
     }

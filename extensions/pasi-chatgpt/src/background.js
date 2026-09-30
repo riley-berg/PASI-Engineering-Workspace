@@ -306,7 +306,7 @@ async function injectExistingChatTabs() {
           'src/timeout-config.js',
           'src/detectors.js',
           'src/recovery_progress.js',
-          'src/content.js',
+          'src/legacy/dom-controller.js',
           'src/recovery.js'
         ]
       });

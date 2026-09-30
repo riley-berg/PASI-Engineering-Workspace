@@ -1862,7 +1862,7 @@
             type: 'pasi-controller-ready',
             controller_id: CONTROLLER_INSTANCE_ID,
             chat_url: chatUrl(),
-            ready: true
+            ready: !processing && activeOperationId === null && recoveryOperationId() === null
           },
           (response) => {
             const runtimeError = chrome.runtime.lastError;
@@ -1882,9 +1882,12 @@
       return;
     }
 
-    if (message?.type === 'pasi-controller-ready' && !extensionContextInvalidated) {
-      void notifyControllerReady();
-      sendResponse({ok: true, controller_id: CONTROLLER_INSTANCE_ID, ready: !processing && activeOperationId === null});
+    if (message?.type === 'pasi-controller-status' && !extensionContextInvalidated) {
+      sendResponse({
+        ok: true,
+        controller_id: CONTROLLER_INSTANCE_ID,
+        ready: !processing && activeOperationId === null && recoveryOperationId() === null
+      });
       return;
     }
 

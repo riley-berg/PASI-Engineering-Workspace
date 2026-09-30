@@ -1011,12 +1011,17 @@
         return;
       }
     }
-    if (!(await bindCdpOperation(activeOperationId))) {
+    try {
+      const cdpBound = await bindCdpOperation(activeOperationId);
+      if (!cdpBound) {
+        throw new Error('PASI_NATIVE: CDP network binding unavailable');
+      }
+    } catch (error) {
       activeOperationId = null;
       processing = false;
       controllerLeader = false;
       controllerClaimedAt = 0;
-      throw new Error('PASI_NATIVE: CDP network binding unavailable');
+      throw error;
     }
     leaseTimerId = setInterval(() => {
       controllerClaim({ force: true }).catch(() => {
@@ -1137,10 +1142,6 @@
           browserTiming.generation_start_ms = generationStartMs;
           armM0RecoveryProbe(operation);
           const response = await waitForResponse(
-            baseline,
-            Array.isArray(operation.completion_markers)
-              ? operation.completion_markers
-              : [],
             operation.operation_id,
             baseline,
             Array.isArray(operation.completion_markers)

@@ -1623,73 +1623,31 @@
   }
 
   async function waitForResponse(operationId, baseline, completionMarkers = [], evidenceContext = null) {
-    let sawGeneration = false;
-    let generationEndedAt = 0;
-    let failureReason = null;
-    let networkResponse = '';
-    let networkFailure = null;
-    let networkPollActive = true;
+    void baseline;
+    void evidenceContext;
+    const startedAt = Date.now();
 
-    const networkPoll = (async () => {
-      const startedAt = Date.now();
-      while (networkPollActive && Date.now() - startedAt < TIMEOUTS.generation) {
-        const evidence = await cdpOperationEvidence(operationId, completionMarkers);
-        if (evidence.status === 'completed') {
-          networkResponse = evidence.text;
-          return;
-        }
-        if (evidence.status === 'failed') {
-          networkFailure = evidence.error;
-          return;
-        }
-        await sleep(250);
+    while (Date.now() - startedAt < TIMEOUTS.generation) {
+      const evidence = await cdpOperationEvidence(operationId, completionMarkers);
+      if (evidence.status === 'completed') {
+        return evidence.text;
       }
-    })();
+      if (evidence.status === 'failed') {
+        throw new Error(evidence.error);
+      }
 
-    try {
-      const response = await waitUntil(() => {
-        if (networkResponse) return networkResponse;
-        if (networkFailure) return null;
+      const detected = detectorState();
+      if (detected.context_exhausted === true) {
+        throw new Error('PASI_CDP: CONTEXT_EXHAUSTED: conversation context is exhausted');
+      }
+      if (detected.context_exhausted !== true && detected.usage_limited === true) {
+        throw new Error('PASI_CDP: USAGE_LIMIT_REACHED: ChatGPT provider usage is exhausted or rate limited');
+      }
 
-        if (generating()) {
-          sawGeneration = true;
-          generationEndedAt = 0;
-          return null;
-        }
-
-        const detected = detectorState();
-        if (detected.context_exhausted === true) {
-          failureReason = 'CHAT_EXHAUSTED: conversation context is exhausted';
-          return null;
-        }
-        if (detected.context_exhausted !== true && detected.usage_limited === true) {
-          failureReason = 'CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited';
-          return null;
-        }
-
-        const responseText = assistantResponseEvidence(
-          evidenceContext?.assistantSnapshot,
-          evidenceContext?.prompt,
-          baseline
-        );
-        if (sawGeneration) {
-          if (!generationEndedAt) generationEndedAt = Date.now();
-          if (Date.now() - generationEndedAt < RESPONSE_SETTLE_MS) return null;
-        }
-        return completionMarkersSatisfied(responseText, completionMarkers)
-          ? responseText
-          : null;
-      }, TIMEOUTS.generation, DOM_POLL_MS);
-
-      if (networkResponse) return networkResponse;
-      if (networkFailure) throw new Error(networkFailure);
-      if (failureReason) throw new Error(failureReason);
-      if (response) return response;
-      throw new Error('PASI_NATIVE: ChatGPT generation timed out');
-    } finally {
-      networkPollActive = false;
-      await networkPoll.catch(() => undefined);
+      await sleep(250);
     }
+
+    throw new Error('PASI_CDP: NETWORK_RESPONSE_TIMEOUT: authoritative CDP response was not captured');
   }
 
 
@@ -1823,7 +1781,7 @@
         body: {
           operation_id: operationId,
           controller_id: CONTROLLER_INSTANCE_ID,
-          failure_source: 'dom_fallback',
+          failure_source: 'cdp_authority',
           error: String(error?.message || error)
         }
       });
@@ -1965,14 +1923,11 @@
               attempt: submission.attempt
             });
           }
-          let generationStartMs = null;
-          if (!(await waitUntil(() => {
-            const started = generating() || Boolean(assistantResponseEvidence(assistantSnapshot, promptText, baseline));
-            if (started && generationStartMs === null) generationStartMs = Date.now();
-            return started;
-          }, GENERATION_START_WAIT_MS, DOM_POLL_MS))) {
-            throw new Error('PASI_NATIVE: submission accepted but generation did not start');
-          }
+          // CDP Fetch is the authoritative generation boundary. Do not infer
+          // generation start from an existing DOM assistant message: that can
+          // satisfy completion markers from a prior response before this
+          // operation produces any network traffic.
+          const generationStartMs = Date.now();
           browserTiming.generation_start_ms = generationStartMs;
           armM0RecoveryProbe(operation);
           const response = await waitForResponse(

@@ -120,6 +120,12 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
   try {
     const tab = await chrome.tabs.get(tabId);
     const previousUrl = String(tab?.url || '');
+
+    const reasoning = await cdpNetworkController?.ensureReasoningMode?.(tabId, 'thinking');
+    if (reasoning?.enabled !== true) {
+      throw new Error('PASI_NATIVE: Thinking state could not be verified before new-chat navigation');
+    }
+
     const navigation = waitForTabNavigation(tabId);
     await chrome.tabs.update(tabId, {url: 'https://chatgpt.com/'});
     const finalUrl = await navigation;
@@ -418,6 +424,67 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         submitted: false,
         error: String(error?.message || error).slice(0, 500)
       }));
+    return true;
+  }
+
+  if (message?.type === 'pasi-cdp-select-reasoning') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const operationId = message?.operation_id == null ? '' : String(message.operation_id).trim();
+    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+    const mode = message?.mode == null ? 'thinking' : String(message.mode).trim();
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      !operationId ||
+      operationId.length > 200 ||
+      !controllerId ||
+      controllerId.length > 200 ||
+      mode !== 'thinking'
+    ) {
+      sendResponse({ok: false, enabled: false});
+      return undefined;
+    }
+
+    bridgeFetch('/operation?operation_id=' + encodeURIComponent(operationId))
+      .then((response) => {
+        if (!response.ok) throw new Error('operation lookup failed');
+        const operation = JSON.parse(response.text)?.operation;
+        if (!operation || operation.operation_id !== operationId) throw new Error('operation not found');
+        if (operation.operation_type !== 'select_reasoning') throw new Error('operation type mismatch');
+        if (operation.controller_id !== controllerId) throw new Error('operation controller ownership conflict');
+        return cdpNetworkController?.ensureReasoningMode?.(tabId, mode);
+      })
+      .then((result) => {
+        if (result?.enabled !== true) throw new Error('Thinking state could not be verified');
+        return bridgeFetch('/chat/finished', 'POST', {
+          operation_id: operationId,
+          controller_id: controllerId,
+          chat_url: String(senderUrl),
+          response_text: '',
+          response_text_available: false,
+          ack_only: true,
+          claim_next: true
+        }, 10000);
+      })
+      .then(async (completion) => {
+        if (!completion.ok) throw new Error('reasoning completion rejected');
+        await dispatchNextOperationForController(tabId, controllerId);
+        sendResponse({ok: true, enabled: true});
+      })
+      .catch(async (error) => {
+        await bridgeFetch('/chat/failed', 'POST', {
+          operation_id: operationId,
+          controller_id: controllerId,
+          failure_source: 'controller',
+          error: 'PASI_NATIVE: reasoning selection failed: ' + String(error?.message || error).slice(0, 400)
+        }, 10000);
+        sendResponse({
+          ok: false,
+          enabled: false,
+          error: String(error?.message || error).slice(0, 500)
+        });
+      });
     return true;
   }
 

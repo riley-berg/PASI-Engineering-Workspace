@@ -90,6 +90,76 @@ function serializeOperationDispatch(task) {
   return next;
 }
 
+async function waitForTabNavigation(tabId, timeoutMs = 20000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      if (chrome.tabs?.onUpdated?.removeListener) {
+        chrome.tabs.onUpdated.removeListener(listener);
+      }
+      clearTimeout(timer);
+    };
+    const finish = (value, error = null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => finish(null, new Error('PASI_NATIVE: new chat navigation timed out')), timeoutMs);
+    const listener = (updatedTabId, changeInfo, tab) => {
+      if (updatedTabId !== tabId || changeInfo?.status !== 'complete') return;
+      finish(String(tab?.url || ''));
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function executeNewChatOperation(tabId, controllerId, operation) {
+  if (!operation?.operation_id) return false;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const previousUrl = String(tab?.url || '');
+    const navigation = waitForTabNavigation(tabId);
+    await chrome.tabs.update(tabId, {url: 'https://chatgpt.com/'});
+    const finalUrl = await navigation;
+    if (!finalUrl || !/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\//.test(finalUrl)) {
+      throw new Error('PASI_NATIVE: new chat navigation ended outside ChatGPT');
+    }
+    if (
+      /^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\/c\//.test(previousUrl) &&
+      finalUrl === previousUrl
+    ) {
+      throw new Error('PASI_NATIVE: new chat navigation did not change conversation identity');
+    }
+
+    const completion = await bridgeFetch('/chat/finished', 'POST', {
+      operation_id: String(operation.operation_id),
+      controller_id: String(controllerId),
+      chat_url: finalUrl,
+      response_text: '',
+      response_text_available: false,
+      ack_only: true,
+      claim_next: false
+    }, 10000);
+    if (!completion.ok) {
+      throw new Error(
+        'PASI_NATIVE: new chat completion failed: HTTP ' + String(completion.status || 0)
+      );
+    }
+    return true;
+  } catch (error) {
+    const failure = String(error?.message || error).slice(0, 500);
+    await bridgeFetch('/chat/failed', 'POST', {
+      operation_id: String(operation.operation_id),
+      controller_id: String(controllerId),
+      failure_source: 'controller',
+      error: failure || 'PASI_NATIVE: new chat navigation failed'
+    }, 10000);
+    return false;
+  }
+}
+
 async function dispatchNextOperationForController(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
@@ -100,13 +170,17 @@ async function dispatchNextOperationForController(tabId, controllerId) {
       return false;
     }
     const url = String(tab?.url || '');
-    if (!/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(url)) return false;
+    if (!/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\//.test(url)) return false;
 
     const payload = await bridgeJson(
       '/next-operation?controller_id=' + encodeURIComponent(controllerId)
     );
     const operation = payload?.operation;
     if (!operation || !operation.operation_id) return false;
+
+    if (operation.operation_type === 'new_chat') {
+      return executeNewChatOperation(tabId, controllerId, operation);
+    }
 
     try {
       const result = await chrome.tabs.sendMessage(tabId, {

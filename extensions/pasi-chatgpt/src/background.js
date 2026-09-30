@@ -117,7 +117,15 @@ async function cdpNetworkObservation(event) {
     }
   }, 10000);
   cdpOperationTimings.delete(operationId);
-  void dispatchNextOperationForController(event.tabId, controllerId);
+
+  // Explicit provider/context terminal states must not be immediately
+  // redispatched. Context exhaustion is surfaced to the runner, which
+  // creates the fresh conversation before submitting the task again.
+  const autoRetry = !new Set(['context_exhaustion', 'usage_limit', 'auth_failure'])
+    .has(String(event.classification || ''));
+  if (autoRetry) {
+    void dispatchNextOperationForController(event.tabId, controllerId);
+  }
 }
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
   debuggerApi: chrome.debugger,

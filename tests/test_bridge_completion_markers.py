@@ -383,3 +383,25 @@ def test_navigation_completion_can_leave_next_operation_queued(tmp_path):
     assert queued is not None
     assert queued["status"] == "queued"
 
+
+
+def test_context_exhaustion_is_terminal_for_runner_fresh_chat_recovery(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "context-bound prompt",
+        completion_markers=["CONTEXT_OK"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    failed = bridge.fail_operation(
+        operation.operation_id,
+        "PASI_CDP: CONTEXT_EXHAUSTED: conversation context is exhausted",
+    )
+
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert failed["retry_class"] == "context"
+    assert failed["failure_reason"] == "context_exhausted"
+    assert failed["error"].startswith("CHAT_EXHAUSTED:")

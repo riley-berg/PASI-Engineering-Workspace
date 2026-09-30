@@ -176,7 +176,18 @@ def test_operation_state_status_stays_in_sync_with_durable_lifecycle(tmp_path):
         },
     })
 
-    completed = bridge.get_operation(operation.operation_id, repair_response=False)
+    observed = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert observed is not None
+    assert observed["status"] == "claimed"
+    assert observed["operation_state"]["status"] == "claimed"
+    assert observed["network_response_authoritative"] is True
+
+    completed, _ = bridge.complete_operation_and_claim_next(
+        operation.operation_id,
+        response_text="NETWORK_PATCH_OK_2026",
+        response_text_available=True,
+        controller_id="controller-cdp",
+    )
     assert completed is not None
     assert completed["status"] == "completed"
     assert completed["operation_state"]["status"] == "completed"

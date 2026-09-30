@@ -23,6 +23,9 @@ HOST = "127.0.0.1"
 PORT = 8765
 MAX_RESPONSE_TEXT_CHARS = 120_000
 
+class ControllerOwnershipConflict(InvalidOperationTransition):
+    """Raised when a stale controller instance mutates another instance's operation."""
+
 def completion_markers_satisfied(response_text: object, markers: object) -> bool:
     if not isinstance(response_text, str) or not response_text.strip():
         return False
@@ -360,17 +363,26 @@ class BridgeState:
             self._save_queue(queue)
 
     @classmethod
-    def _mark_claimed(cls, item: dict[str, Any]) -> dict[str, Any]:
+    def _mark_claimed(
+        cls,
+        item: dict[str, Any],
+        controller_id: str | None = None,
+    ) -> dict[str, Any]:
         now = time.time()
         validate_transition(str(item.get("status", "")), "claimed")
         item["status"] = "claimed"
         item["claimed_at"] = now
         item["updated_at"] = now
+        if controller_id is None:
+            item.pop("controller_id", None)
+        else:
+            item["controller_id"] = controller_id
         return item
 
     def claim_operation(
         self,
         operation_id: str,
+        controller_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
@@ -382,13 +394,16 @@ class BridgeState:
                 if item.get("status") != "queued":
                     return None
 
-                claimed = self._mark_claimed(item)
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
         return None
 
-    def claim_next_operation(self) -> dict[str, Any] | None:
+    def claim_next_operation(
+        self,
+        controller_id: str | None = None,
+    ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
@@ -397,7 +412,7 @@ class BridgeState:
                 if item.get("status") != "queued":
                     continue
 
-                claimed = self._mark_claimed(item)
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
@@ -450,6 +465,7 @@ class BridgeState:
         response_text: str | None = None,
         response_text_available: bool = False,
         timing: object = None,
+        controller_id: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Complete one operation and claim exactly one next operation in one durable queue write."""
         with self.lock:
@@ -462,6 +478,14 @@ class BridgeState:
             )
             if current is None:
                 return None, None
+
+            if controller_id is not None:
+                owner = current.get("controller_id")
+                if owner is not None and owner != controller_id:
+                    raise ControllerOwnershipConflict(
+                        "Operation is owned by a different controller instance."
+                    )
+                current["controller_id"] = controller_id
 
             if current.get("operation_type") == "prompt" and not completion_markers_satisfied(
                 response_text,
@@ -497,7 +521,7 @@ class BridgeState:
             for item in queue:
                 if item is current or item.get("status") != "queued":
                     continue
-                chained = dict(self._mark_claimed(item))
+                chained = dict(self._mark_claimed(item, controller_id))
                 current["next_operation_id"] = item.get("operation_id")
                 break
 
@@ -1430,7 +1454,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/next-operation":
-            operation = self.bridge_state.claim_next_operation()
+            controller_ids = parse_qs(parsed.query).get("controller_id", [])
+            controller_id = controller_ids[0].strip() if controller_ids else ""
+            if not controller_id or len(controller_id) > 200:
+                self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            operation = self.bridge_state.claim_next_operation(controller_id)
             self._send_json({"operation": operation})
             return
 
@@ -1528,14 +1557,18 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         payload: dict[str, Any],
     ) -> None:
         operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             self._send_json(
                 {"error": "operation_id is required."},
                 HTTPStatus.BAD_REQUEST,
             )
             return
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
 
-        operation = self.bridge_state.claim_operation(operation_id)
+        operation = self.bridge_state.claim_operation(operation_id, controller_id.strip())
         if operation is None:
             self._send_json(
                 {"error": "Operation is not queued."},
@@ -1752,6 +1785,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             "response_text_available",
             False,
         )
+        controller_id = payload.get("controller_id")
         ack_only = payload.get("ack_only", False)
         timing = payload.get("timing")
 
@@ -1766,6 +1800,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
             return
 
         if chat_url is not None and not isinstance(
@@ -1852,6 +1890,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 {"error": "Operation not found."},
                 HTTPStatus.NOT_FOUND,
+            )
+            return
+        if existing_operation.get("controller_id") != controller_id.strip():
+            self._send_json(
+                {"error": "Operation is owned by a different controller instance."},
+                HTTPStatus.CONFLICT,
             )
             return
 
@@ -1942,6 +1986,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 response_text=response_text,
                 response_text_available=response_text_available,
                 timing=normalized_timing,
+                controller_id=controller_id.strip(),
             )
         except InvalidOperationTransition:
             # Completion acknowledgements are retried by the browser controller.
@@ -1985,6 +2030,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             "operation_id"
         )
 
+        controller_id = payload.get("controller_id")
+
         error = payload.get(
             "error"
         )
@@ -2000,6 +2047,18 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        current = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if current is None:
+            self._send_json({"error": "Operation not found."}, HTTPStatus.NOT_FOUND)
+            return
+        if current.get("controller_id") != controller_id.strip():
+            self._send_json({"error": "Operation is owned by a different controller instance."}, HTTPStatus.CONFLICT)
             return
 
         if not isinstance(

@@ -1046,6 +1046,7 @@ class BridgeState:
             error.startswith("PASI_NATIVE: ChatGPT generation timed out")
             or error.startswith("PASI_NATIVE: response text unavailable")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
             or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
             or error.startswith("PASI_CDP: NETWORK_STREAM_DISCONNECTED")
             or error.startswith("PASI_CDP: CDP_DEBUGGER_DETACHED")

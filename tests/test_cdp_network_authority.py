@@ -57,7 +57,7 @@ def test_cdp_network_authority_contract():
     assert "executeNewChatOperation" in background
     assert "executeAttachGithubOperation" in background
     assert "operation.operation_type === 'select_reasoning'" in background
-    assert "claim_next: false" in background
+    assert "claim_next: true" in background
     assert "chrome.tabs.onActivated" in background
     assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background

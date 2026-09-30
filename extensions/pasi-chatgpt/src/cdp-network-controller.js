@@ -609,6 +609,88 @@
       throw lastError || new Error('NO_VERIFIED_THINKING_CONTROL');
     }
 
+    function findAXNodeByPattern(nodes, pattern, roles) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (roles && !roles.has(role)) continue;
+        const name = axName(node);
+        if (!pattern.test(name)) continue;
+        const score = role === 'button' ? 100 : 50;
+        if (score > bestScore) { bestScore = score; best = node; }
+      }
+      return best;
+    }
+
+    function findEditableAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const roles = new Set(['textbox', 'searchbox', 'combobox', 'generic']);
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!roles.has(role)) continue;
+        const editable = axBooleanProperty(node, 'editable');
+        const multiline = axBooleanProperty(node, 'multiline');
+        if (editable === true || role === 'searchbox' || role === 'combobox' || multiline === true) return node;
+      }
+      return null;
+    }
+
+    async function activateAXNode(tabId, node) {
+      const backendNodeId = Number(node?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) throw new Error('CDP UI control has no backend node');
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId});
+      for (const type of ['keyDown', 'keyUp']) {
+        await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+          type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13
+        });
+      }
+    }
+
+    async function fillAXNode(tabId, node, value) {
+      const backendNodeId = Number(node?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) throw new Error('CDP editable control has no backend node');
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId});
+      await sendCommand(tabId, 'Input.insertText', {text: String(value)});
+    }
+
+    async function ensureGithubRepository(tabId, repository) {
+      const target = String(repository || '').trim();
+      if (!/^[^/\s]+\/[^/\s]+$/.test(target)) throw new Error('PASI_NATIVE: GitHub repository must be in owner/name form');
+      await attachTab(tabId);
+      const deadline = now() + 12000;
+      let stage = 'plus';
+      let lastError = null;
+      const escaped = target.replace(/[.*+?^${}()|[\\]\\]/g, '\\    async function submitOperation(tabId, operationId, controllerId) {
+');
+      while (now() < deadline) {
+        try {
+          const nodes = await readAXTree(tabId);
+          if (stage === 'plus') {
+            const plus = findAXNodeByPattern(nodes, /add files and more|add files|attach/i, new Set(['button', 'menuitem']));
+            if (plus) { await activateAXNode(tabId, plus); stage = 'github'; continue; }
+          }
+          if (stage === 'github') {
+            const github = findAXNodeByPattern(nodes, /github/i, new Set(['button', 'menuitem', 'option', 'link']));
+            if (github) { await activateAXNode(tabId, github); stage = 'repository'; continue; }
+          }
+          if (stage === 'repository') {
+            const editable = findEditableAXNode(nodes);
+            if (editable) { await fillAXNode(tabId, editable, target); stage = 'select'; continue; }
+          }
+          if (stage === 'select') {
+            const result = findAXNodeByPattern(nodes, new RegExp(escaped, 'i'), new Set(['button', 'option', 'menuitem', 'link']));
+            if (result) { await activateAXNode(tabId, result); return {attached: true, repository: target}; }
+          }
+          lastError = new Error('WAITING_FOR_GITHUB_' + stage.toUpperCase());
+        } catch (error) { lastError = error; }
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
+    }
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -969,6 +1051,7 @@
       unbindOperation,
       interruptOperation,
       ensureReasoningMode,
+      ensureGithubRepository,
       handlePaused,
       currentBinding,
       health() {

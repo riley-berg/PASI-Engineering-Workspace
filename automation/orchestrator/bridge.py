@@ -941,8 +941,17 @@ class BridgeState:
                 request_id = data.get("request_id")
                 if isinstance(request_id, str) and request_id:
                     item["network_request_id"] = request_id[:200]
-                if event_type:
+                if event_type in {"COMPLETED", "INTERRUPTED", "FAILED"}:
                     item["network_terminal_event"] = event_type
+                elif event_type:
+                    # Lifecycle events such as STARTED are not terminal
+                    # evidence. Keep them separate so response polling cannot
+                    # misclassify an in-flight generation as a failure.
+                    item["network_lifecycle_event"] = event_type
+                    item.pop("network_terminal_event", None)
+                    item.pop("network_terminal_reason", None)
+                    item.pop("network_classification", None)
+                    item.pop("network_failure_source", None)
                 reason = data.get("reason")
                 classification = data.get("classification")
                 if isinstance(reason, str) and reason:

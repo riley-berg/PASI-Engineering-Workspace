@@ -155,12 +155,13 @@ def test_next_operation_redelivers_same_controller_claimed_handoff_after_grace(t
     claimed = bridge.claim_operation(operation.operation_id, "controller-a")
     assert claimed is not None
 
-    queue = bridge._load_queue()
-    for item in queue:
-        if item.get("operation_id") == operation.operation_id:
-            item["claimed_at"] = time.time() - 6
-            bridge._save_queue(queue)
-            break
+    with bridge.lock:
+        queue = bridge._load_queue()
+        for item in queue:
+            if item.get("operation_id") == operation.operation_id:
+                item["claimed_at"] = time.time() - 6
+                bridge._save_queue(queue)
+                break
 
     redelivered = bridge.claim_next_operation("controller-a")
     assert redelivered is not None

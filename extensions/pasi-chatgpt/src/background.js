@@ -4,9 +4,6 @@ const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
 const OPERATION_DISPATCH_ERROR = 'PASI_NATIVE: controller dispatch unavailable';
 let STALE_MS = 45 * 1000;
-const CONTROLLER_LEASE_KEY = 'pasi:controller-lease';
-const CONTROLLER_LEASE_MS = 10 * 1000;
-let controllerClaimTail = Promise.resolve();
 let operationDispatchTail = Promise.resolve();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
@@ -140,12 +137,6 @@ if (chrome.sidePanel?.setPanelBehavior) {
   chrome.sidePanel
     .setPanelBehavior({ openPanelOnActionClick: true })
     .catch((error) => console.warn('[PASI side panel]', error));
-}
-
-function serializeControllerClaim(task) {
-  const next = controllerClaimTail.then(task, task);
-  controllerClaimTail = next.catch(() => undefined);
-  return next;
 }
 
 function serializeOperationDispatch(task) {
@@ -517,200 +508,6 @@ async function bridgeJson(path) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === 'pasi-controller-ready') {
-    const senderUrl = String(sender?.url || '');
-    const tabId = sender?.tab?.id;
-    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
-    const ready = message?.ready !== false;
-    if (
-      typeof tabId !== 'number' ||
-      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
-      !controllerId ||
-      controllerId.length > 200 ||
-      !ready
-    ) {
-      sendResponse({ ok: true, accepted: false, ready: false, controller_id: controllerId || null });
-      return undefined;
-    }
-    sendResponse({
-      ok: true,
-      accepted: false,
-      ready: true,
-      controller_id: controllerId
-    });
-    void dispatchNextOperationForController(tabId, controllerId);
-    return undefined;
-  }
-
-  if (message?.type === 'pasi-network-bind-operation') {
-    const senderUrl = String(sender?.url || '');
-    const tabId = sender?.tab?.id;
-    const rawOperationId = message?.operation_id;
-    const operationId = rawOperationId == null ? null : String(rawOperationId).trim();
-    if (
-      typeof tabId !== 'number' ||
-      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
-      (operationId !== null && (!operationId || operationId.length > 200))
-    ) {
-      sendResponse({ ok: false, bound: false });
-      return undefined;
-    }
-
-    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
-    if (!controllerId || controllerId.length > 200) {
-      sendResponse({ ok: false, bound: false });
-      return undefined;
-    }
-
-    if (operationId === null) {
-      cdpNetworkController?.unbindOperation?.(tabId, null, controllerId)
-        .then((result) => sendResponse({ ok: true, bound: result?.bound === true }))
-        .catch(() => sendResponse({ ok: false, bound: false }));
-      return true;
-    }
-
-    bridgeFetch('/operation?operation_id=' + encodeURIComponent(operationId))
-      .then((response) => {
-        if (!response.ok) throw new Error('operation lookup failed');
-        let operation;
-        try {
-          operation = JSON.parse(response.text)?.operation;
-        } catch (_) {
-          throw new Error('operation lookup was invalid');
-        }
-        if (!operation || operation.operation_id !== operationId) throw new Error('operation not found');
-        if (operation.controller_id !== controllerId) throw new Error('operation controller ownership conflict');
-        return cdpNetworkController?.bindOperation?.({
-          tabId,
-          operationId,
-          controllerId,
-          prompt: '[PASI_OPERATION ' + operationId + ']\n' + String(operation.prompt || ''),
-          completionMarkers: Array.isArray(operation.completion_markers) ? operation.completion_markers : [],
-          chatUrl: typeof operation.chat_url === 'string' ? operation.chat_url : null
-        });
-      })
-      .then((result) => {
-        const bound = result?.bound === true;
-        sendResponse({ ok: bound, bound });
-      })
-      .catch(() => {
-        sendResponse({ ok: false, bound: false });
-      });
-    return true;
-  }
-
-  if (message?.type === 'pasi-cdp-submit-operation') {
-    const senderUrl = String(sender?.url || '');
-    const tabId = sender?.tab?.id;
-    const operationId = message?.operation_id == null ? '' : String(message.operation_id).trim();
-    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
-    if (
-      typeof tabId !== 'number' ||
-      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
-      !operationId ||
-      operationId.length > 200 ||
-      !controllerId ||
-      controllerId.length > 200
-    ) {
-      sendResponse({ok: false, submitted: false});
-      return undefined;
-    }
-
-    const binding = cdpNetworkController?.currentBinding?.(tabId);
-    if (
-      !binding ||
-      binding.operationId !== operationId ||
-      binding.controllerId !== controllerId
-    ) {
-      sendResponse({ok: false, submitted: false});
-      return undefined;
-    }
-
-    cdpNetworkController.submitOperation(tabId, operationId, controllerId)
-      .then((result) => sendResponse({ok: result?.submitted === true, ...result}))
-      .catch((error) => sendResponse({
-        ok: false,
-        submitted: false,
-        error: String(error?.message || error).slice(0, 500)
-      }));
-    return true;
-  }
-
-  if (message?.type === 'pasi-cdp-interrupt-operation') {
-    const senderUrl = String(sender?.url || '');
-    const tabId = sender?.tab?.id;
-    const operationId = message?.operation_id == null ? '' : String(message.operation_id).trim();
-    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
-    const reason = message?.reason == null ? 'NETWORK_STREAM_DISCONNECTED' : String(message.reason).trim();
-    if (
-      typeof tabId !== 'number' ||
-      !/^https:\/\/(?:www\\.)?chatgpt\\.com(?::\\d+)?\\//.test(senderUrl) ||
-      !operationId ||
-      operationId.length > 200 ||
-      !controllerId ||
-      controllerId.length > 200
-    ) {
-      sendResponse({ok: false, interrupted: 0});
-      return undefined;
-    }
-
-    const binding = cdpNetworkController?.currentBinding?.(tabId);
-    if (
-      !binding ||
-      binding.operationId !== operationId ||
-      binding.controllerId !== controllerId
-    ) {
-      sendResponse({ok: false, interrupted: 0});
-      return undefined;
-    }
-
-    cdpNetworkController.interruptOperation(tabId, operationId, controllerId, reason)
-      .then((result) => sendResponse({
-        ok: Number(result?.interrupted || 0) > 0,
-        ...result
-      }))
-      .catch((error) => sendResponse({
-        ok: false,
-        interrupted: 0,
-        error: String(error?.message || error).slice(0, 500)
-      }));
-    return true;
-  }
-
-  if (message?.type === 'pasi-controller-claim') {
-    const tabId = sender?.tab?.id;
-    const rawControllerId = message?.controller_id;
-    const controllerId = rawControllerId == null ? `legacy:${tabId}` : String(rawControllerId).trim();
-    if (typeof tabId !== 'number' || !controllerId || controllerId.length > 200) {
-      sendResponse({ ok: false, leader: false });
-      return undefined;
-    }
-    serializeControllerClaim(async () => {
-      const stored = await chrome.storage.local.get(CONTROLLER_LEASE_KEY);
-      const current = stored?.[CONTROLLER_LEASE_KEY];
-      const now = Date.now();
-      const currentFresh = Boolean(
-        current &&
-        now - Number(current.renewedAt || 0) < CONTROLLER_LEASE_MS
-      );
-      const owned = Boolean(
-        currentFresh &&
-        current.tabId === tabId &&
-        current.controllerId === controllerId
-      );
-      const available = !current || !currentFresh || current.tabId === tabId;
-      if (!owned && !available) {
-        sendResponse({ ok: true, leader: false, controller_id: controllerId });
-        return;
-      }
-      await chrome.storage.local.set({
-        [CONTROLLER_LEASE_KEY]: { tabId, controllerId, renewedAt: now }
-      });
-      sendResponse({ ok: true, leader: true, controller_id: controllerId });
-    }).catch(() => sendResponse({ ok: false, leader: false }));
-    return true;
-  }
-
   if (message?.type === 'pasi-control-center-bridge-request') {
     const senderUrl = String(sender?.url || '');
     const extensionPrefix = `chrome-extension://${chrome.runtime.id}/`;
@@ -761,100 +558,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   bridgeFetch(path, method, body, timeoutMs).then(sendResponse);
   return true;
 });
-function observationAge(observation) {
-  const stamp = observation && observation.captured_at;
-  if (typeof stamp !== 'string') return Infinity;
-  const value = Date.parse(stamp);
-  if (!Number.isFinite(value)) return Infinity;
-  return Math.max(0, Date.now() - value);
+function isChatGPTUrl(url) {
+  return /^https:\/\/(?:www\\.)?chatgpt\.com(?::\\d+)?\//.test(String(url || ''));
 }
 
-function healthData(payload) {
-  const observation = payload && payload.observation;
-  if (!observation || typeof observation !== 'object') return null;
-  const data = observation.data && typeof observation.data === 'object' ? observation.data : observation;
-  return { observation, data };
+function controllerIdForTab(tabId) {
+  return 'cdp-tab:' + String(tabId);
 }
 
-function sameChatConversationUrl(candidate, target) {
+async function attachAndDispatchTab(tab) {
+  const tabId = tab?.id;
+  if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return false;
+  if (!cdpNetworkController?.attachTab) return false;
   try {
-    const left = new URL(String(candidate || ''));
-    const right = new URL(String(target || ''));
-    const allowedOrigins = new Set(['https://chatgpt.com', 'https://www.chatgpt.com']);
-    return allowedOrigins.has(left.origin)
-      && allowedOrigins.has(right.origin)
-      && left.pathname === right.pathname
-      && left.pathname.startsWith('/c/');
+    await cdpNetworkController.attachTab(tabId);
+    return await dispatchNextOperationForController(tabId, controllerIdForTab(tabId));
   } catch (_) {
     return false;
   }
 }
 
-async function injectExistingChatTabs() {
-  if (!chrome.scripting?.executeScript) return;
+async function attachExistingChatTabs() {
   const tabs = await chrome.tabs.query({
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
+  const active = tabs.find((tab) => tab.active && typeof tab.id === 'number');
+  if (active) {
+    await attachAndDispatchTab(active);
+    return;
+  }
   for (const tab of tabs) {
-    if (typeof tab.id !== 'number') continue;
-
-    // A previously injected controller can answer this ping. Do not
-    // re-execute the full support-script bundle on an already-live tab,
-    // because the support scripts are intentionally global and are not
-    // themselves controller lifecycle owners.
-    try {
-      await chrome.tabs.sendMessage(tab.id, { type: 'pasi-health-ping' });
-      continue;
-    } catch (_) {
-      // No live controller listener is present; inject into the existing tab.
-    }
-
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: [
-          'src/timeout-config.js',
-          'src/detectors.js',
-          'src/recovery_progress.js',
-          'src/legacy/dom-controller.js',
-          'src/recovery.js'
-        ]
-      });
-    } catch (_) {
-      // Retry later without creating, navigating, or reloading a tab.
-    }
+    if (await attachAndDispatchTab(tab)) return;
   }
 }
+
 async function inspect() {
-  await injectExistingChatTabs();
-
-  const payload = await bridgeJson('/browser/observation');
-  if (!payload) return;
-  const health = healthData(payload);
-  if (!health || health.data.auth_required === true) return;
-
-  const targetChatUrl = typeof health.data.chat_url === 'string'
-    ? health.data.chat_url
-    : '';
-  if (!targetChatUrl) return;
-
   const tabs = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
-  const matchingTab = tabs.find((tab) => sameChatConversationUrl(tab.url, targetChatUrl));
-  if (matchingTab && typeof matchingTab.id === 'number') {
-    try {
-      const response = await chrome.tabs.sendMessage(matchingTab.id, {
-        type: 'pasi-controller-status',
-        source: 'watchdog'
-      });
-      if (response?.ready === true && response?.controller_id) {
-        void dispatchNextOperationForController(matchingTab.id, String(response.controller_id));
-      }
-    } catch (_) {
-      // Existing-tab injection will be retried on the next watchdog pass.
-    }
+  if (tabs[0]) {
+    await attachAndDispatchTab(tabs[0]);
+    return;
   }
+  await attachExistingChatTabs();
 }
 
 async function applyTimeoutPolicy() {
@@ -882,7 +630,7 @@ async function ensureWatchdogAlarm() {
 
 chrome.runtime.onInstalled.addListener(() => {
   void ensureWatchdogAlarm();
-  void injectExistingChatTabs();
+  void attachExistingChatTabs();
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -891,11 +639,25 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 void ensureWatchdogAlarm();
-void injectExistingChatTabs();
+void attachExistingChatTabs();
 
 if (chrome.tabs?.onRemoved) {
   chrome.tabs.onRemoved.addListener((tabId) => {
     void cdpNetworkController?.detachTab?.(tabId);
+  });
+}
+if (chrome.tabs?.onActivated) {
+  chrome.tabs.onActivated.addListener((activeInfo) => {
+    void chrome.tabs.get(activeInfo.tabId)
+      .then((tab) => attachAndDispatchTab(tab))
+      .catch(() => undefined);
+  });
+}
+if (chrome.tabs?.onUpdated) {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo?.status === 'complete' && isChatGPTUrl(tab?.url)) {
+      void attachAndDispatchTab(tab);
+    }
   });
 }
 

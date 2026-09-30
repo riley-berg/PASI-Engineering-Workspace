@@ -51,6 +51,15 @@ def test_cdp_network_authority_contract():
     assert "nativeMouseActivate" not in controller
     assert "sendCandidatesForComposer" not in controller
     assert "dom_fallback" not in controller
+    wait_start = controller.read_text(encoding="utf-8").index("async function waitForResponse(")
+    wait_end = controller.read_text(encoding="utf-8").index("  function completionProgress", wait_start)
+    wait_source = controller.read_text(encoding="utf-8")[wait_start:wait_end]
+    assert "detectorState()" not in wait_source
+
+    recovery_start = controller.read_text(encoding="utf-8").index("async function recoverInterruptedOperation()")
+    recovery_end = controller.read_text(encoding="utf-8").index("  function recoveryOperationId", recovery_start)
+    recovery_source = controller.read_text(encoding="utf-8")[recovery_start:recovery_end]
+    assert "generating()" not in recovery_source
 
     for source in (cdp, extension / "src" / "background.js"):
         result = subprocess.run(

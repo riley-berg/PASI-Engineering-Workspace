@@ -378,7 +378,8 @@
         const focused = axBooleanProperty(node, 'focused') === true;
         const supportedRole = editableRoles.has(role);
         const genericEditable = editable === true || multiline === true;
-        if (!supportedRole && !genericEditable && !semantic) continue;
+        const editableLike = supportedRole || genericEditable;
+        if (!editableLike) continue;
 
         const score =
           (focused ? 1000 : 0) +

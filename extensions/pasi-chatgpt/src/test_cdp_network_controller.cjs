@@ -79,6 +79,47 @@ function fakeDebugger() {
   };
 }
 
+test('CDP reasoning control verifies an existing Thinking state and can enable it', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  let treeCalls = 0;
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      treeCalls += 1;
+      const selected = treeCalls >= 2;
+      return callback({
+        nodes: [{
+          nodeId: 'ax-thinking',
+          backendDOMNodeId: 91,
+          role: {type: 'role', value: 'button'},
+          name: {type: 'computedString', value: 'Thinking'},
+          ignored: false,
+          properties: [
+            {name: 'selected', value: {type: 'boolean', value: selected}},
+            {name: 'focused', value: {type: 'boolean', value: false}}
+          ]
+        }]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  const result = await controller.ensureReasoningMode(15, 'thinking');
+
+  assert.equal(result.enabled, true);
+  assert.equal(result.control, 'Thinking');
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'DOM.focus' && command.params.backendNodeId === 91
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+  ));
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
+});
+
 test('CDP submit operation uses native input and never clicks a DOM send control', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

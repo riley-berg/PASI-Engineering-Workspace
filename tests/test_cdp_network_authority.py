@@ -35,6 +35,12 @@ def test_cdp_network_authority_contract():
     assert "cdpOperationEvidence(operationId" in controller
     assert "pasi-cdp-submit-operation" in controller
     assert "submitPrompt(" not in controller
+    assert "Accessibility.getFullAXTree" in cdp.read_text(encoding="utf-8")
+    assert "DOM.focus" in cdp.read_text(encoding="utf-8")
+    assert "Input.insertText" in cdp.read_text(encoding="utf-8")
+    assert "Input.dispatchKeyEvent" in cdp.read_text(encoding="utf-8")
+    assert "Runtime.evaluate" not in cdp.read_text(encoding="utf-8")
+    assert "document.querySelector" not in cdp.read_text(encoding="utf-8")
     assert "form.requestSubmit" not in controller
     assert "nativeMouseActivate" not in controller
     assert "sendCandidatesForComposer" not in controller

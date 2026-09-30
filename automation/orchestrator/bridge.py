@@ -72,6 +72,7 @@ MAX_RUNNER_CAPABILITIES_BYTES = 256_000
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
     "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+    "PASI_CDP: network failure",
     "PASI_CDP: CDP_DEBUGGER_DETACHED",
     "PASI_CDP: NETWORK_STREAM_DISCONNECTED",
     "Could not find ChatGPT composer.",
@@ -1067,6 +1068,7 @@ class BridgeState:
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
             or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
+            or error.startswith("PASI_CDP: network failure")
             or error.startswith("PASI_CDP: NETWORK_STREAM_DISCONNECTED")
             or error.startswith("PASI_CDP: CDP_DEBUGGER_DETACHED")
         ):

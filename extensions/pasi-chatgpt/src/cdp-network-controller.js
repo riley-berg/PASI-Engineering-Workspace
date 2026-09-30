@@ -319,6 +319,85 @@
       return tabs.get(tabId)?.binding || null;
     }
 
+    async function focusEditableTarget(tabId) {
+      const expression = `() => {
+        const isEditable = (element) => {
+          if (!element || element.disabled === true) return false;
+          if (element.getAttribute?.('aria-hidden') === 'true') return false;
+          return element.isContentEditable === true ||
+            element.tagName === 'TEXTAREA' ||
+            element.tagName === 'INPUT' ||
+            element.getAttribute?.('role') === 'textbox';
+        };
+        const visible = (element) => {
+          if (!isEditable(element)) return false;
+          try { return element.getClientRects().length > 0; } catch (_) { return false; }
+        };
+        const active = document.activeElement;
+        if (visible(active)) {
+          active.focus();
+          return {focused: true, kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase()};
+        }
+        const candidates = Array.from(document.querySelectorAll('textarea, input, [contenteditable="true"], [role="textbox"]'));
+        const target = candidates.find(visible);
+        if (!target) return {focused: false, reason: 'NO_EDITABLE_TARGET'};
+        target.focus();
+        return {focused: document.activeElement === target, kind: target.isContentEditable ? 'contenteditable' : String(target.tagName || '').toLowerCase()};
+      })()`;
+      const result = await sendCommand(tabId, 'Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+        awaitPromise: false
+      });
+      const value = result?.result?.value;
+      if (!value?.focused) {
+        throw new Error('CDP submit target unavailable: ' + String(value?.reason || 'focus failed'));
+      }
+      return value;
+    }
+
+    async function submitOperation(tabId, operationId, controllerId) {
+      const state = tabs.get(tabId);
+      if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
+      if (state.binding.operationId !== String(operationId)) {
+        throw new Error('CDP submit operation mismatch');
+      }
+      if (state.binding.controllerId !== String(controllerId || '')) {
+        throw new Error('CDP submit controller ownership conflict');
+      }
+      const prompt = String(state.binding.prompt || '');
+      if (!prompt.trim()) throw new Error('CDP submit requires a non-empty prompt');
+
+      const submittedAt = now();
+      const target = await focusEditableTarget(tabId);
+      const insertedAt = now();
+      await sendCommand(tabId, 'Input.insertText', {text: prompt});
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        nativeVirtualKeyCode: 13
+      });
+      return {
+        submitted: true,
+        operationId: state.binding.operationId,
+        controllerId: state.binding.controllerId,
+        submissionMethod: 'cdp_input',
+        targetKind: target.kind,
+        submittedAtMs: submittedAt,
+        insertedAtMs: insertedAt,
+        enterDispatchedAtMs: now()
+      };
+    }
+
     function bindOperation({tabId, operationId, controllerId, prompt, completionMarkers, chatUrl}) {
       return attachTab(tabId).then(() => {
         const state = tabs.get(tabId);

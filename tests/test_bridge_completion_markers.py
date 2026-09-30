@@ -95,3 +95,137 @@ def test_marked_completion_rejects_nonmatching_response(tmp_path):
     operation = bridge.get_operation(operation_id, repair_response=False)
     assert operation is not None
     assert operation["status"] == "claimed"
+
+
+def test_cdp_network_response_becomes_authoritative_and_overrides_stale_dom_text(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-09-30T00:00:00Z",
+            "data": {
+                "kind": "chatgpt_network_response",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-cdp-1",
+                "event_type": "COMPLETED",
+                "response_text": "NETWORK_PATCH_OK_2026",
+                "response_text_available": True,
+                "assistant_message_id": "assistant-current",
+            },
+        }
+    )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["network_response_authoritative"] is True
+    assert stored["response_source"] == "cdp_fetch_stream"
+    assert stored["network_request_id"] == "req-cdp-1"
+
+    completed, _ = bridge.complete_operation_and_claim_next(
+        operation.operation_id,
+        response_text="That is stale DOM text.",
+        response_text_available=True,
+        controller_id="controller-cdp",
+    )
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["response_text"] == "NETWORK_PATCH_OK_2026"
+    assert completed["response_source"] == "cdp_fetch_stream"
+
+
+def test_cdp_completed_event_without_matching_marker_cannot_authorize_completion(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-09-30T00:00:01Z",
+            "data": {
+                "kind": "chatgpt_network_response",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-cdp-stale",
+                "event_type": "COMPLETED",
+                "response_text": "STALE_RESPONSE",
+                "response_text_available": True,
+            },
+        }
+    )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["network_terminal_event"] == "COMPLETED"
+    assert stored.get("network_response_authoritative") is not True
+    assert stored.get("response_text_available") is not True
+
+    with pytest.raises(ValueError, match="completion markers"):
+        bridge.complete_operation_and_claim_next(
+            operation.operation_id,
+            response_text="STALE_RESPONSE",
+            response_text_available=True,
+            controller_id="controller-cdp",
+        )
+
+
+def test_late_dom_response_cannot_replace_authoritative_cdp_response(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-09-30T00:00:00Z",
+            "data": {
+                "kind": "chatgpt_network_response",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-cdp-2",
+                "event_type": "COMPLETED",
+                "response_text": "NETWORK_PATCH_OK_2026",
+                "response_text_available": True,
+            },
+        }
+    )
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-native-chromium-v2",
+            "captured_at": "2026-09-30T00:00:02Z",
+            "data": {
+                "kind": "chatgpt_response",
+                "active_operation_id": operation.operation_id,
+                "response_text": "STALE DOM RESPONSE",
+                "response_text_available": True,
+            },
+        }
+    )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["response_text"] == "NETWORK_PATCH_OK_2026"
+    assert stored["response_source"] == "cdp_fetch_stream"
+

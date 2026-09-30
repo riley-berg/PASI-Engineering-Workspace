@@ -793,7 +793,7 @@ class BridgeState:
             data = observation.get("data")
             if isinstance(data, dict):
                 kind = data.get("kind")
-                if kind == "chatgpt_response":
+                if kind in {"chatgpt_response", "chatgpt_network_response"}:
                     timing = data.get("timing")
                     active_operation_id = data.get("active_operation_id")
                     if isinstance(active_operation_id, str) and timing is not None:

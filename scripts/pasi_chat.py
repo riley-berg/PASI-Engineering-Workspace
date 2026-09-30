@@ -43,10 +43,10 @@ def observed_chat_state(observation:Mapping[str,Any]|None)->dict[str,Any]:
     }
 
 def select_chat_mode(state:Mapping[str,Any],live:Mapping[str,Any])->str:
-    if bool(live.get("usage_limited") or state.get("usage_limited")):
-        return "blocked"
-    if bool(live.get("chat_exhausted") or state.get("chat_exhausted")):
-        return "new_chat"
+    # Preflight health is not authority for chat rollover. Reuse the currently
+    # active ChatGPT conversation whenever one is known; create a fresh chat
+    # only from an explicit operation-level exhaustion result handled after
+    # generation.
     if valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")):
         return "reuse"
     return "new_chat"

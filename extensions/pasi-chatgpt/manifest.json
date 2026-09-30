@@ -46,11 +46,7 @@
         "src/api_v4.js",
         "src/copy-api.js",
         "src/chatgpt.js",
-        "src/timeout-config.js",
-        "src/detectors.js",
-        "src/recovery_progress.js",
-        "src/legacy/dom-controller.js",
-        "src/recovery.js"
+        "src/timeout-config.js"
       ],
       "run_at": "document_idle"
     }

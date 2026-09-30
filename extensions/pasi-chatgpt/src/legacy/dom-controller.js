@@ -14,7 +14,6 @@
   globalThis.PASI_NATIVE_CONTROLLER_ID = CONTROLLER_INSTANCE_ID;
   const PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1';
   const TIMEOUT_POLICY = globalThis.PASI_TIMEOUT_POLICY?.get?.() || {};
-  const POLL_MS = TIMEOUT_POLICY.pollMs || 2000;
   const HEALTH_MS = TIMEOUT_POLICY.heartbeatMs || 15000;
   const DOM_POLL_MS = TIMEOUT_POLICY.domPollMs || 100;
   const CLICK_SETTLE_MS = TIMEOUT_POLICY.clickSettleMs || 250;
@@ -52,13 +51,10 @@
   let leaseTimerId = null;
   let controllerClaimedAt = 0;
   const CONTROLLER_CLAIM_CACHE_MS = 2000;
-  let pollTimerId = null;
   let healthTimerId = null;
   let healthReportInFlight = null;
-  let pollInFlight = null;
   let lastStateReportAt = 0;
   const STATE_REPORT_MS = 10000;
-  let immediatePollQueued = false;
   let immediateOperationQueued = false;
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
@@ -127,16 +123,6 @@
       void trigger(operation.operation_id, 'm0_controlled_live_probe');
     }, 250);
   }
-
-  function scheduleImmediatePoll() {
-    if (immediatePollQueued || extensionContextInvalidated) return;
-    immediatePollQueued = true;
-    queueMicrotask(() => {
-      immediatePollQueued = false;
-      if (!processing && activeOperationId === null && !extensionContextInvalidated) void poll();
-    });
-  }
-
 
   function isExtensionContextInvalidatedError(error) {
     return /extension context invalidated|context invalidated/i.test(String(error?.message || error));
@@ -1746,7 +1732,7 @@
         // Schedule the next operation before any health telemetry so the
         // completion -> prompt critical path wins the event loop immediately.
         if (chainedOperation?.operation_id) scheduleImmediateOperation(chainedOperation);
-        else scheduleImmediatePoll();
+        else void notifyControllerReady();
         setTimeout(() => { void reportHealth(); }, 0);
       } else {
         void reportHealth();
@@ -1838,53 +1824,8 @@
     }
   }
 
-  function poll() {
-    if (processing || activeOperationId !== null || extensionContextInvalidated) return Promise.resolve();
-    if (pollInFlight) return pollInFlight;
-    pollInFlight = (async () => {
-      if (!(await controllerClaim())) return;
-      try {
-      const recoveryOperation = recoveryOperationId();
-      if (localStorage.getItem(RECOVERY_KEY) && !recoveryOperation) return;
-
-      const response = recoveryOperation
-        ? await bridge('/chat/claim', {
-            method: 'POST',
-            body: { operation_id: recoveryOperation }
-          })
-        : await bridge('/next-operation?controller_id=' + encodeURIComponent(CONTROLLER_INSTANCE_ID));
-      if (!response.ok) {
-        if (recoveryOperation) {
-          try {
-            const current = await bridge(`/operation?operation_id=${encodeURIComponent(recoveryOperation)}`);
-            const operation = current.ok ? current.json().operation : null;
-            if (operation && ['completed', 'failed', 'cancelled'].includes(operation.status)) {
-              localStorage.removeItem(RECOVERY_KEY);
-            }
-          } catch (_) {}
-        }
-        return;
-      }
-      const payload = response.json();
-      if (payload?.operation) await processOperation(payload.operation);
-      } catch (error) {
-        if (isExtensionContextInvalidatedError(error)) {
-          extensionContextInvalidated = true;
-          if (pollTimerId !== null) clearInterval(pollTimerId);
-          if (healthTimerId !== null) clearInterval(healthTimerId);
-          return;
-        }
-        console.warn('[PASI native controller]', error);
-        try { await reportHealth(); } catch (_) {}
-      }
-    })().finally(() => {
-      pollInFlight = null;
-    });
-    return pollInFlight;
-  }
 
   async function start() {
-    pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
 
     // Wait for the active conversation DOM to settle before the first state
@@ -1898,25 +1839,74 @@
 
     await recoverInterruptedOperation();
     if (extensionContextInvalidated) {
-      if (pollTimerId !== null) clearInterval(pollTimerId);
       if (healthTimerId !== null) clearInterval(healthTimerId);
-      pollTimerId = null;
       healthTimerId = null;
       return;
     }
 
-    await poll();
-    if (extensionContextInvalidated) {
-      if (pollTimerId !== null) clearInterval(pollTimerId);
-      if (healthTimerId !== null) clearInterval(healthTimerId);
-      pollTimerId = null;
-      healthTimerId = null;
-    }
+    await notifyControllerReady();
   }
 
-  chrome.runtime?.onMessage?.addListener?.((message) => {
+  function notifyControllerReady() {
+    if (
+      extensionContextInvalidated ||
+      !globalThis.chrome?.runtime?.sendMessage ||
+      processing ||
+      activeOperationId !== null
+    ) return Promise.resolve(false);
+
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'pasi-controller-ready',
+            controller_id: CONTROLLER_INSTANCE_ID,
+            chat_url: chatUrl(),
+            ready: true
+          },
+          (response) => {
+            const runtimeError = chrome.runtime.lastError;
+            resolve(!runtimeError && response?.ok === true);
+          }
+        );
+      } catch (_) {
+        resolve(false);
+      }
+    });
+  }
+
+  chrome.runtime?.onMessage?.addListener?.((message, sender, sendResponse) => {
     if (message?.type === 'pasi-health-ping' && !extensionContextInvalidated) {
       void reportHealth();
+      sendResponse({ok: true, controller_id: CONTROLLER_INSTANCE_ID, ready: !processing && activeOperationId === null});
+      return;
+    }
+
+    if (message?.type === 'pasi-controller-ready' && !extensionContextInvalidated) {
+      void notifyControllerReady();
+      sendResponse({ok: true, controller_id: CONTROLLER_INSTANCE_ID, ready: !processing && activeOperationId === null});
+      return;
+    }
+
+    if (message?.type === 'pasi-dispatch-operation' && !extensionContextInvalidated) {
+      const operation = message?.operation;
+      const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+      if (
+        controllerId !== CONTROLLER_INSTANCE_ID ||
+        processing ||
+        activeOperationId !== null ||
+        !operation ||
+        operation.operation_id == null
+      ) {
+        sendResponse({ok: false, accepted: false});
+        return;
+      }
+
+      activeOperationId = String(operation.operation_id);
+      queueMicrotask(() => {
+        void processOperation(operation);
+      });
+      sendResponse({ok: true, accepted: true, controller_id: CONTROLLER_INSTANCE_ID});
     }
   });
 

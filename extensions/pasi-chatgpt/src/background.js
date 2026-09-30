@@ -225,7 +225,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           tabId,
           operationId,
           controllerId,
-          prompt: '[PASI_OPERATION ' + operationId + ']\\n' + String(operation.prompt || ''),
+          prompt: '[PASI_OPERATION ' + operationId + ']\n' + String(operation.prompt || ''),
           completionMarkers: Array.isArray(operation.completion_markers) ? operation.completion_markers : [],
           chatUrl: typeof operation.chat_url === 'string' ? operation.chat_url : null
         });

@@ -86,9 +86,12 @@ def test_legacy_dom_controller_isolated_from_active_entry_points():
     legacy = extension / "src" / "legacy" / "dom-controller.js"
     active_content = extension / "src" / "content.js"
     interceptor = extension / "src" / "network-interceptor.js"
+    cdp = extension / "src" / "cdp-network-controller.js"
     background = (extension / "src" / "background.js").read_text(encoding="utf-8")
 
     assert not active_content.exists()
+    assert not interceptor.exists()
+    assert cdp.is_file()
     assert legacy.is_file()
 
     manifest_scripts = [
@@ -101,9 +104,11 @@ def test_legacy_dom_controller_isolated_from_active_entry_points():
     assert "src/legacy/dom-controller.js" in background
 
     legacy_text = legacy.read_text(encoding="utf-8")
-    interceptor_text = interceptor.read_text(encoding="utf-8")
+    cdp_text = cdp.read_text(encoding="utf-8")
 
     assert "document.querySelector" in legacy_text
     assert "MutationObserver" in legacy_text
-    assert "document.querySelector" not in interceptor_text
-    assert "MutationObserver" not in interceptor_text
+    assert "Fetch.requestPaused" in cdp_text
+    assert "Fetch.takeResponseBodyAsStream" in cdp_text
+    assert "MutationObserver" not in cdp_text
+    assert "document.querySelector" not in cdp_text

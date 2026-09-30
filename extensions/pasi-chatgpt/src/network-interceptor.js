@@ -127,6 +127,7 @@
         return {
           mode: 'snapshot',
           text: textParts.join('').slice(0, MAX_RESPONSE_TEXT_CHARS),
+          messageId: typeof message?.id === 'string' ? message.id : null,
         };
       }
     }
@@ -141,25 +142,50 @@
       return {
         mode: 'snapshot',
         text: messageText.slice(0, MAX_RESPONSE_TEXT_CHARS),
+        messageId: typeof message?.id === 'string' ? message.id : null,
       };
     }
 
     if (typeof payload?.delta === 'string' && payload.delta) {
-      return {mode: 'delta', text: payload.delta};
+      return {mode: 'delta', text: payload.delta, messageId: null};
     }
     if (typeof payload?.text === 'string' && payload.text) {
-      return {mode: 'delta', text: payload.text};
+      return {mode: 'delta', text: payload.text, messageId: null};
     }
 
-    if (
-      typeof payload?.p === 'string' &&
-      typeof payload?.v === 'string' &&
-      /\/message\/content\/parts(?:\/0)?$/.test(payload.p)
-    ) {
+    if (typeof payload?.p === 'string' && typeof payload?.v === 'string') {
+      if (!/\/message\/content\/parts(?:\/0)?$/.test(payload.p)) return null;
       return {
         mode: String(payload?.o || '').toLowerCase() === 'replace' ? 'snapshot' : 'delta',
         text: payload.v.slice(0, MAX_RESPONSE_TEXT_CHARS),
+        messageId: null,
       };
+    }
+
+    if (typeof payload?.v === 'string' && !payload?.p) {
+      return {
+        mode: 'delta',
+        text: payload.v.slice(0, MAX_RESPONSE_TEXT_CHARS),
+        messageId: null,
+      };
+    }
+
+    if (
+      String(payload?.o || '').toLowerCase() === 'patch' &&
+      Array.isArray(payload?.v)
+    ) {
+      const textParts = [];
+      for (const patch of payload.v) {
+        const extracted = extractAssistantResponseText(patch);
+        if (extracted?.text) textParts.push(extracted);
+      }
+      if (textParts.length) {
+        return {
+          mode: textParts.some(item => item.mode === 'snapshot') ? 'snapshot' : 'delta',
+          text: textParts.map(item => item.text).join('').slice(0, MAX_RESPONSE_TEXT_CHARS),
+          messageId: textParts.find(item => item.messageId)?.messageId || null,
+        };
+      }
     }
 
     return null;
@@ -263,11 +289,19 @@
 
       const extracted = extractAssistantResponseText(parsed);
       if (extracted?.text) {
-        if (extracted.mode === 'snapshot') {
+        if (
+          extracted.mode === 'snapshot' &&
+          extracted.messageId &&
+          responseState.messageId &&
+          extracted.messageId !== responseState.messageId
+        ) {
+          responseState.text = extracted.text;
+        } else if (extracted.mode === 'snapshot') {
           responseState.text = extracted.text;
         } else {
           responseState.text = (responseState.text + extracted.text).slice(0, MAX_RESPONSE_TEXT_CHARS);
         }
+        if (extracted.messageId) responseState.messageId = extracted.messageId;
       }
 
       const classification = classifyPayload(parsed);
@@ -287,7 +321,7 @@
       let chunkCount = 0;
       let buffer = '';
       let stallReported = false;
-      const responseState = {text: ''};
+      const responseState = {text: '', messageId: null};
 
       try {
         const reader = response.body.getReader();

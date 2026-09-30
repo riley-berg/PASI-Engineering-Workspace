@@ -38,7 +38,7 @@ def test_cdp_network_authority_contract():
     assert "form.requestSubmit" not in controller
     assert "nativeMouseActivate" not in controller
     assert "sendCandidatesForComposer" not in controller
-    assert "dom_fallback" in controller
+    assert "dom_fallback" not in controller
 
     for source in (cdp, extension / "src" / "background.js"):
         result = subprocess.run(

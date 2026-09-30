@@ -341,9 +341,14 @@
         const composerScore = (element) => {
           if (!visible(element)) return -1;
           const tag = String(element.tagName || '').toUpperCase();
-          const preferred = element.isContentEditable === true || tag === 'TEXTAREA' || element.getAttribute?.('role') === 'textbox';
+          const role = String(element.getAttribute?.('role') || '').toLowerCase();
+          const baseScore = element.isContentEditable === true || tag === 'TEXTAREA'
+            ? 100
+            : role === 'textbox'
+              ? 80
+              : 10;
           const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(metadata(element));
-          return (preferred ? 100 : 10) + (semantic ? 25 : 0);
+          return baseScore + (semantic ? 25 : 0);
         };
 
         const active = document.activeElement;

@@ -1723,6 +1723,7 @@
     // verification and diagnostics, but it must never block durable completion.
     const body = {
       operation_id: operationId,
+      controller_id: CONTROLLER_INSTANCE_ID,
       chat_url: chatUrl(),
       response_text: responseText.slice(0, MAX_RESPONSE_TEXT_CHARS),
       response_text_available: typeof responseText === 'string' && Boolean(responseText.trim()),

@@ -516,6 +516,39 @@
       return {bound: true};
     }
 
+    async function interruptOperation(tabId, operationId, controllerId, reason = 'NETWORK_STREAM_DISCONNECTED') {
+      const state = tabs.get(tabId);
+      if (!state?.binding) return {interrupted: 0, reason: 'no_binding'};
+      if (state.binding.operationId !== String(operationId)) return {interrupted: 0, reason: 'different_operation'};
+      if (controllerId != null && state.binding.controllerId && state.binding.controllerId !== String(controllerId)) {
+        return {interrupted: 0, reason: 'different_controller'};
+      }
+
+      let interrupted = 0;
+      for (const [requestId, correlation] of requests.entries()) {
+        if (
+          correlation.tabId !== tabId ||
+          correlation.operationId !== String(operationId) ||
+          correlation.controllerId !== state.binding.controllerId
+        ) continue;
+
+        correlation.interrupted = true;
+        interrupted += 1;
+        emitLifecycle(correlation, {
+          eventType: 'FAILED',
+          reason: String(reason || 'NETWORK_STREAM_DISCONNECTED').slice(0, 200),
+          classification: 'retryable_transport_failure',
+          telemetry: {controlledInterrupt: true}
+        });
+        await sendCommand(tabId, 'Fetch.failRequest', {
+          requestId,
+          errorReason: 'Aborted'
+        }).catch(() => undefined);
+        requests.delete(requestId);
+      }
+      return {interrupted, reason: interrupted ? null : 'no_active_request'};
+    }
+
     async function replayResponse(source, params, bodyBytes) {
       const headers = Array.isArray(params.responseHeaders)
         ? params.responseHeaders.map((header) => ({name: String(header.name), value: String(header.value)}))
@@ -709,13 +742,15 @@
           });
         }
       } catch (error) {
-        emitLifecycle(correlation, {
-          eventType: 'FAILED',
-          reason: 'NETWORK_RESPONSE_CAPTURE_FAILED',
-          classification: 'retryable_transport_failure',
-          telemetry: {errorMessage: String(error?.message || error).slice(0, 500)}
-        });
-        await sendCommand(tabId, 'Fetch.failRequest', {requestId: params.requestId, errorReason: 'Failed'}).catch(() => undefined);
+        if (!correlation.interrupted) {
+          emitLifecycle(correlation, {
+            eventType: 'FAILED',
+            reason: 'NETWORK_RESPONSE_CAPTURE_FAILED',
+            classification: 'retryable_transport_failure',
+            telemetry: {errorMessage: String(error?.message || error).slice(0, 500)}
+          });
+          await sendCommand(tabId, 'Fetch.failRequest', {requestId: params.requestId, errorReason: 'Failed'}).catch(() => undefined);
+        }
       } finally {
         requests.delete(params.requestId);
       }
@@ -761,6 +796,7 @@
       bindOperation,
       submitOperation,
       unbindOperation,
+      interruptOperation,
       handlePaused,
       currentBinding,
       health() {

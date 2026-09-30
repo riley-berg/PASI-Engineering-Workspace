@@ -2,10 +2,12 @@ importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.j
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
+const OPERATION_DISPATCH_ERROR = 'PASI_NATIVE: controller dispatch unavailable';
 let STALE_MS = 45 * 1000;
 const CONTROLLER_LEASE_KEY = 'pasi:controller-lease';
 const CONTROLLER_LEASE_MS = 10 * 1000;
 let controllerClaimTail = Promise.resolve();
+let operationDispatchTail = Promise.resolve();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 
@@ -80,6 +82,49 @@ function serializeControllerClaim(task) {
   const next = controllerClaimTail.then(task, task);
   controllerClaimTail = next.catch(() => undefined);
   return next;
+}
+
+function serializeOperationDispatch(task) {
+  const next = operationDispatchTail.then(task, task);
+  operationDispatchTail = next.catch(() => undefined);
+  return next;
+}
+
+async function dispatchNextOperationForController(tabId, controllerId) {
+  if (typeof tabId !== 'number' || !controllerId) return false;
+  return serializeOperationDispatch(async () => {
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch (_) {
+      return false;
+    }
+    const url = String(tab?.url || '');
+    if (!/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(url)) return false;
+
+    const payload = await bridgeJson(
+      '/next-operation?controller_id=' + encodeURIComponent(controllerId)
+    );
+    const operation = payload?.operation;
+    if (!operation || !operation.operation_id) return false;
+
+    try {
+      const result = await chrome.tabs.sendMessage(tabId, {
+        type: 'pasi-dispatch-operation',
+        operation,
+        controller_id: controllerId
+      });
+      if (result?.accepted === true) return true;
+    } catch (_) {}
+
+    await bridgeFetch('/chat/failed', 'POST', {
+      operation_id: operation.operation_id,
+      controller_id: controllerId,
+      failure_source: 'controller',
+      error: OPERATION_DISPATCH_ERROR
+    }, 10000);
+    return false;
+  });
 }
 
 const BRIDGE_ROUTES = new Set([
@@ -183,6 +228,31 @@ async function bridgeJson(path) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'pasi-controller-ready') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+    const ready = message?.ready !== false;
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      !controllerId ||
+      controllerId.length > 200 ||
+      !ready
+    ) {
+      sendResponse({ ok: true, accepted: false, ready: false, controller_id: controllerId || null });
+      return undefined;
+    }
+    sendResponse({
+      ok: true,
+      accepted: false,
+      ready: true,
+      controller_id: controllerId
+    });
+    void dispatchNextOperationForController(tabId, controllerId);
+    return undefined;
+  }
+
   if (message?.type === 'pasi-network-bind-operation') {
     const senderUrl = String(sender?.url || '');
     const tabId = sender?.tab?.id;
@@ -428,9 +498,8 @@ async function injectExistingChatTabs() {
 async function inspect() {
   await injectExistingChatTabs();
 
-  const status = await bridgeJson('/status');
   const payload = await bridgeJson('/browser/observation');
-  if (!status || !payload) return;
+  if (!payload) return;
   const health = healthData(payload);
   if (!health || health.data.auth_required === true) return;
 
@@ -445,7 +514,7 @@ async function inspect() {
   const matchingTab = tabs.find((tab) => sameChatConversationUrl(tab.url, targetChatUrl));
   if (matchingTab && typeof matchingTab.id === 'number') {
     try {
-      await chrome.tabs.sendMessage(matchingTab.id, { type: 'pasi-health-ping' });
+      await chrome.tabs.sendMessage(matchingTab.id, { type: 'pasi-controller-ready', source: 'watchdog' });
     } catch (_) {
       // Existing-tab injection will be retried on the next watchdog pass.
     }

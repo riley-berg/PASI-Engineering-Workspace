@@ -82,7 +82,15 @@ async function cdpNetworkObservation(event) {
 
     if (completion?.ok) {
       cdpOperationTimings.delete(operationId);
-      void dispatchNextOperationForController(event.tabId, controllerId);
+      try {
+        const completedPayload = JSON.parse(completion.text);
+        const next = completedPayload?.next_operation;
+        if (next?.operation_id) {
+          void serializeOperationDispatch(() =>
+            dispatchOperationForController(event.tabId, controllerId, next)
+          );
+        }
+      } catch (_) {}
       return;
     }
 

@@ -36,6 +36,11 @@ def test_cdp_network_authority_contract():
     assert "pasi-cdp-submit-operation" in controller
     assert "submitPrompt(" not in controller
     assert "pasi-controller-ready" in background
+    assert "executeNewChatOperation" in background
+    assert "operation.operation_type === 'new_chat'" in background
+    assert "claim_next: false" in background
+    assert "async function newChat" not in controller
+    assert "case 'new_chat'" not in controller
     assert "pasi-dispatch-operation" in background
     assert "chrome.alarms.onAlarm" in background
     assert "function poll()" not in controller

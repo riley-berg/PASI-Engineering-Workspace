@@ -288,13 +288,22 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
       response_text: '',
       response_text_available: false,
       ack_only: true,
-      claim_next: false
+      claim_next: true
     }, 10000);
     if (!completion.ok) {
       throw new Error(
         'PASI_NATIVE: new chat completion failed: HTTP ' + String(completion.status || 0)
       );
     }
+    try {
+      const payload = JSON.parse(completion.text);
+      const next = payload?.next_operation;
+      if (next?.operation_id) {
+        void serializeOperationDispatch(() =>
+          dispatchOperationForController(tabId, controllerId, next)
+        );
+      }
+    } catch (_) {}
     return true;
   } catch (error) {
     const failure = String(error?.message || error).slice(0, 500);
@@ -557,12 +566,34 @@ function controllerIdForTab(tabId) {
   return 'cdp-tab:' + String(tabId);
 }
 
+async function reportWorkerHealth(tab) {
+  const tabId = tab?.id;
+  if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return;
+  const binding = cdpNetworkController?.currentBinding?.(tabId);
+  await bridgeFetch('/browser/observation', 'POST', {
+    observation: {
+      schema_version: 'pasi-native-chromium-v2',
+      captured_at: new Date().toISOString(),
+      data: {
+        kind: 'chatgpt_health',
+        controller_version: 'cdp-worker-v1',
+        chat_url: String(tab.url || ''),
+        active_operation_id: binding?.operationId || null,
+        page_visible: tab.active === true,
+        native_controller: true,
+        network_authority: true
+      }
+    }
+  }, 5000);
+}
+
 async function attachAndDispatchTab(tab) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return false;
   if (!cdpNetworkController?.attachTab) return false;
   try {
     await cdpNetworkController.attachTab(tabId);
+    await reportWorkerHealth(tab);
     return await dispatchNextOperationForController(tabId, controllerIdForTab(tabId));
   } catch (_) {
     return false;

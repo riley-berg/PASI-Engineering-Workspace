@@ -1,4 +1,4 @@
-importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js");
+importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js", "cdp-network-controller.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
@@ -8,6 +8,67 @@ const CONTROLLER_LEASE_MS = 10 * 1000;
 let controllerClaimTail = Promise.resolve();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
+
+function cdpNetworkObservation(event) {
+  const terminal = ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(event?.eventType);
+  const kind = event?.eventType === 'COMPLETED'
+    ? 'chatgpt_network_response'
+    : 'chatgpt_network_lifecycle';
+  const observation = {
+    schema_version: 'pasi-network-cdp-v1',
+    captured_at: new Date().toISOString(),
+    data: {
+      kind,
+      network_source: 'cdp_fetch',
+      active_operation_id: event?.operationId || null,
+      controller_id: event?.controllerId || null,
+      request_id: event?.requestId || null,
+      tab_id: Number.isInteger(event?.tabId) ? event.tabId : null,
+      request_url: typeof event?.requestUrl === 'string' ? event.requestUrl : null,
+      event_type: event?.eventType || null,
+      reason: event?.reason || null,
+      classification: event?.classification || null,
+      response_text: typeof event?.responseText === 'string' ? event.responseText : '',
+      response_text_available: typeof event?.responseText === 'string' && Boolean(event.responseText.trim()),
+      assistant_message_id: event?.assistantMessageId || null,
+      telemetry: event?.telemetry && typeof event.telemetry === 'object' ? event.telemetry : {},
+      network_terminal: terminal
+    }
+  };
+
+  void bridgeFetch('/browser/observation', 'POST', { observation }, 10000);
+
+  if (
+    terminal &&
+    event?.eventType !== 'COMPLETED' &&
+    typeof event?.operationId === 'string' &&
+    event.operationId &&
+    typeof event?.controllerId === 'string' &&
+    event.controllerId
+  ) {
+    const error = 'PASI_CDP: ' + String(event.reason || event.classification || 'NETWORK_FAILURE');
+    void bridgeFetch('/chat/failed', 'POST', {
+      operation_id: event.operationId,
+      controller_id: event.controllerId,
+      failure_source: 'network',
+      error,
+      recovery_context: {
+        network_request_id: String(event.requestId || '').slice(0, 200),
+        network_classification: String(event.classification || '').slice(0, 120),
+        network_reason: String(event.reason || '').slice(0, 200)
+      }
+    }, 10000);
+  }
+}
+
+const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
+  debuggerApi: chrome.debugger,
+  onEvent: cdpNetworkObservation
+});
+if (cdpNetworkController) {
+  cdpNetworkController.install();
+}
+
 
 if (chrome.sidePanel?.setPanelBehavior) {
   chrome.sidePanel
@@ -136,22 +197,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
 
-    chrome.scripting?.executeScript({
-      target: { tabId },
-      world: 'MAIN',
-      func: (value) => {
-        const interceptor = globalThis.__PASI_NETWORK_INTERCEPTOR__;
-        if (!interceptor || typeof interceptor.bindOperation !== 'function') return false;
-        interceptor.bindOperation(value);
-        return true;
-      },
-      args: [operationId]
-    }).then((results) => {
-      const bound = Array.isArray(results) && results.some((entry) => entry?.result === true);
-      sendResponse({ ok: bound, bound });
-    }).catch(() => {
+    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+    if (!controllerId || controllerId.length > 200) {
       sendResponse({ ok: false, bound: false });
-    });
+      return undefined;
+    }
+
+    if (operationId === null) {
+      cdpNetworkController?.unbindOperation?.(tabId, null, controllerId)
+        .then((result) => sendResponse({ ok: true, bound: result?.bound === true }))
+        .catch(() => sendResponse({ ok: false, bound: false }));
+      return true;
+    }
+
+    bridgeFetch('/operation?operation_id=' + encodeURIComponent(operationId))
+      .then((response) => {
+        if (!response.ok) throw new Error('operation lookup failed');
+        let operation;
+        try {
+          operation = JSON.parse(response.text)?.operation;
+        } catch (_) {
+          throw new Error('operation lookup was invalid');
+        }
+        if (!operation || operation.operation_id !== operationId) throw new Error('operation not found');
+        if (operation.controller_id !== controllerId) throw new Error('operation controller ownership conflict');
+        return cdpNetworkController?.bindOperation?.({
+          tabId,
+          operationId,
+          controllerId,
+          prompt: '[PASI_OPERATION ' + operationId + ']\\n' + String(operation.prompt || ''),
+          completionMarkers: Array.isArray(operation.completion_markers) ? operation.completion_markers : [],
+          chatUrl: typeof operation.chat_url === 'string' ? operation.chat_url : null
+        });
+      })
+      .then((result) => {
+        const bound = result?.bound === true;
+        sendResponse({ ok: bound, bound });
+      })
+      .catch(() => {
+        sendResponse({ ok: false, bound: false });
+      });
     return true;
   }
 
@@ -290,16 +375,6 @@ async function injectExistingChatTabs() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
-        world: 'MAIN',
-        files: ['src/network-interceptor.js']
-      });
-    } catch (_) {
-      // Retry the interceptor independently from the DOM controller.
-    }
-
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
         files: [
           'src/timeout-config.js',
           'src/detectors.js',
@@ -375,6 +450,12 @@ chrome.runtime.onStartup.addListener(() => {
 
 void ensureWatchdogAlarm();
 void injectExistingChatTabs();
+
+if (chrome.tabs?.onRemoved) {
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void cdpNetworkController?.detachTab?.(tabId);
+  });
+}
 
 if (chrome.sidePanel?.setPanelBehavior) {
   chrome.sidePanel

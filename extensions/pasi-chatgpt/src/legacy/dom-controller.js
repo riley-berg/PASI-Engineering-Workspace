@@ -588,30 +588,6 @@
     return { head: text.slice(0, 80), tail: text.slice(-80) };
   }
 
-  // returns 'match' | 'new_unmatched' | null
-  function classifyNewUserMessages(nodes, snapshot, head, tail, textOf) {
-    let unmatched = false;
-    for (const node of nodes) {
-      const key = node.getAttribute?.('data-message-id');
-      const known = key ? snapshot.keys.has(key) : snapshot.nodes.has(node);
-      if (known) continue;
-      const text = normalize(textOf(node));
-      if ((head && text.includes(head)) || (tail && text.includes(tail))) return 'match';
-      unmatched = true;
-    }
-    return unmatched ? 'new_unmatched' : null;
-  }
-
-  function countNewUserMessages(nodes, snapshot) {
-    let count = 0;
-    for (const node of nodes) {
-      const key = node.getAttribute?.('data-message-id');
-      const known = key ? snapshot.keys.has(key) : snapshot.nodes.has(node);
-      if (!known) count += 1;
-    }
-    return count;
-  }
-
   function snapshotAssistantMessages() {
     const nodes = assistantMessages();
     const texts = new Set();
@@ -1189,13 +1165,6 @@
         composed: true
       }));
     }
-  }
-
-  async function ensurePromptSubmissionReady() {
-    if (authRequired()) throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
-    if (contextExhausted()) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-    if (usageLimited()) throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-    await ensureThinkingBestEffort();
   }
 
   function freshCompletionHandoff(operation) {
@@ -1966,7 +1935,6 @@
       messageText,
       extractAssistant,
       fingerprint,
-      composerContainsPrompt,
       userMessages,
       assistantMessages,
       snapshotAssistantMessages,
@@ -1975,7 +1943,6 @@
       operationPrompt,
       findNewChatControl,
       detectorState,
-      submitPrompt,
       waitForResponse
     });
   } else {

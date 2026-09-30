@@ -240,6 +240,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === 'pasi-cdp-submit-operation') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const operationId = message?.operation_id == null ? '' : String(message.operation_id).trim();
+    const controllerId = message?.controller_id == null ? '' : String(message.controller_id).trim();
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      !operationId ||
+      operationId.length > 200 ||
+      !controllerId ||
+      controllerId.length > 200
+    ) {
+      sendResponse({ok: false, submitted: false});
+      return undefined;
+    }
+
+    const binding = cdpNetworkController?.currentBinding?.(tabId);
+    if (
+      !binding ||
+      binding.operationId !== operationId ||
+      binding.controllerId !== controllerId
+    ) {
+      sendResponse({ok: false, submitted: false});
+      return undefined;
+    }
+
+    cdpNetworkController.submitOperation(tabId, operationId, controllerId)
+      .then((result) => sendResponse({ok: result?.submitted === true, ...result}))
+      .catch((error) => sendResponse({
+        ok: false,
+        submitted: false,
+        error: String(error?.message || error).slice(0, 500)
+      }));
+    return true;
+  }
+
   if (message?.type === 'pasi-controller-claim') {
     const tabId = sender?.tab?.id;
     const rawControllerId = message?.controller_id;

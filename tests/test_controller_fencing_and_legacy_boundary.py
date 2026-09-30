@@ -94,6 +94,22 @@ def test_next_operation_claim_records_controller_owner(tmp_path):
     assert claimed["controller_id"] == "controller-a"
 
 
+def test_next_operation_does_not_skip_past_active_operation(tmp_path):
+    bridge = _bridge(tmp_path)
+    first = bridge.queue_operation("prompt", "first")
+    second = bridge.queue_operation("prompt", "second")
+
+    claimed = bridge.claim_next_operation("controller-a")
+
+    assert claimed is not None
+    assert claimed["operation_id"] == first.operation_id
+    assert bridge.claim_next_operation("controller-a") is None
+
+    second_state = bridge.get_operation(second.operation_id)
+    assert second_state is not None
+    assert second_state["status"] == "queued"
+
+
 def test_legacy_dom_controller_isolated_from_active_entry_points():
     root = Path(__file__).resolve().parents[1]
     extension = root / "extensions" / "pasi-chatgpt"

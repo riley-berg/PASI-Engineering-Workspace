@@ -170,6 +170,22 @@ test('extracts assistant response from direct, patch-envelope, and delta SSE pay
   const delta = source.extractAssistantResponseText({delta: 'response'});
   assert.equal(delta.mode, 'delta');
   assert.equal(delta.text, 'response');
+
+  const implicit = source.extractAssistantResponseText({v: 'implicit'});
+  assert.equal(implicit.mode, 'delta');
+  assert.equal(implicit.text, 'implicit');
+
+  const batch = source.extractAssistantResponseText({
+    p: '',
+    o: 'patch',
+    v: [
+      {p: '/message/content/parts/0', o: 'append', v: 'batch-1'},
+      {p: '/message/status', o: 'replace', v: 'finished_successfully'},
+      {p: '/message/content/parts/0', o: 'append', v: 'batch-2'}
+    ]
+  });
+  assert.equal(batch.mode, 'delta');
+  assert.equal(batch.text, 'batch-1batch-2');
 });
 
 test('emits correlated response text on terminal network completion', async () => {
@@ -177,8 +193,11 @@ test('emits correlated response text on terminal network completion', async () =
   const target = {
     fetch: async () =>
       fakeResponse([
-        'data: {"p":"","o":"add","v":{"message":{"author":{"role":"assistant"},"content":{"parts":["NETWORK_CORRELATION_"]}}}}\n\n',
-        'data: {"p":"/message/content/parts/0","o":"append","v":"OK_2026"}\n\n',
+        'data: {"p":"","o":"add","v":{"message":{"id":"old-assistant","author":{"role":"assistant"},"content":{"parts":["STALE_RESPONSE"]}}}}\n\n',
+        'data: {"p":"","o":"add","v":{"message":{"id":"current-assistant","author":{"role":"assistant"},"content":{"parts":["NETWORK_CORRELATION_"]}}}}\n\n',
+        'data: {"p":"/message/content/parts/0","o":"append","v":"OK"}\n\n',
+        'data: {"v":"_2026"}\n\n',
+        'data: {"p":"","o":"patch","v":[{"p":"/message/content/parts/0","o":"append","v":"_BATCH"},{"p":"/message/status","o":"replace","v":"finished_successfully"}]}\n\n',
         'data: [DONE]\n\n'
       ]),
   };
@@ -200,7 +219,7 @@ test('emits correlated response text on terminal network completion', async () =
   assert.equal(events[0].operationId, 'op-network-response');
   assert.equal(events.at(-1).eventType, 'COMPLETED');
   assert.equal(events.at(-1).operationId, 'op-network-response');
-  assert.equal(events.at(-1).responseText, 'NETWORK_CORRELATION_OK_2026');
+  assert.equal(events.at(-1).responseText, 'NETWORK_CORRELATION_OK_2026_BATCH');
 });
 
 test('observes a generation stream without consuming the original response', async () => {

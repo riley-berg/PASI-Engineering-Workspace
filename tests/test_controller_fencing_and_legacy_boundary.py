@@ -108,7 +108,7 @@ def test_legacy_dom_controller_isolated_from_active_entry_points():
 
     assert "document.querySelector" in legacy_text
     assert "MutationObserver" in legacy_text
-    assert "Fetch.requestPaused" in cdp_text
+    assert "debuggerApi.onEvent.addListener(handlePaused)" in cdp_text
     assert "Fetch.takeResponseBodyAsStream" in cdp_text
     assert "MutationObserver" not in cdp_text
     assert "document.querySelector" not in cdp_text

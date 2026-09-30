@@ -42,7 +42,6 @@
   const MAX_RECOVERY_CONTEXT_REPOSITORY_CHARS = 200;
   let activeOperationId = null;
   let processing = false;
-  let reasoningMode = null;
   let githubAttached = false;
   let githubRepository = null;
   let lastKnownChatUrl = null;
@@ -529,7 +528,6 @@
       exhausted: contextExhausted(),
       users: userMessages().length,
       assistants: assistantMessages().length,
-      mode: reasoningMode,
       buttons
     };
   }
@@ -547,7 +545,6 @@
 
   function recoveryContext() {
     const context = {};
-    if (reasoningMode === 'thinking') context.reasoning_mode = 'thinking';
     if (
       githubAttached &&
       typeof githubRepository === 'string' &&
@@ -628,7 +625,6 @@
         if (!processing) {
           githubAttached = false;
           githubRepository = null;
-          reasoningMode = null;
         }
         lastKnownChatUrl = currentUrl;
       }
@@ -637,7 +633,6 @@
       const exhausted = detected.context_exhausted === true;
       const limited = !exhausted && detected.usage_limited === true;
       const auth = detected.auth_required === true;
-      const thinking = thinkingEnabled();
       const composerPresent = Boolean(composer());
 
       await reportObservation('chatgpt_health', {
@@ -646,7 +641,6 @@
         auth_required: auth,
         conversation_context_exhausted: exhausted,
         thinking_enabled: thinking,
-        thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
         page_visible: document.visibilityState !== 'hidden',
         composer_present: composerPresent,
         native_controller: true,
@@ -662,8 +656,6 @@
           chat_exhausted: exhausted,
           provider_usage_limited: limited,
           github_attached: githubAttached,
-          reasoning_mode: reasoningMode,
-          reasoning_capability: reasoningMode === 'unavailable' ? 'unavailable' : (thinking === true ? 'available' : 'unknown'),
           conversation_signature: conversationSignature(),
           active_operation_id: activeOperationId,
           native_controller: true
@@ -1083,10 +1075,6 @@
               chat_exhausted: contextExhausted(),
               provider_usage_limited: usageLimited(),
               github_attached: githubAttached,
-              reasoning_mode: reasoningMode,
-              reasoning_capability: reasoningMode === 'unavailable'
-                ? 'unavailable'
-                : (thinkingEnabled() === true ? 'available' : 'unknown'),
               conversation_signature: conversationSignature(),
               active_operation_id: operationId,
               native_controller: true
@@ -1172,7 +1160,6 @@
       operation_type: operation.operation_type,
       started_at: new Date().toISOString(),
       chat_url: chatUrl(),
-      reasoning_mode: reasoningMode,
       github_attached: githubAttached,
       github_repository: githubRepository
     };
@@ -1181,15 +1168,10 @@
     let chainedOperation = null;
     try {
       switch (operation.operation_type) {
-        case 'select_reasoning': await ensureThinkingBestEffort(); break;
         case 'attach_github': await attachGithub(operation.prompt); break;
         case 'prompt': {
           const fastHandoff = freshCompletionHandoff(operation);
           await restoreRecoveryContext(operation.recovery_context);
-          if (!fastHandoff || (reasoningMode !== 'thinking' && reasoningMode !== 'unavailable')) {
-            await ensureThinkingBestEffort();
-          }
-
           const promptText = operationPrompt(operation);
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
@@ -1197,7 +1179,6 @@
               operation_type: operation.operation_type,
               started_at: new Date().toISOString(),
               chat_url: chatUrl(),
-              reasoning_mode: reasoningMode,
               github_attached: githubAttached,
               github_repository: githubRepository
             };

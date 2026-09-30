@@ -1952,6 +1952,17 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        claim_next = payload.get("claim_next", True)
+        if not isinstance(claim_next, bool):
+            self._send_json(
+                {
+                    "error":
+                        "claim_next must be a boolean."
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         if response_text is not None and len(response_text) > MAX_RESPONSE_TEXT_CHARS:
             self._send_json(
                 {
@@ -2086,14 +2097,24 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             response_text_available = True
 
         try:
-            operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
-                operation_id=operation_id,
-                chat_url=chat_url,
-                response_text=response_text,
-                response_text_available=response_text_available,
-                timing=normalized_timing,
-                controller_id=controller_id.strip(),
-            )
+            if claim_next:
+                operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                    controller_id=controller_id.strip(),
+                )
+            else:
+                operation = self.bridge_state.complete_operation(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                )
+                chained_operation = None
         except InvalidOperationTransition:
             # Completion acknowledgements are retried by the browser controller.
             # Once an operation is durably completed, return its persisted state

@@ -1590,6 +1590,50 @@
     });
   }
 
+  async function submitCdpOperation(operationId) {
+    if (!globalThis.chrome?.runtime?.sendMessage) {
+      throw new Error('PASI_NATIVE: extension messaging API unavailable');
+    }
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        reject(new Error('PASI_NATIVE: CDP submit operation timed out'));
+      }, 5000);
+
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'pasi-cdp-submit-operation',
+            operation_id: String(operationId),
+            controller_id: CONTROLLER_INSTANCE_ID
+          },
+          (response) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            const runtimeError = chrome.runtime.lastError;
+            if (runtimeError) {
+              reject(new Error('PASI_NATIVE: CDP submit messaging failed: ' + runtimeError.message));
+              return;
+            }
+            if (!response?.submitted) {
+              reject(new Error(String(response?.error || 'PASI_NATIVE: CDP submit operation failed')));
+              return;
+            }
+            resolve(response);
+          }
+        );
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        reject(error);
+      }
+    });
+  }
+
   async function cdpOperationEvidence(operationId, completionMarkers) {
     if (!operationId) return {status: 'unavailable'};
     try {
@@ -1867,24 +1911,8 @@
             if (contextExhausted()) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
             if (usageLimited()) throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
           }
-          // A just-completed chained operation already proved generation ended.
-          // Take the ready composer synchronously on this hot path, with the
-          // existing event-driven wait as a bounded fallback if the UI is one
-          // render behind.
-          const immediateBox = fastHandoff ? (() => {
-            const current = composer();
-            return current && !generating() ? current : null;
-          })() : null;
-          const box = immediateBox || await waitUntil(() => {
-            const current = composer();
-            return current && !generating() ? current : null;
-          }, PREVIOUS_RESPONSE_WAIT_MS, DOM_POLL_MS);
-          if (!box) throw new Error(generating() ? 'PASI_NATIVE: previous response still generating' : 'PASI_NATIVE: composer unavailable');
-          const baseline = typeof operation.__pasi_baseline_fingerprint === 'string'
-            ? operation.__pasi_baseline_fingerprint
-            : fingerprint();
+
           const promptText = operationPrompt(operation);
-          const assistantSnapshot = snapshotAssistantMessages();
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
               operation_id: operation.operation_id,
@@ -1896,66 +1924,59 @@
               github_repository: githubRepository
             };
           }
-          activeRecoveryState.baseline = baseline;
+          activeRecoveryState.baseline = '';
           localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
-          const submission = await submitPrompt(promptText, {
-            fastPath: fastHandoff,
-            readyBox: box
-          });
-          const browserTiming = { ...(submission.timing || {}) };
-          const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
+
+          // Prompt submission no longer touches the ChatGPT DOM. The CDP
+          // control plane focuses a generic editable target, inserts the exact
+          // operation prompt through Chromium Input, and dispatches Enter.
+          // Actual submission is proved only when Fetch matches the resulting
+          // generation POST to this operation.
+          const submission = await submitCdpOperation(operation.operation_id);
+          const browserTiming = {
+            injected_at_ms: Number(submission.submittedAtMs || Date.now()),
+            ack_at_ms: Number(submission.enterDispatchedAtMs || Date.now())
+          };
           if (
-            Number.isFinite(previousCompletionAckAtMs) &&
-            typeof browserTiming.injected_at_ms === 'number' &&
+            Number.isFinite(Number(operation.__pasi_completion_ack_at_ms)) &&
             Number.isFinite(browserTiming.injected_at_ms)
           ) {
             browserTiming.completion_to_prompt_injected_ms = Math.max(
               0,
-              browserTiming.injected_at_ms - previousCompletionAckAtMs
+              browserTiming.injected_at_ms - Number(operation.__pasi_completion_ack_at_ms)
             );
           }
-          const previousResponseCompletedAtMs = Number(
-            operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms
-          );
           if (
-            Number.isFinite(previousResponseCompletedAtMs) &&
-            typeof browserTiming.injected_at_ms === 'number' &&
+            Number.isFinite(Number(operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms)) &&
             Number.isFinite(browserTiming.injected_at_ms)
           ) {
             browserTiming.response_completed_to_prompt_injected_ms = Math.max(
               0,
-              browserTiming.injected_at_ms - previousResponseCompletedAtMs
+              browserTiming.injected_at_ms - Number(operation.predecessor_completed_at_ms ?? operation.__pasi_response_completed_at_ms)
             );
           }
+
           void reportObservation('prompt_injected', {
             operation_id: operation.operation_id,
             captured_at: new Date().toISOString(),
-            submission_via: submission.via,
-            submission_attempt: submission.attempt,
-            submission_verified: submission.verified,
+            submission_via: 'cdp_input',
+            submission_method: submission.submissionMethod || 'cdp_input',
+            target_kind: submission.targetKind || null,
+            submission_dispatched: true,
+            submission_verified: false,
             timing: browserTiming
           });
-          if (!submission.verified) {
-            void reportObservation('chatgpt_submit_unverified', {
-              operation_id: operation.operation_id,
-              via: submission.via,
-              attempt: submission.attempt
-            });
-          }
-          // CDP Fetch is the authoritative generation boundary. Do not infer
-          // generation start from an existing DOM assistant message: that can
-          // satisfy completion markers from a prior response before this
-          // operation produces any network traffic.
+
           const generationStartMs = Date.now();
           browserTiming.generation_start_ms = generationStartMs;
           armM0RecoveryProbe(operation);
           const response = await waitForResponse(
             operation.operation_id,
-            baseline,
+            '',
             Array.isArray(operation.completion_markers)
               ? operation.completion_markers
               : [],
-            { assistantSnapshot, prompt: promptText }
+            {prompt: promptText}
           );
           browserTiming.completed_at_ms = Date.now();
           const completion = await finishOperation(

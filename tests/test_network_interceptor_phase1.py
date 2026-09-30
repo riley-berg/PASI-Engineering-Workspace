@@ -24,7 +24,7 @@ def test_cdp_network_authority_contract():
     )
     assert '"cdp-network-controller.js"' in background
     assert "chrome.debugger" in background
-    assert "Fetch.requestPaused" in cdp.read_text(encoding="utf-8")
+    assert "debuggerApi.onEvent.addListener(handlePaused)" in cdp.read_text(encoding="utf-8")
     assert "Fetch.takeResponseBodyAsStream" in cdp.read_text(encoding="utf-8")
     assert "Fetch.fulfillRequest" in cdp.read_text(encoding="utf-8")
     assert "requestContainsPrompt" in cdp.read_text(encoding="utf-8")

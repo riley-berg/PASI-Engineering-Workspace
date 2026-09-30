@@ -41,6 +41,7 @@ const BRIDGE_ROUTES = new Set([
   'GET /next-operation'
 ]);
 const BRIDGE_OPERATION_RE = /^\/operation\?operation_id=[^&]{1,200}$/;
+const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}$/;
 
 async function bridgeToken(forceRefresh = false) {
   if (!forceRefresh && cachedBridgeToken) return cachedBridgeToken;
@@ -65,7 +66,10 @@ async function bridgeToken(forceRefresh = false) {
 function allowedBridgeRequest(method, path) {
   const normalized = String(method || 'GET').toUpperCase();
   const value = String(path || '');
-  if (normalized === 'GET' && BRIDGE_OPERATION_RE.test(value)) return true;
+  if (normalized === 'GET' && (
+    BRIDGE_OPERATION_RE.test(value) ||
+    BRIDGE_NEXT_OPERATION_RE.test(value)
+  )) return true;
   return BRIDGE_ROUTES.has(`${normalized} ${value}`);
 }
 
@@ -123,9 +127,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender?.tab?.id;
     const rawOperationId = message?.operation_id;
     const operationId = rawOperationId == null ? null : String(rawOperationId).trim();
+    const rawControllerId = message?.controller_id;
+    const controllerId = rawControllerId == null ? `legacy:${tabId}` : String(rawControllerId).trim();
     if (
       typeof tabId !== 'number' ||
       !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      !controllerId ||
+      controllerId.length > 200 ||
       (operationId !== null && (!operationId || operationId.length > 200))
     ) {
       sendResponse({ ok: false, bound: false });
@@ -161,16 +169,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const stored = await chrome.storage.local.get(CONTROLLER_LEASE_KEY);
       const current = stored?.[CONTROLLER_LEASE_KEY];
       const now = Date.now();
-      const owned = current && current.tabId === tabId && now - Number(current.renewedAt || 0) < CONTROLLER_LEASE_MS;
-      const available = !current || now - Number(current.renewedAt || 0) >= CONTROLLER_LEASE_MS;
+      const currentFresh = Boolean(
+        current &&
+        now - Number(current.renewedAt || 0) < CONTROLLER_LEASE_MS
+      );
+      const owned = Boolean(
+        currentFresh &&
+        current.tabId === tabId &&
+        current.controllerId === controllerId
+      );
+      const available = !current || !currentFresh || current.tabId === tabId;
       if (!owned && !available) {
-        sendResponse({ ok: true, leader: false });
+        sendResponse({ ok: true, leader: false, controller_id: controllerId });
         return;
       }
       await chrome.storage.local.set({
-        [CONTROLLER_LEASE_KEY]: { tabId, renewedAt: now }
+        [CONTROLLER_LEASE_KEY]: { tabId, controllerId, renewedAt: now }
       });
-      sendResponse({ ok: true, leader: true });
+      sendResponse({ ok: true, leader: true, controller_id: controllerId });
     }).catch(() => sendResponse({ ok: false, leader: false }));
     return true;
   }

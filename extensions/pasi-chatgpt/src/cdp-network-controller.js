@@ -347,9 +347,21 @@
         };
 
         const active = document.activeElement;
+        const readValue = (element) => String(
+          element?.value ??
+          element?.innerText ??
+          element?.textContent ??
+          ''
+        ).trim();
+
         if (visible(active) && composerScore(active) >= 100) {
           active.focus();
-          return {focused: true, kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase(), source: 'active'};
+          return {
+            focused: true,
+            kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase(),
+            source: 'active',
+            currentText: readValue(active)
+          };
         }
 
         const candidates = Array.from(document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"], input'));
@@ -367,7 +379,8 @@
         return {
           focused: document.activeElement === target,
           kind: target.isContentEditable ? 'contenteditable' : String(target.tagName || '').toLowerCase(),
-          source: 'semantic_editable'
+          source: 'semantic_editable',
+          currentText: readValue(target)
         };
       })()`;
       const result = await sendCommand(tabId, 'Runtime.evaluate', {
@@ -396,8 +409,14 @@
 
       const submittedAt = now();
       const target = await focusEditableTarget(tabId);
+      const currentText = String(target.currentText || '').trim();
+      if (currentText && currentText !== prompt.trim()) {
+        throw new Error('CDP submit target contains unrelated draft text');
+      }
       const insertedAt = now();
-      await sendCommand(tabId, 'Input.insertText', {text: prompt});
+      if (!currentText) {
+        await sendCommand(tabId, 'Input.insertText', {text: prompt});
+      }
       await sendCommand(tabId, 'Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Enter',

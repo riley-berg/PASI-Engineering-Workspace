@@ -70,6 +70,10 @@ RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
 RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
+    "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
+    "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+    "PASI_CDP: CDP_DEBUGGER_DETACHED",
+    "PASI_CDP: NETWORK_STREAM_DISCONNECTED",
     "Could not find ChatGPT composer.",
     "Composer disappeared before submission.",
     "Could not find ChatGPT send button.",
@@ -479,6 +483,16 @@ class BridgeState:
             if current is None:
                 return None, None
 
+            if (
+                current.get("operation_type") == "prompt"
+                and current.get("network_response_authoritative") is True
+                and current.get("response_text_available") is True
+                and isinstance(current.get("response_text"), str)
+                and current.get("response_text").strip()
+            ):
+                response_text = current.get("response_text")
+                response_text_available = True
+
             if controller_id is not None:
                 owner = current.get("controller_id")
                 if owner is not None and owner != controller_id:
@@ -753,6 +767,11 @@ class BridgeState:
         data = observation.get("data")
         kind = data.get("kind") if isinstance(data, dict) else None
 
+        if schema_version == "pasi-network-cdp-v1" and kind in {
+            "chatgpt_network_lifecycle",
+            "chatgpt_network_response",
+        }:
+            return 120
         if schema_version == "pasi-native-chromium-v2" and kind in {
             "chatgpt_health",
             "chatgpt_state",
@@ -883,23 +902,16 @@ class BridgeState:
         observation: dict[str, Any],
     ) -> None:
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict):
+            return
+
+        kind = data.get("kind")
+        if kind not in {"chatgpt_response", "chatgpt_network_response", "chatgpt_network_lifecycle"}:
             return
 
         operation_id = data.get("active_operation_id")
-        response_text = data.get("response_text")
-        response_text_available = data.get("response_text_available")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return
-        if not isinstance(response_text, str) or len(response_text) > MAX_RESPONSE_TEXT_CHARS:
-            return
-        # Nonblank response text is the persisted evidence. A stale controller
-        # may report the legacy availability flag incorrectly, but that flag
-        # must not discard an already-bound response. Blank text remains
-        # fail-closed.
-        if not response_text.strip():
-            return
-        response_text_available = True
 
         queue = self._load_queue()
         for item in queue:
@@ -907,31 +919,63 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
-            if not completion_markers_satisfied(
-                response_text,
-                item.get("completion_markers"),
-            ):
-                return
-            stored_response = self.state_manager.load_terminal_response(operation_id)
-            current_response = item.get("response_text")
-            if (
-                isinstance(stored_response, str)
-                and stored_response.strip()
-            ) or (
-                item.get("response_text_available") is True
-                and isinstance(current_response, str)
-                and current_response.strip()
-            ):
-                return
 
-            item["response_text"] = response_text
-            item["response_text_available"] = True
-            chat_url = data.get("chat_url")
-            if isinstance(chat_url, str):
-                item["chat_url"] = chat_url
-            item["response_source"] = "browser_observation"
-            item["response_observed_at"] = observation.get("captured_at", time.time())
-            self._save_queue(queue)
+            network_source = data.get("network_source")
+            controller_id = data.get("controller_id")
+            if network_source == "cdp_fetch":
+                if (
+                    isinstance(controller_id, str)
+                    and controller_id.strip()
+                    and item.get("controller_id") != controller_id.strip()
+                ):
+                    return
+                event_type = str(data.get("event_type") or "")
+                item["network_source"] = "cdp_fetch"
+                if isinstance(controller_id, str) and controller_id.strip():
+                    item["network_controller_id"] = controller_id.strip()
+                request_id = data.get("request_id")
+                if isinstance(request_id, str) and request_id:
+                    item["network_request_id"] = request_id[:200]
+                if event_type:
+                    item["network_terminal_event"] = event_type
+                reason = data.get("reason")
+                classification = data.get("classification")
+                if isinstance(reason, str) and reason:
+                    item["network_terminal_reason"] = reason[:200]
+                if isinstance(classification, str) and classification:
+                    item["network_classification"] = classification[:120]
+                if event_type in {"INTERRUPTED", "FAILED"}:
+                    item["network_failure_source"] = "cdp"
+
+            response_text = data.get("response_text")
+            response_verified = (
+                isinstance(response_text, str)
+                and len(response_text) <= MAX_RESPONSE_TEXT_CHARS
+                and bool(response_text.strip())
+                and completion_markers_satisfied(
+                    response_text,
+                    item.get("completion_markers"),
+                )
+            )
+            if response_verified:
+                item["response_text"] = response_text
+                item["response_text_available"] = True
+                item["response_source"] = (
+                    "cdp_fetch_stream"
+                    if network_source == "cdp_fetch"
+                    else "browser_observation"
+                )
+                item["response_observed_at"] = observation.get("captured_at", time.time())
+                if network_source == "cdp_fetch":
+                    item["network_response_authoritative"] = True
+                    assistant_message_id = data.get("assistant_message_id")
+                    if isinstance(assistant_message_id, str) and assistant_message_id:
+                        item["network_assistant_message_id"] = assistant_message_id[:200]
+                chat_url = data.get("chat_url") or data.get("request_url")
+                if isinstance(chat_url, str) and chat_url:
+                    item["chat_url"] = chat_url
+            if network_source == "cdp_fetch" or kind == "chatgpt_response":
+                self._save_queue(queue)
             return
 
     def _repair_response_from_browser_observation(
@@ -943,6 +987,7 @@ class BridgeState:
         operation_id = item.get("operation_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return False
+
         stored_response = self.state_manager.load_terminal_response(operation_id)
         if isinstance(stored_response, str) and stored_response.strip():
             return False
@@ -957,16 +1002,13 @@ class BridgeState:
         observation = self.state_manager.load_browser_response()
         if not isinstance(observation, dict):
             return False
-
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict) or data.get("kind") not in {"chatgpt_response", "chatgpt_network_response"}:
             return False
         if data.get("active_operation_id") != item.get("operation_id"):
             return False
 
         response_text = data.get("response_text")
-        # Nonblank, operation-bound response text is the evidence. Do not let
-        # a stale controller availability flag hide already-captured text.
         if (
             not isinstance(response_text, str)
             or len(response_text) > MAX_RESPONSE_TEXT_CHARS
@@ -980,21 +1022,34 @@ class BridgeState:
 
         item["response_text"] = response_text
         item["response_text_available"] = True
-        chat_url = data.get("chat_url")
+        chat_url = data.get("chat_url") or data.get("request_url")
         if isinstance(chat_url, str):
             item["chat_url"] = chat_url
-        item["response_source"] = "browser_observation"
-        item["response_observed_at"] = observation.get(
-            "captured_at",
-            time.time(),
+        item["response_source"] = (
+            "cdp_fetch_stream"
+            if data.get("network_source") == "cdp_fetch"
+            else "browser_observation"
         )
+        item["network_response_authoritative"] = data.get("network_source") == "cdp_fetch"
+        item["response_observed_at"] = observation.get("captured_at", time.time())
         return True
 
     @staticmethod
     def _retry_class(error: str) -> str:
-        if error.startswith("CHAT_EXHAUSTED:") or error.startswith("PASI_NATIVE: context recovery exhausted:"):
+        if (
+            error.startswith("CHAT_EXHAUSTED:")
+            or error.startswith("PASI_NATIVE: context recovery exhausted:")
+            or error.startswith("PASI_CDP: CONTEXT_EXHAUSTED")
+        ):
             return "context"
-        if error.startswith("PASI_NATIVE: ChatGPT generation timed out") or error.startswith("PASI_NATIVE: response text unavailable"):
+        if (
+            error.startswith("PASI_NATIVE: ChatGPT generation timed out")
+            or error.startswith("PASI_NATIVE: response text unavailable")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
+            or error.startswith("PASI_CDP: NETWORK_STREAM_DISCONNECTED")
+            or error.startswith("PASI_CDP: CDP_DEBUGGER_DETACHED")
+        ):
             return "response"
         return "controller"
 
@@ -1899,6 +1954,15 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if (
+            existing_operation.get("network_response_authoritative") is True
+            and existing_operation.get("response_text_available") is True
+            and isinstance(existing_operation.get("response_text"), str)
+            and existing_operation.get("response_text").strip()
+        ):
+            response_text = existing_operation.get("response_text")
+            response_text_available = True
+
         incoming_response_verified = (
             response_text_available is True
             and isinstance(response_text, str)
@@ -2031,6 +2095,8 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         )
 
         controller_id = payload.get("controller_id")
+        failure_source = payload.get("failure_source", "dom_fallback")
+
 
         error = payload.get(
             "error"
@@ -2059,6 +2125,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
         if current.get("controller_id") != controller_id.strip():
             self._send_json({"error": "Operation is owned by a different controller instance."}, HTTPStatus.CONFLICT)
+            return
+
+        current_network = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if (
+            failure_source == "dom_fallback"
+            and isinstance(current_network, dict)
+            and current_network.get("network_terminal_event")
+        ):
+            self._send_json(
+                {
+                    "operation": current_network,
+                    "suppressed": True,
+                    "reason": "network_authority_already_recorded"
+                }
+            )
             return
 
         if not isinstance(

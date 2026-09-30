@@ -354,3 +354,32 @@ def test_generic_cdp_network_failure_is_transient_and_late_authoritative_respons
     assert completed["status"] == "completed"
     assert completed["response_source"] == "cdp_fetch_stream"
     assert completed["network_response_authoritative"] is True
+
+
+def test_navigation_completion_can_leave_next_operation_queued(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    navigation = bridge.queue_operation(
+        "new_chat",
+        "",
+    )
+    next_operation = bridge.queue_operation(
+        "prompt",
+        "next prompt",
+        completion_markers=["NEXT_OK"],
+    )
+
+    claimed = bridge.claim_operation(navigation.operation_id, "controller-navigation")
+    assert claimed is not None
+
+    completed = bridge.complete_operation(
+        navigation.operation_id,
+        chat_url="https://chatgpt.com/",
+        response_text_available=False,
+    )
+    assert completed is not None
+    assert completed["status"] == "completed"
+
+    queued = bridge.get_operation(next_operation.operation_id, repair_response=False)
+    assert queued is not None
+    assert queued["status"] == "queued"
+

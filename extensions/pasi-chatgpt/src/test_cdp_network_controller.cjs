@@ -77,6 +77,7 @@ test('request-to-task correlation binds the exact POST generation request', asyn
   await controller.handlePaused(
     {tabId: 7},
     'Fetch.requestPaused',
+    'Fetch.requestPaused',
     {
       requestId: 'req-7',
       request: {
@@ -109,6 +110,7 @@ test('response stream is captured before browser continuation and stale snapshot
   await controller.handlePaused(
     {tabId: 8},
     'Fetch.requestPaused',
+    'Fetch.requestPaused',
     {
       requestId: 'req-8',
       request: {
@@ -122,6 +124,7 @@ test('response stream is captured before browser continuation and stale snapshot
 
   await controller.handlePaused(
     {tabId: 8},
+    'Fetch.requestPaused',
     'Fetch.requestPaused',
     {
       requestId: 'req-8',
@@ -162,6 +165,7 @@ test('unmatched generation requests are never assigned to a task', async () => {
   await controller.handlePaused(
     {tabId: 9},
     'Fetch.requestPaused',
+    'Fetch.requestPaused',
     {
       requestId: 'req-wrong',
       request: {
@@ -191,6 +195,7 @@ test('classifies provider failures before response-body correlation', async () =
   await controller.handlePaused(
     {tabId: 10},
     'Fetch.requestPaused',
+    'Fetch.requestPaused',
     {
       requestId: 'req-10',
       request: {
@@ -203,6 +208,7 @@ test('classifies provider failures before response-body correlation', async () =
   await new Promise((resolve) => setImmediate(resolve));
   await controller.handlePaused(
     {tabId: 10},
+    'Fetch.requestPaused',
     'Fetch.requestPaused',
     {
       requestId: 'req-10',

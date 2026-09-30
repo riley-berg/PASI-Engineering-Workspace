@@ -1117,6 +1117,34 @@ class BridgeState:
                 retry_class = self._retry_class(error)
                 count = int(retry_counts.get(retry_class, 0) or 0)
 
+                if retry_class == "context":
+                    if count >= RETRY_BUDGETS[retry_class]:
+                        validate_transition(current_status, "failed")
+                        item["status"] = "failed"
+                        item["error"] = error[:MAX_ERROR_CHARS]
+                        item["failure_reason"] = "context_retry_exhausted"
+                        item["retry_class"] = "context"
+                        item["retry_counts"] = dict(retry_counts)
+                        item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                        item["updated_at"] = time.time()
+                        self._save_queue(queue)
+                        return dict(item)
+
+                    retry_counts = dict(retry_counts)
+                    retry_counts["context"] = count + 1
+                    item["status"] = "failed"
+                    item["error"] = (
+                        "CHAT_EXHAUSTED: explicit network context exhaustion; "
+                        "the runner must prepare a fresh ChatGPT conversation before retrying the task."
+                    )
+                    item["failure_reason"] = "context_exhausted"
+                    item["retry_class"] = "context"
+                    item["retry_counts"] = retry_counts
+                    item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                    item["updated_at"] = time.time()
+                    self._save_queue(queue)
+                    return dict(item)
+
                 if (
                     item.get("operation_type") == "prompt"
                     and item.get("response_text_available") is True

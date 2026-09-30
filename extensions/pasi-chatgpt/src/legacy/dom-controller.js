@@ -1595,10 +1595,6 @@
           if (!fastHandoff || (reasoningMode !== 'thinking' && reasoningMode !== 'unavailable')) {
             await ensureThinkingBestEffort();
           }
-          if (!fastHandoff) {
-            if (contextExhausted()) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-            if (usageLimited()) throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-          }
 
           const promptText = operationPrompt(operation);
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {

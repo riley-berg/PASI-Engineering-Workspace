@@ -220,6 +220,45 @@ async function executePromptOperation(tabId, controllerId, operation) {
   }
 }
 
+async function executeAttachGithubOperation(tabId, controllerId, operation) {
+  if (!operation?.operation_id) return false;
+  try {
+    const repository = String(operation.prompt || '').trim();
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
+      throw new Error('PASI_NATIVE: GitHub repository must be in owner/name form');
+    }
+    const result = await cdpNetworkController?.ensureGithubRepository?.(tabId, repository);
+    if (result?.attached !== true || result.repository !== repository) {
+      throw new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
+    }
+    const completion = await bridgeFetch('/chat/finished', 'POST', {
+      operation_id: String(operation.operation_id),
+      controller_id: String(controllerId),
+      chat_url: String((await chrome.tabs.get(tabId))?.url || ''),
+      response_text: '',
+      response_text_available: false,
+      ack_only: true,
+      claim_next: true
+    }, 10000);
+    if (!completion.ok) throw new Error('PASI_NATIVE: GitHub attachment completion rejected');
+    try {
+      const payload = JSON.parse(completion.text);
+      const next = payload?.next_operation;
+      if (next?.operation_id) {
+        void serializeOperationDispatch(() => dispatchOperationForController(tabId, controllerId, next));
+      }
+    } catch (_) {}
+    return true;
+  } catch (error) {
+    await bridgeFetch('/chat/failed', 'POST', {
+      operation_id: String(operation.operation_id),
+      controller_id: String(controllerId),
+      failure_source: 'controller',
+      error: 'PASI_NATIVE: GitHub attachment failed: ' + String(error?.message || error).slice(0, 500)
+    }, 10000);
+    return false;
+  }
+}
 async function executeNewChatOperation(tabId, controllerId, operation) {
   if (!operation?.operation_id) return false;
   try {
@@ -289,6 +328,10 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 
   if (operation.operation_type === 'prompt') {
     return executePromptOperation(tabId, controllerId, operation);
+  }
+
+  if (operation.operation_type === 'attach_github') {
+    return executeAttachGithubOperation(tabId, controllerId, operation);
   }
 
   if (operation.operation_type === 'select_reasoning') {

@@ -333,16 +333,42 @@
           if (!isEditable(element)) return false;
           try { return element.getClientRects().length > 0; } catch (_) { return false; }
         };
+        const metadata = (element) => [
+          element.getAttribute?.('aria-label'),
+          element.getAttribute?.('placeholder'),
+          element.getAttribute?.('title')
+        ].filter(Boolean).join(' ').toLowerCase();
+        const composerScore = (element) => {
+          if (!visible(element)) return -1;
+          const tag = String(element.tagName || '').toUpperCase();
+          const preferred = element.isContentEditable === true || tag === 'TEXTAREA' || element.getAttribute?.('role') === 'textbox';
+          const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(metadata(element));
+          return (preferred ? 100 : 10) + (semantic ? 25 : 0);
+        };
+
         const active = document.activeElement;
-        if (visible(active)) {
+        if (visible(active) && composerScore(active) >= 100) {
           active.focus();
-          return {focused: true, kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase()};
+          return {focused: true, kind: active.isContentEditable ? 'contenteditable' : String(active.tagName || '').toLowerCase(), source: 'active'};
         }
-        const candidates = Array.from(document.querySelectorAll('textarea, input, [contenteditable="true"], [role="textbox"]'));
-        const target = candidates.find(visible);
-        if (!target) return {focused: false, reason: 'NO_EDITABLE_TARGET'};
+
+        const candidates = Array.from(document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"], input'));
+        let target = null;
+        let bestScore = -1;
+        for (const candidate of candidates) {
+          const score = composerScore(candidate);
+          if (score > bestScore) {
+            bestScore = score;
+            target = candidate;
+          }
+        }
+        if (!target || bestScore < 100) return {focused: false, reason: 'NO_COMPOSER_EDITABLE_TARGET'};
         target.focus();
-        return {focused: document.activeElement === target, kind: target.isContentEditable ? 'contenteditable' : String(target.tagName || '').toLowerCase()};
+        return {
+          focused: document.activeElement === target,
+          kind: target.isContentEditable ? 'contenteditable' : String(target.tagName || '').toLowerCase(),
+          source: 'semantic_editable'
+        };
       })()`;
       const result = await sendCommand(tabId, 'Runtime.evaluate', {
         expression,

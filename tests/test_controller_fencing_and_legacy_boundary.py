@@ -53,6 +53,21 @@ def test_operation_owner_can_complete_and_chain_next_operation(tmp_path):
     claimed = bridge.claim_operation(first.operation_id, "controller-a")
     assert claimed is not None
 
+    bridge.save_browser_observation({
+        "schema_version": "pasi-network-cdp-v1",
+        "captured_at": "2026-09-30T00:00:00Z",
+        "data": {
+            "kind": "chatgpt_network_response",
+            "network_source": "cdp_fetch",
+            "active_operation_id": first.operation_id,
+            "controller_id": "controller-a",
+            "request_id": "req-first",
+            "event_type": "COMPLETED",
+            "response_text": "FIRST_OK",
+            "response_text_available": True,
+        },
+    })
+
     completed, chained = bridge.complete_operation_and_claim_next(
         first.operation_id,
         response_text="FIRST_OK",

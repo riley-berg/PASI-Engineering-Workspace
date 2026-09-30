@@ -5,6 +5,12 @@
   globalThis.__PASI_NATIVE_CONTROLLER_STARTED__ = true;
 
   const CONTROLLER_VERSION = '2.4.11';
+  const CONTROLLER_INSTANCE_ID = (() => {
+    try {
+      if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    } catch (_) {}
+    return `ctrl-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  })();
   const PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1';
   const TIMEOUT_POLICY = globalThis.PASI_TIMEOUT_POLICY?.get?.() || {};
   const POLL_MS = TIMEOUT_POLICY.pollMs || 2000;
@@ -144,6 +150,12 @@
       throw new Error('PASI_NATIVE: extension messaging API unavailable');
     }
     const timeoutMs = Number(options.timeout || 10000);
+    const pathValue = String(path || '');
+    const bodyValue = options.body ?? null;
+    const controllerBoundRoute = /^\/chat\/(?:claim|heartbeat|finished|failed|cancel)$/.test(pathValue);
+    const requestBody = controllerBoundRoute && bodyValue && typeof bodyValue === 'object'
+      ? { ...bodyValue, controller_id: CONTROLLER_INSTANCE_ID }
+      : bodyValue;
     return new Promise((resolve, reject) => {
       let settled = false;
       const timerId = setTimeout(() => {
@@ -156,7 +168,7 @@
           type: 'pasi-bridge-request',
           path: String(path || ''),
           method: String(options.method || 'GET').toUpperCase(),
-          body: options.body ?? null,
+          body: requestBody,
           timeout: timeoutMs
         }, (response) => {
           if (settled) return;
@@ -407,7 +419,10 @@
     }
     return new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({ type: 'pasi-controller-claim' }, (response) => {
+        chrome.runtime.sendMessage({
+          type: 'pasi-controller-claim',
+          controller_id: CONTROLLER_INSTANCE_ID
+        }, (response) => {
           const runtimeError = chrome.runtime.lastError;
           if (runtimeError || !response || response.ok !== true) {
             controllerLeader = false;
@@ -415,7 +430,8 @@
             resolve(false);
             return;
           }
-          controllerLeader = response.leader === true;
+          controllerLeader = response.leader === true &&
+            (response.controller_id == null || response.controller_id === CONTROLLER_INSTANCE_ID);
           controllerClaimedAt = controllerLeader ? Date.now() : 0;
           resolve(controllerLeader);
         });
@@ -2326,7 +2342,7 @@
             method: 'POST',
             body: { operation_id: recoveryOperation }
           })
-        : await bridge('/next-operation');
+        : await bridge('/next-operation?controller_id=' + encodeURIComponent(CONTROLLER_INSTANCE_ID));
       if (!response.ok) {
         if (recoveryOperation) {
           try {

@@ -63,6 +63,7 @@ def test_operation_owner_can_complete_and_chain_next_operation(tmp_path):
             "controller_id": "controller-a",
             "request_id": "req-first",
             "event_type": "COMPLETED",
+            "stream_complete": True,
             "response_text": "FIRST_OK",
             "response_text_available": True,
         },

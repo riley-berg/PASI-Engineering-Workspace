@@ -43,6 +43,7 @@ async function cdpNetworkObservation(event) {
       assistant_message_id: event?.assistantMessageId || null,
       telemetry: event?.telemetry && typeof event.telemetry === 'object' ? event.telemetry : {},
       timing,
+      stream_complete: event?.streamComplete === true,
       network_terminal: terminal
     }
   };

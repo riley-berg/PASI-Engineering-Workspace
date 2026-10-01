@@ -127,6 +127,7 @@ test('CDP controller keeps prompt bindings exclusive and exposes idle state', as
   assert.equal(controller.isIdle(31), false);
 
   await controller.interruptOperation(31, 'op-31-c', 'controller-31');
+  await controller.unbindOperation(31, 'op-31-c', 'controller-31');
   assert.equal(controller.isIdle(31), true);
 });
 

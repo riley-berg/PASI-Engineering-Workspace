@@ -23,6 +23,17 @@ from automation.computer_use.chatgpt import ChatGPTAdapter, UrllibBridgeTranspor
 EXPECTED_SERVICE = "pasi-engineering-workspace-chatgpt-bridge"
 EXPECTED_SCHEMA = "pasi-native-chromium-v2"
 EXPECTED_CONTROLLER = "cdp-worker-v1"
+
+
+def expected_extension_version() -> str:
+    manifest = REPO_ROOT / "extensions" / "pasi-chatgpt" / "manifest.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    version = payload.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise RuntimeError("PASI ChatGPT extension manifest has no valid version")
+    return version.strip()
+
+
 CHAT_URL_PREFIXES = ("https://chatgpt.com/c/", "https://www.chatgpt.com/c/")
 
 
@@ -79,6 +90,16 @@ def read_browser_diagnostics(transport: UrllibBridgeTransport) -> dict[str, Any]
         "browser_health",
         f"expected CDP controller {EXPECTED_CONTROLLER!r}",
         {"controller_version": data.get("controller_version"), "browser": browser},
+    )
+    expected_version = expected_extension_version()
+    require(
+        data.get("extension_version") == expected_version,
+        "browser_health.extension_version",
+        f"loaded PASI extension is stale: expected {expected_version!r}",
+        {
+            "expected_extension_version": expected_version,
+            "loaded_extension_version": data.get("extension_version"),
+        },
     )
     require(
         data.get("native_controller") is True and data.get("network_authority") is True,

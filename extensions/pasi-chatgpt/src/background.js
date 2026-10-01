@@ -79,6 +79,11 @@ async function cdpNetworkObservation(event) {
 
     if (completion?.ok) {
       cdpOperationTimings.delete(operationId);
+      await cdpNetworkController?.unbindOperation?.(
+        event.tabId,
+        operationId,
+        controllerId
+      );
       try {
         const completedPayload = JSON.parse(completion.text);
         const next = completedPayload?.next_operation;
@@ -114,6 +119,11 @@ async function cdpNetworkObservation(event) {
     }
   }, 10000);
   cdpOperationTimings.delete(operationId);
+  await cdpNetworkController?.unbindOperation?.(
+    event.tabId,
+    operationId,
+    controllerId
+  );
 
   // Explicit provider/context terminal states must not be immediately
   // redispatched. Context exhaustion is surfaced to the runner, which
@@ -215,6 +225,12 @@ async function executePromptOperation(tabId, controllerId, operation) {
       failure_source: 'controller',
       error: 'PASI_NATIVE: prompt dispatch failed: ' + String(error?.message || error).slice(0, 500)
     }, 10000);
+    await cdpNetworkController?.unbindOperation?.(
+      tabId,
+      String(operation.operation_id),
+      String(controllerId)
+    );
+    void dispatchNextOperationForController(tabId, controllerId);
     return false;
   }
 }
@@ -399,6 +415,7 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 async function dispatchNextOperationForController(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
+    if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
     const payload = await bridgeJson(
       '/next-operation?controller_id=' + encodeURIComponent(controllerId)
     );

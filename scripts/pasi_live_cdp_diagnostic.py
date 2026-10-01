@@ -10,6 +10,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
+# When invoked as `python scripts/pasi_live_cdp_diagnostic.py`, Python places
+# `scripts/` on sys.path rather than the repository root. Make the repository
+# package tree importable without requiring PYTHONPATH or editable installation.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from automation.computer_use.chatgpt import ChatGPTAdapter, UrllibBridgeTransport
 
 

@@ -79,9 +79,17 @@ def test_operation_owner_can_complete_and_chain_next_operation(tmp_path):
     assert completed is not None
     assert completed["status"] == "completed"
     assert completed["controller_id"] == "controller-a"
-    assert chained is not None
-    assert chained["operation_id"] == second.operation_id
-    assert chained["controller_id"] == "controller-a"
+    assert chained is None
+    assert completed["response_processing_complete"] is False
+
+    processed = bridge.mark_response_processed(first.operation_id, "controller-a")
+    assert processed is not None
+    assert processed["response_processing_complete"] is True
+
+    claimed_second = bridge.claim_next_operation("controller-a")
+    assert claimed_second is not None
+    assert claimed_second["operation_id"] == second.operation_id
+    assert claimed_second["controller_id"] == "controller-a"
 
 
 def test_next_operation_claim_records_controller_owner(tmp_path):

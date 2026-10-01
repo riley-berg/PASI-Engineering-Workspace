@@ -515,6 +515,14 @@ class BridgeState:
                 if item.get("status") != "queued":
                     continue
 
+                predecessor = self._latest_completed_prompt_for_controller(
+                    queue,
+                    controller_id,
+                )
+                if predecessor is not None:
+                    predecessor_operation_id, predecessor_completed_at_ms = predecessor
+                    item["predecessor_operation_id"] = predecessor_operation_id
+                    item["predecessor_completed_at_ms"] = predecessor_completed_at_ms
                 claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)

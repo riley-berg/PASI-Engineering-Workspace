@@ -71,6 +71,10 @@ def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
         time.sleep(.5)
     raise RuntimeError("Engineering Workspace ChatGPT controller heartbeat is not live")
 
+def active_operation_needs_recovery(completion:str)->bool:
+    """Return whether a persisted active operation is terminal and cannot be resumed."""
+    return str(completion).strip().lower() in {"error", "interrupted"}
+
 def prompt(task:str,phase:str,task_id:str,issue:str)->str:
     return f"""CURRENT TASK:
 {task}
@@ -160,7 +164,7 @@ def main()->int:
             # yet be inspected; the bridge/browser may still be reconciling it.
             op=active; response=wait_task_response(op)
         else:
-            if active_response.completion in {"error","interrupted"}:
+            if active_operation_needs_recovery(active_response.completion):
                 # A terminal failed/interrupted operation cannot be "resumed" by
                 # waiting on the same id. Clear the stale cursor and submit a
                 # fresh operation in the same chat unless the provider explicitly

@@ -153,8 +153,29 @@ def main()->int:
         return result
 
     if isinstance(active,str) and active.strip() and active_key==key:
-        op=active; response=wait_task_response(op)
-    else:
+        try:
+            active_response = adapter.read_operation(active)
+        except ChatGPTAdapterError:
+            # Preserve the existing recovery behavior when the operation cannot
+            # yet be inspected; the bridge/browser may still be reconciling it.
+            op=active; response=wait_task_response(op)
+        else:
+            if active_response.completion in {"error","interrupted"}:
+                # A terminal failed/interrupted operation cannot be "resumed" by
+                # waiting on the same id. Clear the stale cursor and submit a
+                # fresh operation in the same chat unless the provider explicitly
+                # reports context exhaustion, which is handled below via new-chat
+                # recovery.
+                state["active_operation_id"]=None
+                state["active_task_fingerprint"]=None
+                state["connection_interrupted"]=False
+                if active_response.chat_exhausted:
+                    state["chat_exhausted"]=True
+                save(state)
+                active = None
+            else:
+                op=active; response=wait_task_response(op)
+    if not isinstance(active,str) or not active.strip() or active_key!=key:
         mode=select_chat_mode(state,live)
         if mode=="blocked":
             raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")

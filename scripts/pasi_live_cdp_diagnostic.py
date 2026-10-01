@@ -547,7 +547,23 @@ def main() -> int:
         evidence: dict[str, Any] = {}
         if "operation_id" in locals() and isinstance(operation_id, str) and operation_id.strip():
             try:
-                evidence["operation"] = read_operation(transport, operation_id)
+                operation = read_operation(transport, operation_id)
+                evidence["operation_before_cancel"] = operation
+                controller_id = operation.get("controller_id")
+                cancel_payload: dict[str, Any] = {
+                    "operation_id": operation_id,
+                    "reason": "live diagnostic interrupted by operator",
+                }
+                if isinstance(controller_id, str) and controller_id.strip():
+                    cancel_payload["controller_id"] = controller_id
+                try:
+                    evidence["cancel"] = dict(
+                        request(transport, "POST", "/chat/cancel", cancel_payload)
+                    )
+                    evidence["operation"] = read_operation(transport, operation_id)
+                except Exception as exc:
+                    evidence["cancel_error"] = str(exc)
+                    evidence["operation"] = operation
             except Exception as exc:
                 evidence["operation_read_error"] = str(exc)
             try:

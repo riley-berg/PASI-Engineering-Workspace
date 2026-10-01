@@ -484,7 +484,7 @@ test('premature response EOF is treated as incomplete and is never replayed as a
     return originalSendCommand(_debuggee, method, params, callback);
   };
 
-  const controller = source.createController({debuggerApi});
+  const controller = source.createController({debuggerApi, onEvent: (event) => events.push(event)});
   controller.install();
   await controller.bindOperation({
     tabId: 19,

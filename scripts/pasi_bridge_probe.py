@@ -55,6 +55,7 @@ def probe(token: str) -> dict:
     browser_payload = get("/browser/health", token)
     observation = browser_payload.get("observation")
     data = observation.get("data") if isinstance(observation, dict) else None
+    schema_version = observation.get("schema_version") if isinstance(observation, dict) else None
     if not isinstance(data, dict):
         raise RuntimeError("bridge returned no browser health data")
 
@@ -63,7 +64,7 @@ def probe(token: str) -> dict:
         "bridge_authorized": True,
         "status_endpoint": True,
         "browser_health": True,
-        "schema": data.get("schema_version") == EXPECTED_SCHEMA,
+        "schema": schema_version == EXPECTED_SCHEMA,
         "controller_version": data.get("controller_version") == EXPECTED_CONTROLLER_VERSION,
         "native_controller": data.get("native_controller") is True,
         "network_authority": data.get("network_authority") is True,
@@ -82,7 +83,7 @@ def probe(token: str) -> dict:
         },
         "browser": {
             "kind": data.get("kind"),
-            "schema_version": data.get("schema_version"),
+            "schema_version": schema_version,
             "controller_version": data.get("controller_version"),
             "native_controller": data.get("native_controller"),
             "network_authority": data.get("network_authority"),

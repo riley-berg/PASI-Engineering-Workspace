@@ -219,15 +219,44 @@ def wait_until_status(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     deadline = time.monotonic() + timeout_seconds
+    last_state: tuple[Any, ...] | None = None
     while time.monotonic() < deadline:
         operation = read_operation(transport, operation_id)
+        state = (
+            operation.get("status"),
+            operation.get("error"),
+            operation.get("failure_reason"),
+            operation.get("retry_class"),
+            operation.get("retry_count"),
+        )
+        if state != last_state:
+            print(
+                "LIVE WAIT "
+                + json.dumps(
+                    {
+                        "operation_id": operation_id,
+                        "status": operation.get("status"),
+                        "error": operation.get("error"),
+                        "failure_reason": operation.get("failure_reason"),
+                        "retry_class": operation.get("retry_class"),
+                        "retry_count": operation.get("retry_count"),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
+            last_state = state
         if str(operation.get("status")) in wanted:
             return operation
         time.sleep(0.25)
     raise DiagnosticFailure(
         "operation_wait",
         f"operation {operation_id} did not reach {sorted(wanted)} within {timeout_seconds}s",
-        {"operation": read_operation(transport, operation_id)},
+        {
+            "operation": read_operation(transport, operation_id),
+            "browser_health": dict(request(transport, "GET", "/browser/health")),
+            "browser_response": dict(request(transport, "GET", "/browser/response")),
+        },
     )
 
 
@@ -398,6 +427,7 @@ def main() -> int:
             max_wait_seconds=args.timeout,
         )
         operation_id = adapter.submit_prompt(make_probe_prompt(marker), completion_markers=[marker])
+        print(f"LIVE OPERATION: {operation_id}", flush=True)
         step_results.append({
             "ok": True,
             "step": "prompt_submission",
@@ -513,6 +543,33 @@ def main() -> int:
             summarize_output(step_results, final)
         return 0
 
+    except KeyboardInterrupt:
+        evidence: dict[str, Any] = {}
+        if "operation_id" in locals() and isinstance(operation_id, str) and operation_id.strip():
+            try:
+                evidence["operation"] = read_operation(transport, operation_id)
+            except Exception as exc:
+                evidence["operation_read_error"] = str(exc)
+            try:
+                evidence["browser_health"] = dict(request(transport, "GET", "/browser/health"))
+            except Exception as exc:
+                evidence["browser_health_error"] = str(exc)
+            try:
+                evidence["browser_response"] = dict(request(transport, "GET", "/browser/response"))
+            except Exception as exc:
+                evidence["browser_response_error"] = str(exc)
+        failure = DiagnosticFailure(
+            "operation_wait.interrupted",
+            "live diagnostic was interrupted before the operation reached a terminal state",
+            evidence,
+        )
+        step_results.append({"ok": False, "step": failure.step, "summary": failure.message, "evidence": failure.evidence})
+        payload = {"ok": False, "steps": step_results, "failure": failure.as_dict()}
+        if args.as_json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            summarize_output(step_results, {"ok": False, "failure": failure.as_dict()})
+        return 130
     except DiagnosticFailure as exc:
         step_results.append({"ok": False, "step": exc.step, "summary": exc.message, "evidence": exc.evidence})
         payload = {"ok": False, "steps": step_results, "failure": exc.as_dict()}

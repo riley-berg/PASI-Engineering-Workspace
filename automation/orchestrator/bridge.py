@@ -896,6 +896,56 @@ class BridgeState:
                 return True
         return False
 
+    def cancel_operation(
+        self,
+        operation_id: str,
+        controller_id: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Cancel a nonterminal operation, fencing controller ownership when present."""
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return None
+        normalized_controller = (
+            controller_id.strip()
+            if isinstance(controller_id, str) and controller_id.strip()
+            else None
+        )
+        normalized_reason = (
+            reason[:MAX_ERROR_CHARS]
+            if isinstance(reason, str) and reason.strip()
+            else "operation cancelled"
+        )
+        with self.lock:
+            queue = self._load_queue()
+            for item in queue:
+                if item.get("operation_id") != operation_id:
+                    continue
+
+                current_status = str(item.get("status", ""))
+                owner = item.get("controller_id")
+                if owner is not None and owner != normalized_controller:
+                    raise ControllerOwnershipConflict(
+                        "operation is owned by a different controller"
+                    )
+                if current_status == "cancelled":
+                    return dict(item)
+                if current_status not in {"queued", "claimed", "generating"}:
+                    return None
+
+                validate_transition(current_status, "cancelled")
+                item["status"] = "cancelled"
+                item["error"] = normalized_reason
+                item["failure_reason"] = "cancelled"
+                item["updated_at"] = time.time()
+                if normalized_controller is not None:
+                    item["cancelled_by_controller_id"] = normalized_controller
+                if item.get("operation_type") == "prompt":
+                    item["response_processing_required"] = False
+                    item["response_processing_complete"] = False
+                self._save_queue(queue)
+                return dict(item)
+        return None
+
     def complete_operation(
         self,
         operation_id: str,
@@ -1859,6 +1909,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._failed(payload)
                 return
 
+            if path == "/chat/cancel":
+                self._cancel(payload)
+                return
+
             self._send_json(
                 {
                     "error": "Not found"
@@ -2093,6 +2147,41 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 "operation": operation
             }
         )
+
+    def _cancel(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
+        reason = payload.get("reason")
+
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            self._send_json({"error": "operation_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if controller_id is not None and (
+            not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200
+        ):
+            self._send_json({"error": "controller_id must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+        if reason is not None and (
+            not isinstance(reason, str) or not reason.strip() or len(reason) > MAX_ERROR_CHARS
+        ):
+            self._send_json({"error": "reason must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        operation = self.bridge_state.cancel_operation(
+            operation_id=operation_id.strip(),
+            controller_id=controller_id.strip() if isinstance(controller_id, str) else None,
+            reason=reason,
+        )
+        if operation is None:
+            self._send_json(
+                {"error": "Operation is not cancellable."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+        self._send_json({"operation": operation})
 
     def _finished(
         self,

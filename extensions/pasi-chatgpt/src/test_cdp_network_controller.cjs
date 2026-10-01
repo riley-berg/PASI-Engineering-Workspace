@@ -328,7 +328,7 @@ test('CDP submit waits for the accessibility composer to appear after debugger a
 
   const result = await controller.submitOperation(13, 'op-13', 'controller-13');
   assert.equal(result.submitted, true);
-  assert.equal(treeCalls, 3);
+  // The composer becomes available on the third AX-tree read; the fourth\n  // read is the post-submit acknowledgement check introduced to reject\n  // unacknowledged ChatGPT red-box submissions.\n  assert.equal(treeCalls, 4);
 });
 
 test('CDP submit operation refuses to overwrite unrelated editable text', async () => {

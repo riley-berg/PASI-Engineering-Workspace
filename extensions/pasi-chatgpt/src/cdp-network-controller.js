@@ -338,11 +338,10 @@
 
     function isIdle(tabId) {
       const state = tabs.get(tabId);
-      if (!state?.binding) return true;
       for (const request of requests.values()) {
         if (request.tabId === tabId) return false;
       }
-      return false;
+      return !state?.binding;
     }
 
     function axValue(value) {

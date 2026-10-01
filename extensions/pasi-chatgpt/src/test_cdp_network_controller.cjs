@@ -457,9 +457,88 @@ test('response stream is captured before browser continuation and stale snapshot
   assert.equal(events.at(-1).requestId, 'req-8');
   assert.equal(events.at(-1).assistantMessageId, 'new');
   assert.equal(events.at(-1).responseText, 'NETWORK_PATCH_OK_2026');
+  assert.equal(events.at(-1).streamComplete, true);
   assert.ok(debuggerApi.commands.some((command) => command.method === 'Fetch.takeResponseBodyAsStream'));
   assert.ok(debuggerApi.commands.some((command) => command.method === 'Fetch.fulfillRequest'));
 });
+
+test('premature response EOF is treated as incomplete and is never replayed as a completed generation', async () => {
+  const debuggerApi = fakeDebugger();
+  const events = [];
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Fetch.takeResponseBodyAsStream') {
+      return callback({stream: 'truncated-stream'});
+    }
+    if (method === 'IO.read') {
+      if (!this._truncatedRead) {
+        this._truncatedRead = true;
+        return callback({
+          data: 'data: {"message":{"id":"partial","author":{"role":"assistant"},"content":{"parts":["PARTIAL_ONLY"]}}}\n\n',
+          eof: true
+        });
+      }
+      return callback({data: '', eof: true});
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 19,
+    operationId: 'op-19',
+    controllerId: 'controller-19',
+    prompt: 'partial prompt'
+  });
+
+  await controller.handlePaused(
+    {tabId: 19},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-19',
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST',
+        postData: JSON.stringify({prompt: 'partial prompt'})
+      }
+    }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await controller.handlePaused(
+    {tabId: 19},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-19',
+      responseStatusCode: 200,
+      responseStatusText: 'OK',
+      responseHeaders: [{name: 'content-type', value: 'text/event-stream'}],
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST'
+      }
+    }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.at(-1).eventType, 'FAILED');
+  assert.equal(events.at(-1).reason, 'NETWORK_RESPONSE_INCOMPLETE');
+  assert.equal(events.at(-1).classification, 'retryable_transport_failure');
+  assert.equal(events.at(-1).streamComplete, false);
+  assert.equal(events.at(-1).responseText, 'PARTIAL_ONLY');
+  assert.equal(debuggerApi.commands.some((command) =>
+    command.method === 'Fetch.fulfillRequest' &&
+    command.params.requestId === 'req-19'
+  ), false);
+  assert.equal(debuggerApi.commands.some((command) =>
+    command.method === 'Fetch.failRequest' &&
+    command.params.requestId === 'req-19'
+  ), true);
+});
+
 
 test('unmatched generation requests are never assigned to a task', async () => {
   const debuggerApi = fakeDebugger();

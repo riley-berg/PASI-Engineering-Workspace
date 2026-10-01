@@ -133,7 +133,11 @@
       buffer = buffer.slice(newlineIndex + 1);
       if (!line.startsWith('data:')) continue;
       const raw = line.slice(5).trim();
-      if (!raw || raw === '[DONE]') continue;
+      if (!raw) continue;
+      if (raw === '[DONE]') {
+        state.streamComplete = true;
+        continue;
+      }
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -887,7 +891,7 @@
       let timer = null;
       let textBuffer = '';
       const decoder = new TextDecoder('utf-8');
-      const streamState = {responseText: '', assistantMessageId: null, terminal: null};
+      const streamState = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
 
       const capture = (bytes) => {
         totalBytes += bytes.length;
@@ -925,7 +929,9 @@
         if (textBuffer) parseSseText(textBuffer + '\n', streamState);
         await sendCommand(source.tabId, 'IO.close', {handle}).catch(() => undefined);
         const bodyBytes = concatBytes(byteChunks, totalBytes);
-        await replayResponse(source, params, bodyBytes);
+        if (streamState.streamComplete || streamState.terminal) {
+          await replayResponse(source, params, bodyBytes);
+        }
         return streamState;
       } catch (error) {
         try { await sendCommand(source.tabId, 'IO.close', {handle}); } catch (_) {}
@@ -946,9 +952,11 @@
             ? decodeBase64(fallback.body || '')
             : new TextEncoder().encode(fallback?.body || '');
           if (bytes.length > MAX_REPLAY_BODY_BYTES) throw new Error('Fallback response body exceeded bound');
-          const state = {responseText: '', assistantMessageId: null, terminal: null};
+          const state = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
           parseSseText(new TextDecoder('utf-8').decode(bytes) + '\n', state);
-          await replayResponse(source, params, bytes);
+          if (state.streamComplete || state.terminal) {
+            await replayResponse(source, params, bytes);
+          }
           return state;
         } catch (fallbackError) {
           const combined = new Error('CDP response capture failed: ' + String(fallbackError?.message || fallbackError));
@@ -1040,23 +1048,39 @@
             responseText: state.responseText,
             assistantMessageId: state.assistantMessageId
           });
+        } else if (!state.streamComplete) {
+          emitLifecycle(correlation, {
+            eventType: 'FAILED',
+            reason: 'NETWORK_RESPONSE_INCOMPLETE',
+            classification: 'retryable_transport_failure',
+            telemetry: {bodyObserved: true, streamComplete: false},
+            responseText: state.responseText,
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: false
+          });
+          await sendCommand(tabId, 'Fetch.failRequest', {
+            requestId: params.requestId,
+            errorReason: 'ConnectionAborted'
+          }).catch(() => undefined);
         } else if (completionMarkersSatisfied(state.responseText, correlation.binding.completionMarkers)) {
           emitLifecycle(correlation, {
             eventType: 'COMPLETED',
             reason: 'RESPONSE_STREAM_FINISHED',
             classification: 'success',
-            telemetry: {bodyObserved: true},
+            telemetry: {bodyObserved: true, streamComplete: true},
             responseText: state.responseText,
-            assistantMessageId: state.assistantMessageId
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: true
           });
         } else {
           emitLifecycle(correlation, {
             eventType: 'FAILED',
             reason: 'RESPONSE_MARKER_NOT_FOUND',
             classification: 'response_correlation_failure',
-            telemetry: {bodyObserved: true},
+            telemetry: {bodyObserved: true, streamComplete: true},
             responseText: state.responseText,
-            assistantMessageId: state.assistantMessageId
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: true
           });
         }
       } catch (error) {

@@ -529,6 +529,30 @@ test('CDP recovery can interrupt the active generation request without a page re
   assert.equal(controller.health().activeRequests.length, 0);
 });
 
+test('detaching a tab consumes stale-tab runtime errors without rejecting cleanup', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalDetach = debuggerApi.detach;
+  const sandboxChrome = {runtime: {lastError: null}};
+  globalThis.chrome = sandboxChrome;
+  debuggerApi.detach = function(debuggee, callback) {
+    sandboxChrome.runtime.lastError = {message: 'No tab with given id 1779180802'};
+    originalDetach.call(this, debuggee, callback);
+    sandboxChrome.runtime.lastError = null;
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 18,
+    operationId: 'op-18',
+    controllerId: 'controller-18',
+    prompt: 'cleanup'
+  });
+
+  await assert.doesNotReject(() => controller.detachTab(18));
+  assert.equal(controller.health().attachedTabs.length, 0);
+});
+
 test('network-health exposes the request-to-task map and controller fence', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

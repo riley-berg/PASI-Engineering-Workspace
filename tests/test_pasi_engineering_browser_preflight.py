@@ -61,8 +61,8 @@ def test_browser_health_requires_native_network_authority(monkeypatch):
         "get",
         lambda path, token, timeout=5.0: {
             "observation": {
+                "schema_version": "pasi-native-chromium-v2",
                 "data": {
-                    "schema_version": "pasi-native-chromium-v2",
                     "kind": "chatgpt_health",
                     "controller_version": "cdp-worker-v1",
                     "native_controller": True,

@@ -612,6 +612,7 @@ async function reportWorkerHealth(tab) {
       data: {
         kind: 'chatgpt_health',
         controller_version: 'cdp-worker-v1',
+        extension_version: chrome.runtime.getManifest().version,
         chat_url: String(tab.url || ''),
         active_operation_id: binding?.operationId || null,
         page_visible: tab.active === true,

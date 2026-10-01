@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -12,6 +13,22 @@ import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+EXPECTED_BRIDGE_SERVICE = "pasi-engineering-workspace-chatgpt-bridge"
+EXPECTED_CONTROLLER_VERSION = "cdp-worker-v1"
+EXPECTED_SCHEMA = "pasi-native-chromium-v2"
+CHATGPT_URL_RE = re.compile(r"^https://(?:www\.)?chatgpt\.com/c/")
+REQUIRED_MANIFEST_PERMISSIONS = {"tabs", "debugger", "storage"}
+REQUIRED_MANIFEST_HOSTS = {
+    "https://chatgpt.com/*",
+    "https://www.chatgpt.com/*",
+    "http://127.0.0.1:8765/*",
+}
+REQUIRED_CDP_EXPORTS = {
+    "createController",
+    "requestUrlIsGeneration",
+    "completionMarkersSatisfied",
+}
 
 
 def token_path() -> Path:
@@ -27,76 +44,35 @@ def token() -> str:
     path = token_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
-        path.write_text(
-            secrets.token_urlsafe(48) + "\n",
-            encoding="utf-8",
-        )
+        path.write_text(secrets.token_urlsafe(48) + "\n", encoding="utf-8")
         path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    return path.read_text(encoding="utf-8").strip()
+    value = path.read_text(encoding="utf-8").strip()
+    if not value:
+        raise SystemExit(f"bridge token file is empty: {path}")
+    return value
 
 
-def get(path: str, bridge_token: str) -> dict:
+def get(path: str, bridge_token: str, *, timeout: float = 3.0) -> dict:
+    headers = {}
+    if bridge_token:
+        headers["Authorization"] = f"Bearer {bridge_token}"
     request = Request(
         "http://127.0.0.1:8765" + path,
-        headers={"Authorization": f"Bearer {bridge_token}"},
+        headers=headers,
     )
-    with urlopen(request, timeout=3) as response:
-        return json.loads(response.read(2_000_000).decode("utf-8"))
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read(2_000_000).decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"{path} returned a non-object payload")
+    return payload
 
 
-def healthy() -> bool:
+def service_healthy() -> bool:
     try:
-        return isinstance(get("/health", ""), dict)
+        payload = get("/health", "")
     except Exception:
         return False
-
-
-EXPECTED_BRIDGE_SERVICE = "pasi-engineering-workspace-chatgpt-bridge"
-EXPECTED_DEPLOYMENT_ID = "pasi-engineering-workspace-handoff-v1"
-
-
-def bridge_status(bridge_token: str) -> dict | None:
-    try:
-        payload = get("/status", bridge_token)
-        return payload if isinstance(payload, dict) else None
-    except HTTPError:
-        return None
-    except Exception:
-        return None
-
-
-def authorized(bridge_token: str) -> bool:
-    return bridge_status(bridge_token) is not None
-
-
-def is_engineering_workspace_bridge(bridge_token: str) -> bool:
-    payload = bridge_status(bridge_token)
-    return bool(payload and payload.get("service") == EXPECTED_BRIDGE_SERVICE)
-
-
-def controller_source(root: Path) -> Path:
-    for candidate in (root / "src" / "content.js", root / "content.js"):
-        if candidate.is_file():
-            return candidate
-    raise SystemExit(
-        "PASI ChatGPT Handoff controller source not found: expected "
-        "src/content.js or content.js"
-    )
-
-
-def version(root: Path) -> str | None:
-    match = re.search(
-        r"\bCONTROLLER_VERSION\s*=\s*['\"]([^'\"]+)['\"]",
-        controller_source(root).read_text(encoding="utf-8"),
-    )
-    return match.group(1).strip() if match else None
-
-def deployment_id(root: Path) -> str | None:
-    match = re.search(
-        r"\bPASI_DEPLOYMENT_ID\s*=\s*['\"]([^'\"]+)['\"]",
-        controller_source(root).read_text(encoding="utf-8"),
-    )
-    return match.group(1).strip() if match else None
+    return payload.get("status") == "ok" and payload.get("service") == EXPECTED_BRIDGE_SERVICE
 
 
 def start_bridge(runtime: Path, bridge_token: str) -> None:
@@ -114,32 +90,147 @@ def start_bridge(runtime: Path, bridge_token: str) -> None:
         stderr=log,
         start_new_session=True,
     )
-    (runtime / "bridge.pid").write_text(
-        str(process.pid) + "\n",
-        encoding="utf-8",
-    )
+    (runtime / "bridge.pid").write_text(str(process.pid) + "\n", encoding="utf-8")
     log.close()
 
 
-def main() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--extension-root", type=Path, required=True)
-    args = parser.parse_args()
-
-    root = args.extension_root.expanduser().resolve()
+def read_extension_contract(root: Path) -> dict[str, object]:
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("manifest_version") != 3:
         raise SystemExit("PASI ChatGPT Handoff must be MV3")
     if manifest.get("name") != "PASI ChatGPT Handoff":
-        raise SystemExit(
-            f"unexpected browser extension: {manifest.get('name')!r}; "
-            "the canonical runtime uses PASI ChatGPT Handoff"
-        )
-    controller_source(root)
+        raise SystemExit(f"unexpected browser extension: {manifest.get('name')!r}")
 
+    permissions = set(manifest.get("permissions", []))
+    missing_permissions = sorted(REQUIRED_MANIFEST_PERMISSIONS - permissions)
+    if missing_permissions:
+        raise SystemExit("missing required extension permissions: " + ", ".join(missing_permissions))
+
+    hosts = set(manifest.get("host_permissions", []))
+    missing_hosts = sorted(REQUIRED_MANIFEST_HOSTS - hosts)
+    if missing_hosts:
+        raise SystemExit("missing required extension host permissions: " + ", ".join(missing_hosts))
+
+    background = manifest.get("background")
+    service_worker = background.get("service_worker") if isinstance(background, dict) else None
+    if service_worker != "src/background.js":
+        raise SystemExit("canonical runtime must use src/background.js as the MV3 service worker")
+
+    background_path = root / "src" / "background.js"
+    controller_path = root / "src" / "cdp-network-controller.js"
+    if not background_path.is_file():
+        raise SystemExit(f"CDP background controller not found: {background_path}")
+    if not controller_path.is_file():
+        raise SystemExit(f"CDP network controller not found: {controller_path}")
+
+    background_source = background_path.read_text(encoding="utf-8")
+    controller_source = controller_path.read_text(encoding="utf-8")
+
+    required_background_signals = (
+        "chatgpt_health",
+        "controller_version",
+        "network_authority: true",
+        "native_controller: true",
+    )
+    for signal in required_background_signals:
+        if signal not in background_source:
+            raise SystemExit(f"CDP background worker is missing health signal: {signal}")
+
+    missing_exports = sorted(name for name in REQUIRED_CDP_EXPORTS if name not in controller_source)
+    if missing_exports:
+        raise SystemExit("CDP controller contract is incomplete: " + ", ".join(missing_exports))
+    for signal in ("Fetch.takeResponseBodyAsStream", "Input.dispatchKeyEvent"):
+        if signal not in controller_source:
+            raise SystemExit(f"CDP controller is missing required primitive: {signal}")
+
+    legacy_signals = (
+        "MutationObserver",
+        "document.querySelector(",
+        "Runtime.evaluate",
+    )
+    forbidden = [signal for signal in legacy_signals if signal in controller_source]
+    if forbidden:
+        raise SystemExit("CDP controller still contains legacy DOM authority: " + ", ".join(forbidden))
+
+    return {
+        "manifest_version": manifest.get("manifest_version"),
+        "service_worker": service_worker,
+        "controller_version": EXPECTED_CONTROLLER_VERSION,
+        "required_permissions": sorted(REQUIRED_MANIFEST_PERMISSIONS),
+        "required_hosts": sorted(REQUIRED_MANIFEST_HOSTS),
+    }
+
+
+def browser_health(bridge_token: str) -> dict[str, object]:
+    payload = get("/browser/health", bridge_token, timeout=5)
+    observation = payload.get("observation")
+    data = observation.get("data") if isinstance(observation, dict) else None
+    if not isinstance(data, dict):
+        raise SystemExit("bridge returned no browser health data")
+    if data.get("schema_version") != EXPECTED_SCHEMA:
+        raise SystemExit(f"browser schema mismatch: {data.get('schema_version')!r}")
+    if data.get("kind") not in {"chatgpt_health", "chatgpt_state"}:
+        raise SystemExit("ChatGPT controller is not reporting a usable health state")
+    if data.get("controller_version") != EXPECTED_CONTROLLER_VERSION:
+        raise SystemExit(
+            f"CDP controller version mismatch: expected {EXPECTED_CONTROLLER_VERSION!r}, "
+            f"browser={data.get('controller_version')!r}"
+        )
+    if data.get("native_controller") is not True:
+        raise SystemExit("browser health does not confirm native_controller=true")
+    if data.get("network_authority") is not True:
+        raise SystemExit("browser health does not confirm network_authority=true")
+
+    chat_url = data.get("chat_url")
+    if not isinstance(chat_url, str) or not CHATGPT_URL_RE.match(chat_url):
+        raise SystemExit("browser health does not contain a valid ChatGPT conversation URL")
+
+    return {
+        "kind": data.get("kind"),
+        "schema_version": data.get("schema_version"),
+        "controller_version": data.get("controller_version"),
+        "native_controller": data.get("native_controller"),
+        "network_authority": data.get("network_authority"),
+        "chat_url": chat_url,
+        "active_operation_id": data.get("active_operation_id"),
+        "page_visible": data.get("page_visible"),
+    }
+
+
+def run_probe(bridge_token: str) -> dict[str, object]:
+    health = get("/health", "")
+    if health.get("status") != "ok" or health.get("service") != EXPECTED_BRIDGE_SERVICE:
+        raise SystemExit("localhost bridge is not the Engineering Workspace bridge")
+
+    try:
+        status = get("/status", bridge_token, timeout=5)
+    except HTTPError as exc:
+        if exc.code == 401:
+            raise SystemExit("bridge rejected the Engineering Workspace bridge token")
+        raise
+
+    browser = browser_health(bridge_token)
+    return {
+        "bridge": {
+            "status": health.get("status"),
+            "service": health.get("service"),
+            "authorized": True,
+        },
+        "queue": {"available": isinstance(status, dict)},
+        "browser": browser,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--extension-root", type=Path, required=True)
+    parser.add_argument("--no-start", action="store_true")
+    args = parser.parse_args()
+
+    root = args.extension_root.expanduser().resolve()
+    contract = read_extension_contract(root)
     bridge_token = token()
+
     runtime = Path(
         os.environ.get(
             "PASI_ENGINEERING_RUNTIME_DIR",
@@ -148,73 +239,21 @@ def main() -> None:
     ).expanduser().resolve()
     runtime.mkdir(parents=True, exist_ok=True)
 
-    if healthy():
-        if not authorized(bridge_token):
-            raise SystemExit(
-                "127.0.0.1:8765 is already serving a PASI bridge that rejects the "
-                "Engineering Workspace bridge token. Stop the stale bridge process "
-                "(do not rotate credentials behind a live bridge), then rerun this "
-                "preflight."
-            )
-        if not is_engineering_workspace_bridge(bridge_token):
-            raise SystemExit(
-                "127.0.0.1:8765 is already serving a non-Engineering-Workspace "
-                "PASI bridge. Stop the stale legacy bridge process, then rerun "
-                "this preflight."
-            )
-
-    if not is_engineering_workspace_bridge(bridge_token):
+    if not service_healthy():
+        if args.no_start:
+            raise SystemExit("Engineering Workspace PASI bridge is not running")
         start_bridge(runtime, bridge_token)
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline and not service_healthy():
+            time.sleep(0.5)
 
-    deadline = time.monotonic() + 20
-    while time.monotonic() < deadline and not is_engineering_workspace_bridge(bridge_token):
-        time.sleep(0.5)
+    if not service_healthy():
+        raise SystemExit(f"Engineering Workspace PASI bridge did not become healthy; inspect {runtime / 'bridge.log'}")
 
-    if not is_engineering_workspace_bridge(bridge_token):
-        raise SystemExit(
-            f"Engineering Workspace PASI bridge did not become authorized; inspect "
-            f"{runtime / 'bridge.log'}"
-        )
-
-    extension_token = root / ".bridge-token"
-    extension_token.write_text(bridge_token + "\n", encoding="utf-8")
-    extension_token.chmod(stat.S_IRUSR | stat.S_IWUSR)
-
-    observation = get("/browser/health", bridge_token)
-    observation = observation.get("observation", {})
-    data = observation.get("data", {}) if isinstance(observation, dict) else {}
-    expected = version(root)
-    expected_deployment = deployment_id(root)
-    if data.get("kind") not in {"chatgpt_health", "chatgpt_state"}:
-        raise SystemExit(
-            "Engineering Workspace ChatGPT controller is not reporting a usable health state"
-        )
-    if expected and data.get("controller_version") != expected:
-        raise SystemExit(
-            f"controller version mismatch: extension={expected!r}, "
-            f"browser={data.get('controller_version')!r}"
-        )
-    if expected_deployment and data.get("deployment_id") != expected_deployment:
-        raise SystemExit(
-            f"browser deployment mismatch: extension={expected_deployment!r}, "
-            f"browser={data.get('deployment_id')!r}; load the canonical "
-            "PASI ChatGPT Handoff deployment before running P0.4"
-        )
-
-    print(
-        json.dumps(
-            {
-                "bridge": "healthy",
-                "authorized": True,
-                "extension_root": str(root),
-                "controller_version": expected,
-                "deployment_id": expected_deployment,
-                "browser": data,
-            },
-            indent=2,
-        )
-    )
+    probe = run_probe(bridge_token)
+    print(json.dumps({"bridge": probe["bridge"], "browser": probe["browser"], "extension": contract}, indent=2, sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

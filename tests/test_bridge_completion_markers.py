@@ -118,6 +118,7 @@ def test_cdp_network_response_becomes_authoritative_and_overrides_stale_dom_text
                 "controller_id": "controller-cdp",
                 "request_id": "req-cdp-1",
                 "event_type": "COMPLETED",
+                "stream_complete": True,
                 "response_text": "NETWORK_PATCH_OK_2026",
                 "response_text_available": True,
                 "assistant_message_id": "assistant-current",
@@ -405,3 +406,47 @@ def test_context_exhaustion_is_terminal_for_runner_fresh_chat_recovery(tmp_path)
     assert failed["retry_class"] == "context"
     assert failed["failure_reason"] == "context_exhausted"
     assert failed["error"].startswith("CHAT_EXHAUSTED:")
+
+
+def test_incomplete_cdp_response_never_becomes_authoritative(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    bridge.save_browser_observation(
+        {
+            "schema_version": "pasi-network-cdp-v1",
+            "captured_at": "2026-10-01T00:00:00Z",
+            "data": {
+                "kind": "chatgpt_network_response",
+                "network_source": "cdp_fetch",
+                "active_operation_id": operation.operation_id,
+                "controller_id": "controller-cdp",
+                "request_id": "req-incomplete",
+                "event_type": "FAILED",
+                "reason": "NETWORK_RESPONSE_INCOMPLETE",
+                "classification": "retryable_transport_failure",
+                "stream_complete": False,
+                "response_text": "PARTIAL_ONLY",
+                "response_text_available": True,
+            },
+        }
+    )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["status"] == "generating"
+    assert stored.get("response_text_available") is not True
+    assert stored.get("network_response_authoritative") is not True
+
+    failed = bridge.fail_operation(
+        operation.operation_id,
+        "PASI_CDP: NETWORK_RESPONSE_INCOMPLETE",
+    )
+    assert failed is not None
+    assert failed["status"] == "queued"
+    assert failed["retry_class"] == "response"

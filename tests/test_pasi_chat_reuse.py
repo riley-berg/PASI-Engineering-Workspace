@@ -33,3 +33,12 @@ def test_select_chat_mode_blocks_explicit_usage_limit():
         "usage_limited": True,
     }
     assert select_chat_mode({}, live) == "blocked"
+
+
+def test_terminal_active_operations_require_recovery_before_waiting():
+    from scripts.pasi_chat import active_operation_needs_recovery
+
+    assert active_operation_needs_recovery("error") is True
+    assert active_operation_needs_recovery("interrupted") is True
+    assert active_operation_needs_recovery("complete") is False
+    assert active_operation_needs_recovery("generating") is False

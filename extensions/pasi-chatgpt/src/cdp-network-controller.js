@@ -336,6 +336,15 @@
       return tabs.get(tabId)?.binding || null;
     }
 
+    function isIdle(tabId) {
+      const state = tabs.get(tabId);
+      if (!state?.binding) return true;
+      for (const request of requests.values()) {
+        if (request.tabId === tabId) return false;
+      }
+      return false;
+    }
+
     function axValue(value) {
       if (value == null) return '';
       if (typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'value')) {
@@ -812,8 +821,17 @@
       return attachTab(tabId).then(() => {
         const state = tabs.get(tabId);
         if (!state) throw new Error('CDP tab attachment disappeared');
+        const nextOperationId = String(operationId);
+        if (state.binding && state.binding.operationId !== nextOperationId) {
+          throw new Error('PASI_NATIVE: CDP operation bind blocked by active operation');
+        }
+        for (const request of requests.values()) {
+          if (request.tabId === tabId && request.operationId !== nextOperationId) {
+            throw new Error('PASI_NATIVE: CDP operation bind blocked by active generation request');
+          }
+        }
         state.binding = {
-          operationId: String(operationId),
+          operationId: nextOperationId,
           controllerId: String(controllerId || ''),
           prompt: typeof prompt === 'string' ? prompt : '',
           completionMarkers: Array.isArray(completionMarkers) ? completionMarkers.slice(0, 4) : [],
@@ -1143,6 +1161,7 @@
       ensureGithubRepository,
       handlePaused,
       currentBinding,
+      isIdle,
       health() {
         return {
           status: 'HEALTHY',

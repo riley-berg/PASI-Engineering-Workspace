@@ -79,6 +79,58 @@ function fakeDebugger() {
   };
 }
 
+test('CDP controller keeps prompt bindings exclusive and exposes idle state', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+
+  assert.equal(controller.isIdle(31), true);
+  await controller.bindOperation({
+    tabId: 31,
+    operationId: 'op-31-a',
+    controllerId: 'controller-31',
+    prompt: 'first prompt'
+  });
+  assert.equal(controller.isIdle(31), false);
+
+  await assert.rejects(
+    controller.bindOperation({
+      tabId: 31,
+      operationId: 'op-31-b',
+      controllerId: 'controller-31',
+      prompt: 'second prompt'
+    }),
+    /active operation/
+  );
+
+  await controller.unbindOperation(31, 'op-31-a', 'controller-31');
+  assert.equal(controller.isIdle(31), true);
+
+  await controller.bindOperation({
+    tabId: 31,
+    operationId: 'op-31-c',
+    controllerId: 'controller-31',
+    prompt: 'third prompt'
+  });
+  await controller.handlePaused(
+    {tabId: 31},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-31',
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST',
+        postData: JSON.stringify({prompt: 'third prompt'})
+      }
+    }
+  );
+  assert.equal(controller.isIdle(31), false);
+
+  await controller.interruptOperation(31, 'op-31-c', 'controller-31');
+  await controller.unbindOperation(31, 'op-31-c', 'controller-31');
+  assert.equal(controller.isIdle(31), true);
+});
+
 test('CDP reasoning control verifies an existing Thinking state and can enable it', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
@@ -204,6 +256,49 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
+test('CDP submit rejects an unacknowledged send instead of treating a red-box submission as accepted', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  const prompt = '[PASI_OPERATION op-send-failed]';
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 99,
+          role: {type: 'role', value: 'textbox'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: prompt},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: true}}
+          ]
+        }]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi, now: () => Date.now()});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 17,
+    operationId: 'op-send-failed',
+    controllerId: 'controller-17',
+    prompt,
+    completionMarkers: ['SEND_FAILED_OK']
+  });
+
+  await assert.rejects(
+    controller.submitOperation(17, 'op-send-failed', 'controller-17'),
+    /prompt submission not acknowledged/
+  );
+});
+
 test('CDP submit accepts editable composer AX nodes exposed with newer semantic roles', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
@@ -285,7 +380,7 @@ test('CDP submit waits for the accessibility composer to appear after debugger a
 
   const result = await controller.submitOperation(13, 'op-13', 'controller-13');
   assert.equal(result.submitted, true);
-  assert.equal(treeCalls, 3);
+  // The composer becomes available on the third AX-tree read; the fourth\n  // read is the post-submit acknowledgement check introduced to reject\n  // unacknowledged ChatGPT red-box submissions.\n  assert.equal(treeCalls, 4);
 });
 
 test('CDP submit operation refuses to overwrite unrelated editable text', async () => {
@@ -414,9 +509,88 @@ test('response stream is captured before browser continuation and stale snapshot
   assert.equal(events.at(-1).requestId, 'req-8');
   assert.equal(events.at(-1).assistantMessageId, 'new');
   assert.equal(events.at(-1).responseText, 'NETWORK_PATCH_OK_2026');
+  assert.equal(events.at(-1).streamComplete, true);
   assert.ok(debuggerApi.commands.some((command) => command.method === 'Fetch.takeResponseBodyAsStream'));
   assert.ok(debuggerApi.commands.some((command) => command.method === 'Fetch.fulfillRequest'));
 });
+
+test('premature response EOF is treated as incomplete and is never replayed as a completed generation', async () => {
+  const debuggerApi = fakeDebugger();
+  const events = [];
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Fetch.takeResponseBodyAsStream') {
+      return callback({stream: 'truncated-stream'});
+    }
+    if (method === 'IO.read') {
+      if (!this._truncatedRead) {
+        this._truncatedRead = true;
+        return callback({
+          data: 'data: {"message":{"id":"partial","author":{"role":"assistant"},"content":{"parts":["PARTIAL_ONLY"]}}}\n\n',
+          eof: true
+        });
+      }
+      return callback({data: '', eof: true});
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi, onEvent: (event) => events.push(event)});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 19,
+    operationId: 'op-19',
+    controllerId: 'controller-19',
+    prompt: 'partial prompt'
+  });
+
+  await controller.handlePaused(
+    {tabId: 19},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-19',
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST',
+        postData: JSON.stringify({prompt: 'partial prompt'})
+      }
+    }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await controller.handlePaused(
+    {tabId: 19},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-19',
+      responseStatusCode: 200,
+      responseStatusText: 'OK',
+      responseHeaders: [{name: 'content-type', value: 'text/event-stream'}],
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST'
+      }
+    }
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(events.at(-1).eventType, 'FAILED');
+  assert.equal(events.at(-1).reason, 'NETWORK_RESPONSE_INCOMPLETE');
+  assert.equal(events.at(-1).classification, 'retryable_transport_failure');
+  assert.equal(events.at(-1).streamComplete, false);
+  assert.equal(events.at(-1).responseText, 'PARTIAL_ONLY');
+  assert.equal(debuggerApi.commands.some((command) =>
+    command.method === 'Fetch.fulfillRequest' &&
+    command.params.requestId === 'req-19'
+  ), false);
+  assert.equal(debuggerApi.commands.some((command) =>
+    command.method === 'Fetch.failRequest' &&
+    command.params.requestId === 'req-19'
+  ), true);
+});
+
 
 test('unmatched generation requests are never assigned to a task', async () => {
   const debuggerApi = fakeDebugger();
@@ -527,6 +701,30 @@ test('CDP recovery can interrupt the active generation request without a page re
     command.params.requestId === 'req-14'
   ), true);
   assert.equal(controller.health().activeRequests.length, 0);
+});
+
+test('detaching a tab consumes stale-tab runtime errors without rejecting cleanup', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalDetach = debuggerApi.detach;
+  const sandboxChrome = {runtime: {lastError: null}};
+  sandbox.chrome = sandboxChrome;
+  debuggerApi.detach = function(debuggee, callback) {
+    sandboxChrome.runtime.lastError = {message: 'No tab with given id 1779180802'};
+    originalDetach.call(this, debuggee, callback);
+    sandboxChrome.runtime.lastError = null;
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 18,
+    operationId: 'op-18',
+    controllerId: 'controller-18',
+    prompt: 'cleanup'
+  });
+
+  await assert.doesNotReject(() => controller.detachTab(18));
+  assert.equal(controller.health().attachedTabs.length, 0);
 });
 
 test('network-health exposes the request-to-task map and controller fence', async () => {

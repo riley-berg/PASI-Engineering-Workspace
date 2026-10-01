@@ -133,7 +133,11 @@
       buffer = buffer.slice(newlineIndex + 1);
       if (!line.startsWith('data:')) continue;
       const raw = line.slice(5).trim();
-      if (!raw || raw === '[DONE]') continue;
+      if (!raw) continue;
+      if (raw === '[DONE]') {
+        state.streamComplete = true;
+        continue;
+      }
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -311,7 +315,16 @@
       try {
         if (typeof debuggerApi?.detach === 'function') {
           await new Promise((resolve) => {
-            try { debuggerApi.detach({tabId}, () => resolve()); } catch (_) { resolve(); }
+            try {
+              debuggerApi.detach({tabId}, () => {
+                // Consume Chrome's stale-tab cleanup error so ordinary tab
+                // closure does not surface as an unchecked extension error.
+                void globalThis.chrome?.runtime?.lastError;
+                resolve();
+              });
+            } catch (_) {
+              resolve();
+            }
           });
         }
       } catch (_) {}
@@ -321,6 +334,14 @@
 
     function currentBinding(tabId) {
       return tabs.get(tabId)?.binding || null;
+    }
+
+    function isIdle(tabId) {
+      const state = tabs.get(tabId);
+      for (const request of requests.values()) {
+        if (request.tabId === tabId) return false;
+      }
+      return !state?.binding;
     }
 
     function axValue(value) {
@@ -707,6 +728,39 @@
       }
       throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
     }
+    async function waitForSubmissionAcknowledgement(tabId, operationId, prompt, timeoutMs = 3000) {
+      const deadline = now() + timeoutMs;
+      const expected = String(prompt || '').trim();
+      while (now() < deadline) {
+        const activeRequest = [...requests.values()].find((request) =>
+          request.tabId === tabId &&
+          request.operationId === String(operationId)
+        );
+        if (activeRequest) {
+          return {acknowledged: true, source: 'network_request'};
+        }
+
+        try {
+          const nodes = await readAXTree(tabId);
+          const target = findComposerAXNode(nodes);
+          const currentText = String(target.currentText || '').trim();
+          if (!currentText || currentText !== expected) {
+            return {acknowledged: true, source: 'composer_state'};
+          }
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (
+            !message.includes('NO_ACCESSIBLE_COMPOSER') &&
+            !message.includes('ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE')
+          ) {
+            throw error;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error('PASI_NATIVE: prompt submission not acknowledged');
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -743,8 +797,15 @@
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13
       });
+      const acknowledgement = await waitForSubmissionAcknowledgement(
+        tabId,
+        state.binding.operationId,
+        prompt,
+      );
       return {
         submitted: true,
+        acknowledged: true,
+        acknowledgementSource: acknowledgement.source,
         operationId: state.binding.operationId,
         controllerId: state.binding.controllerId,
         submissionMethod: 'cdp_input',
@@ -759,8 +820,17 @@
       return attachTab(tabId).then(() => {
         const state = tabs.get(tabId);
         if (!state) throw new Error('CDP tab attachment disappeared');
+        const nextOperationId = String(operationId);
+        if (state.binding && state.binding.operationId !== nextOperationId) {
+          throw new Error('PASI_NATIVE: CDP operation bind blocked by active operation');
+        }
+        for (const request of requests.values()) {
+          if (request.tabId === tabId && request.operationId !== nextOperationId) {
+            throw new Error('PASI_NATIVE: CDP operation bind blocked by active generation request');
+          }
+        }
         state.binding = {
-          operationId: String(operationId),
+          operationId: nextOperationId,
           controllerId: String(controllerId || ''),
           prompt: typeof prompt === 'string' ? prompt : '',
           completionMarkers: Array.isArray(completionMarkers) ? completionMarkers.slice(0, 4) : [],
@@ -838,7 +908,7 @@
       let timer = null;
       let textBuffer = '';
       const decoder = new TextDecoder('utf-8');
-      const streamState = {responseText: '', assistantMessageId: null, terminal: null};
+      const streamState = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
 
       const capture = (bytes) => {
         totalBytes += bytes.length;
@@ -876,7 +946,9 @@
         if (textBuffer) parseSseText(textBuffer + '\n', streamState);
         await sendCommand(source.tabId, 'IO.close', {handle}).catch(() => undefined);
         const bodyBytes = concatBytes(byteChunks, totalBytes);
-        await replayResponse(source, params, bodyBytes);
+        if (streamState.streamComplete || streamState.terminal) {
+          await replayResponse(source, params, bodyBytes);
+        }
         return streamState;
       } catch (error) {
         try { await sendCommand(source.tabId, 'IO.close', {handle}); } catch (_) {}
@@ -897,9 +969,11 @@
             ? decodeBase64(fallback.body || '')
             : new TextEncoder().encode(fallback?.body || '');
           if (bytes.length > MAX_REPLAY_BODY_BYTES) throw new Error('Fallback response body exceeded bound');
-          const state = {responseText: '', assistantMessageId: null, terminal: null};
+          const state = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
           parseSseText(new TextDecoder('utf-8').decode(bytes) + '\n', state);
-          await replayResponse(source, params, bytes);
+          if (state.streamComplete || state.terminal) {
+            await replayResponse(source, params, bytes);
+          }
           return state;
         } catch (fallbackError) {
           const combined = new Error('CDP response capture failed: ' + String(fallbackError?.message || fallbackError));
@@ -991,23 +1065,39 @@
             responseText: state.responseText,
             assistantMessageId: state.assistantMessageId
           });
+        } else if (!state.streamComplete) {
+          emitLifecycle(correlation, {
+            eventType: 'FAILED',
+            reason: 'NETWORK_RESPONSE_INCOMPLETE',
+            classification: 'retryable_transport_failure',
+            telemetry: {bodyObserved: true, streamComplete: false},
+            responseText: state.responseText,
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: false
+          });
+          await sendCommand(tabId, 'Fetch.failRequest', {
+            requestId: params.requestId,
+            errorReason: 'ConnectionAborted'
+          }).catch(() => undefined);
         } else if (completionMarkersSatisfied(state.responseText, correlation.binding.completionMarkers)) {
           emitLifecycle(correlation, {
             eventType: 'COMPLETED',
             reason: 'RESPONSE_STREAM_FINISHED',
             classification: 'success',
-            telemetry: {bodyObserved: true},
+            telemetry: {bodyObserved: true, streamComplete: true},
             responseText: state.responseText,
-            assistantMessageId: state.assistantMessageId
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: true
           });
         } else {
           emitLifecycle(correlation, {
             eventType: 'FAILED',
             reason: 'RESPONSE_MARKER_NOT_FOUND',
             classification: 'response_correlation_failure',
-            telemetry: {bodyObserved: true},
+            telemetry: {bodyObserved: true, streamComplete: true},
             responseText: state.responseText,
-            assistantMessageId: state.assistantMessageId
+            assistantMessageId: state.assistantMessageId,
+            streamComplete: true
           });
         }
       } catch (error) {
@@ -1070,6 +1160,7 @@
       ensureGithubRepository,
       handlePaused,
       currentBinding,
+      isIdle,
       health() {
         return {
           status: 'HEALTHY',

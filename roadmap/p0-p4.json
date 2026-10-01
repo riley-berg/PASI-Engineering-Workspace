@@ -7,31 +7,41 @@
       "title": "Runtime proof and delivery infrastructure",
       "depends_on": [],
       "status": "in_progress",
-      "promotion_gate": "Current-CDP M0/M1/M2 plus P0.11 recovery evidence required before P0.4 168-hour acceptance."
+      "promotion_gate": "Current-CDP M0/M1/M2 browser/restart recovery plus bounded task prompts required before P0.4."
     },
     {
       "id": "P1",
       "title": "Control-plane consolidation",
-      "depends_on": ["P0.3", "P0.11", "P0.4"],
+      "depends_on": [
+        "P0.3",
+        "P0.4"
+      ],
       "status": "planned",
       "promotion_gate": "Current-CDP P0 recovery gates accepted."
     },
     {
       "id": "P2",
       "title": "Planner, scheduler, and engineering memory",
-      "depends_on": ["P1"],
+      "depends_on": [
+        "P1"
+      ],
       "status": "planned"
     },
     {
       "id": "P3",
       "title": "Provider-neutral model infrastructure",
-      "depends_on": ["P2"],
+      "depends_on": [
+        "P2"
+      ],
       "status": "planned"
     },
     {
       "id": "P4",
       "title": "Typed computer integration",
-      "depends_on": ["P1", "P3"],
+      "depends_on": [
+        "P1",
+        "P3"
+      ],
       "status": "planned"
     }
   ]

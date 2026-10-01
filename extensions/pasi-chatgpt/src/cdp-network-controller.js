@@ -311,7 +311,16 @@
       try {
         if (typeof debuggerApi?.detach === 'function') {
           await new Promise((resolve) => {
-            try { debuggerApi.detach({tabId}, () => resolve()); } catch (_) { resolve(); }
+            try {
+              debuggerApi.detach({tabId}, () => {
+                // Consume Chrome's stale-tab cleanup error so ordinary tab
+                // closure does not surface as an unchecked extension error.
+                void globalThis.chrome?.runtime?.lastError;
+                resolve();
+              });
+            } catch (_) {
+              resolve();
+            }
           });
         }
       } catch (_) {}

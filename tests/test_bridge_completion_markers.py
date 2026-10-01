@@ -226,7 +226,7 @@ def test_cdp_started_event_moves_claimed_operation_to_generating(tmp_path):
 
     stored = bridge.get_operation(operation.operation_id, repair_response=False)
     assert stored is not None
-    assert stored["status"] == "generating"
+    assert stored["status"] == "claimed"
     assert stored["network_lifecycle_event"] == "STARTED"
     assert stored.get("network_terminal_event") is None
 

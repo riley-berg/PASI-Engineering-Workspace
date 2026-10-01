@@ -58,6 +58,7 @@ MAX_TIMING_KEYS = frozenset({
     "ack_at_ms",
     "generation_start_ms",
     "completed_at_ms",
+    "response_processed_at_ms",
     "completion_to_prompt_injected_ms",
     "response_completed_to_prompt_injected_ms",
     "user_messages_added",
@@ -407,6 +408,9 @@ class BridgeState:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
 
+            if self._response_processing_pending_for_controller(queue, controller_id):
+                return None
+
             for item in queue:
                 if item.get("operation_id") != operation_id:
                     continue
@@ -488,6 +492,9 @@ class BridgeState:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
+
+            if self._response_processing_pending_for_controller(queue, controller_id):
+                return None
 
             # A completion acknowledgement may durably claim the next
             # operation before the worker has delivered it. Allow the same
@@ -644,12 +651,17 @@ class BridgeState:
                 current["timing"] = normalized_timing
 
             chained = None
-            for item in queue:
-                if item is current or item.get("status") != "queued":
-                    continue
-                chained = dict(self._mark_claimed(item, controller_id))
-                current["next_operation_id"] = item.get("operation_id")
-                break
+            allow_chained_claim = (
+                current.get("operation_type") != "prompt"
+                or current.get("response_processing_complete") is True
+            )
+            if allow_chained_claim:
+                for item in queue:
+                    if item is current or item.get("status") != "queued":
+                        continue
+                    chained = dict(self._mark_claimed(item, controller_id))
+                    current["next_operation_id"] = item.get("operation_id")
+                    break
 
             self._save_queue(queue)
             return dict(current), chained
@@ -689,7 +701,7 @@ class BridgeState:
         if any(key not in MAX_TIMING_KEYS for key in value):
             return None
         result: dict[str, Any] = {}
-        for key in ("injected_at_ms", "ack_at_ms", "generation_start_ms", "completed_at_ms"):
+        for key in ("injected_at_ms", "ack_at_ms", "generation_start_ms", "completed_at_ms", "response_processed_at_ms"):
             if key not in value:
                 continue
             raw = value[key]
@@ -727,6 +739,10 @@ class BridgeState:
             if previous is not None and numeric < previous:
                 return None
             previous = numeric
+        processed_at = result.get("response_processed_at_ms")
+        if processed_at is not None:
+            if "completed_at_ms" in result and float(processed_at) < float(result["completed_at_ms"]):
+                return None
         if result.get("ack_verified") is True and "ack_at_ms" not in result:
             return None
         return result
@@ -814,6 +830,66 @@ class BridgeState:
                 self._save_queue(queue)
                 return dict(item)
         return None
+
+    def mark_response_processed(
+        self,
+        operation_id: str,
+        controller_id: str,
+    ) -> dict[str, Any] | None:
+        """Durably release the next-operation barrier after runner response processing."""
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return None
+        if not isinstance(controller_id, str) or not controller_id.strip():
+            return None
+        with self.lock:
+            queue = self._load_queue()
+            for item in queue:
+                if item.get("operation_id") != operation_id:
+                    continue
+                if item.get("operation_type") != "prompt" or item.get("status") != "completed":
+                    return None
+                owner = item.get("controller_id")
+                if owner != controller_id.strip():
+                    return None
+                if item.get("response_text_available") is not True or not str(item.get("response_text") or "").strip():
+                    return None
+                if item.get("network_response_authoritative") is not True:
+                    return None
+
+                timing = dict(item.get("timing") or {})
+                processed_at_ms = int(time.time() * 1000)
+                completed_at_ms = timing.get("completed_at_ms")
+                if isinstance(completed_at_ms, (int, float)) and not isinstance(completed_at_ms, bool):
+                    processed_at_ms = max(processed_at_ms, int(completed_at_ms))
+                timing["response_processed_at_ms"] = processed_at_ms
+                normalized = self.normalize_timing(timing)
+                if normalized is None:
+                    return None
+                item["timing"] = normalized
+                item["response_processing_required"] = True
+                item["response_processing_complete"] = True
+                item["updated_at"] = time.time()
+                self._save_queue(queue)
+                return dict(item)
+        return None
+
+    @staticmethod
+    def _response_processing_pending_for_controller(
+        queue: list[dict[str, Any]],
+        controller_id: str | None,
+    ) -> bool:
+        if not controller_id:
+            return False
+        for item in queue:
+            if (
+                item.get("status") == "completed"
+                and item.get("operation_type") == "prompt"
+                and item.get("controller_id") == controller_id
+                and item.get("response_processing_required") is True
+                and item.get("response_processing_complete") is not True
+            ):
+                return True
+        return False
 
     def complete_operation(
         self,
@@ -1360,6 +1436,10 @@ class BridgeState:
                 validate_transition(current_status, status)
                 item["status"] = status
 
+                if status == "completed" and item.get("operation_type") == "prompt":
+                    item["response_processing_required"] = True
+                    item["response_processing_complete"] = False
+
                 if chat_url is not None:
                     item["chat_url"] = chat_url
 
@@ -1761,6 +1841,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
             if path == "/chat/finished":
                 self._finished(payload)
+                return
+
+            if path == "/chat/processed":
+                self._processed(payload)
                 return
 
             if path == "/chat/failed":
@@ -2288,6 +2372,38 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "operation": operation
                 }
             )
+
+    def _processed(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            self._send_json({"error": "operation_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        operation = self.bridge_state.mark_response_processed(
+            operation_id,
+            controller_id.strip(),
+        )
+        if operation is None:
+            self._send_json(
+                {"error": "Response processing acknowledgement rejected."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+
+        self._send_json({
+            "ok": True,
+            "operation_id": operation_id,
+            "status": operation.get("status"),
+            "response_processing_complete": operation.get("response_processing_complete") is True,
+            "timing": operation.get("timing") or {},
+        })
 
     def _failed(
         self,

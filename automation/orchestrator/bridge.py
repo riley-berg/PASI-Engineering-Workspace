@@ -419,6 +419,28 @@ class BridgeState:
 
         return None
 
+    def wait_for_next_operation(
+        self,
+        controller_id: str | None = None,
+        timeout_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        """Wait for a queued operation that is safe to dispatch to a controller."""
+        if timeout_ms < 0:
+            timeout_ms = 0
+        timeout_seconds = min(timeout_ms, 60_000) / 1000.0
+        deadline = time.monotonic() + timeout_seconds
+        with self.operation_changed:
+            while True:
+                operation = self.claim_next_operation(controller_id)
+                if operation is not None:
+                    return operation
+                if timeout_seconds <= 0:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.operation_changed.wait(timeout=remaining)
+
     def claim_next_operation(
         self,
         controller_id: str | None = None,
@@ -1613,11 +1635,20 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/next-operation":
             controller_ids = parse_qs(parsed.query).get("controller_id", [])
+            wait_values = parse_qs(parsed.query).get("wait_ms", [])
             controller_id = controller_ids[0].strip() if controller_ids else ""
             if not controller_id or len(controller_id) > 200:
                 self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
                 return
-            operation = self.bridge_state.claim_next_operation(controller_id)
+            try:
+                wait_ms = int(wait_values[0]) if wait_values else 0
+            except (TypeError, ValueError):
+                self._send_json({"error": "wait_ms must be an integer."}, HTTPStatus.BAD_REQUEST)
+                return
+            if wait_ms < 0 or wait_ms > 60_000:
+                self._send_json({"error": "wait_ms must be between 0 and 60000."}, HTTPStatus.BAD_REQUEST)
+                return
+            operation = self.bridge_state.wait_for_next_operation(controller_id, wait_ms)
             self._send_json({"operation": operation})
             return
 

@@ -204,6 +204,49 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
+test('CDP submit rejects an unacknowledged send instead of treating a red-box submission as accepted', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  const prompt = '[PASI_OPERATION op-send-failed]';
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 99,
+          role: {type: 'role', value: 'textbox'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: prompt},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: true}}
+          ]
+        }]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi, now: () => Date.now()});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 17,
+    operationId: 'op-send-failed',
+    controllerId: 'controller-17',
+    prompt,
+    completionMarkers: ['SEND_FAILED_OK']
+  });
+
+  await assert.rejects(
+    controller.submitOperation(17, 'op-send-failed', 'controller-17'),
+    /prompt submission not acknowledged/
+  );
+});
+
 test('CDP submit accepts editable composer AX nodes exposed with newer semantic roles', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);

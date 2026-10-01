@@ -635,6 +635,9 @@ class BridgeState:
             current_status = str(current.get("status", ""))
             validate_transition(current_status, "completed")
             current["status"] = "completed"
+            if current.get("operation_type") == "prompt":
+                current["response_processing_required"] = True
+                current["response_processing_complete"] = False
 
             if chat_url is not None:
                 current["chat_url"] = chat_url
@@ -1332,6 +1335,9 @@ class BridgeState:
                 ):
                     validate_transition(current_status, "completed")
                     item["status"] = "completed"
+                    if item.get("operation_type") == "prompt":
+                        item["response_processing_required"] = True
+                        item["response_processing_complete"] = False
                     item["completion_recovery_reason"] = "browser_response_observation_after_transient_failure"
                     item["recovery_error"] = error[:MAX_ERROR_CHARS]
                     item["updated_at"] = time.time()

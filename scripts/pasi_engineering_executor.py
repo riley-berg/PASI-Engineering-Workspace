@@ -43,10 +43,48 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+def extract_canonical_task_context(body: str, task_id: str) -> str:
+    text = str(body or "")
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return ""
+
+    phase = re.search(r"^# (P[0-9]+) — (.+)$", text, re.MULTILINE)
+    dependency = re.search(r"^Dependency:\s*(.+)$", text, re.MULTILINE)
+    task = re.search(
+        rf"^\s*- \[[ xX]\] \*\*{re.escape(task_id)} — ([^*]+)\*\*(?:\s+—\s+(.+?))?\s*$",
+        text,
+        re.MULTILINE,
+    )
+
+    sections = []
+    if phase:
+        sections.append(f"PHASE: {phase.group(1)} — {phase.group(2).strip()}")
+    if dependency:
+        sections.append(f"DEPENDENCY: {dependency.group(1).strip()}")
+    if task:
+        description = task.group(2).strip() if task.lastindex and task.lastindex >= 2 and task.group(2) else ""
+        if description:
+            sections.append(f"CANONICAL TASK {task_id}: {task.group(1).strip()} — {description}")
+        else:
+            sections.append(f"CANONICAL TASK {task_id}: {task.group(1).strip()}")
+
+    completion = re.search(
+        r"^## Completion rule\n(.*?)(?=^## |\Z)",
+        text,
+        re.MULTILINE | re.DOTALL,
+    )
+    if completion:
+        sections.append("COMPLETION RULE:\n" + completion.group(1).strip())
+
+    return "\n\n".join(section for section in sections if section).strip()
+
+
 def canonical_issue_context() -> str:
     import urllib.request
     token=os.environ.get("PASI_GITHUB_TOKEN","").strip() or os.environ.get("GITHUB_TOKEN","").strip()
     issue=os.environ.get("PASI_TASK_SOURCE_ISSUE","").strip()
+    task_id=os.environ.get("PASI_TASK_ID","").strip()
     if not token or not issue:
         return ""
     req=urllib.request.Request(
@@ -60,7 +98,7 @@ def canonical_issue_context() -> str:
     except Exception:
         return ""
     body=payload.get("body") if isinstance(payload,dict) else ""
-    return str(body or "")[:30000]
+    return extract_canonical_task_context(str(body or "")[:30000], task_id)
 
 
 def main():
@@ -85,7 +123,7 @@ def main():
     task_issue=os.environ.get("PASI_TASK_SOURCE_ISSUE","")
     previous = os.environ.get("PASI_TASK_PREVIOUS_CONTEXT", "").strip()
     continuity = f"\n\nRUN CONTINUITY CONTEXT:\n{previous}" if previous else ""
-    task=os.environ["PASI_TASK_TITLE"]+f"\n\nCanonical task {task_id}; phase {task_phase}; source issue #{task_issue}. Work only in PASI Engineering Workspace.\n\nCANONICAL ISSUE CONTEXT:\n{canonical_issue_context()}{continuity}"
+    task=os.environ["PASI_TASK_TITLE"]+f"\n\nCanonical task {task_id}; phase {task_phase}; source issue #{task_issue}. Work only in PASI Engineering Workspace.\n\nCANONICAL TASK CONTEXT:\n{canonical_issue_context()}{continuity}"
     code,out=run([sys.executable,"-m","scripts.pasi_chat_guard",task,"--repo",str(root),"--extension-root",str(ext),"--timeout",os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")],Path(__file__).resolve().parents[1],float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800"))+60);(runtime/"last-executor-output.txt").write_text(out+"\n",encoding="utf-8")
     if code:print(out,file=sys.stderr);return code
     response=out.split("=== CHATGPT RESPONSE ===",1)[1] if "=== CHATGPT RESPONSE ===" in out else out

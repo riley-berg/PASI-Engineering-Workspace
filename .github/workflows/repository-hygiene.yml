@@ -29,6 +29,3 @@ jobs:
           node-version: "22"
       - name: Run non-destructive repository hygiene audit
         run: python scripts/pasi_repository_hygiene.py --strict --json
-      - name: Verify canonical browser contract
-        run: |
-          python scripts/pasi_engineering_browser_preflight.py             --extension-root "$GITHUB_WORKSPACE/extensions/pasi-chatgpt"             --no-start

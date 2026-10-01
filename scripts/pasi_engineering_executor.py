@@ -43,6 +43,82 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+
+
+def quarantine_failed_candidate(root: Path, baseline: str, task_id: str, patch: str, *, pytest_output: str = "", frontend_output: str = "", failure_reason: str = "") -> dict[str, str]:
+    safe_task = re.sub(r"[^A-Za-z0-9_.-]+", "-", task_id).strip("-").lower() or "task"
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    quarantine_branch = f"pasi/quarantine/{safe_task}-{stamp}-{os.getpid()}"
+    artifact_root = Path(
+        os.environ.get(
+            "PASI_FAILED_CANDIDATE_DIR",
+            str(Path.home() / ".pasi" / "engineering-workspace-168h" / "failed-candidates"),
+        )
+    ).expanduser().resolve() / f"{safe_task}-{stamp}-{os.getpid()}"
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    original_branch = ""
+    result: dict[str, str] = {
+        "artifact_dir": str(artifact_root),
+        "baseline": baseline,
+        "quarantine_branch": quarantine_branch,
+    }
+
+    try:
+        original_branch = run(["git", "branch", "--show-current"], root, 30)[1].strip()
+        (artifact_root / "candidate.patch").write_text(patch + "\n", encoding="utf-8")
+        (artifact_root / "pytest.log").write_text(pytest_output + "\n", encoding="utf-8")
+        (artifact_root / "frontend.log").write_text(frontend_output + "\n", encoding="utf-8")
+        (artifact_root / "failure.json").write_text(
+            json.dumps(
+                {
+                    "task_id": task_id,
+                    "baseline": baseline,
+                    "original_branch": original_branch,
+                    "quarantine_branch": quarantine_branch,
+                    "failure_reason": failure_reason,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        runtime_output = Path(
+            os.environ.get(
+                "PASI_ENGINEERING_RUNTIME_DIR",
+                str(Path.home() / ".pasi" / "engineering-workspace-168h" / "runtime"),
+            )
+        ).expanduser() / "last-executor-output.txt"
+        if runtime_output.is_file():
+            (artifact_root / "model-response.txt").write_text(runtime_output.read_text(encoding="utf-8"), encoding="utf-8")
+
+        code, out = run(["git", "switch", "-c", quarantine_branch], root, 60)
+        if code:
+            raise RuntimeError(f"could not create quarantine branch: {out}")
+        code, out = run(["git", "add", "--all"], root, 60)
+        if code:
+            raise RuntimeError(f"could not stage failed candidate: {out}")
+        code, out = run(
+            ["git", "commit", "-m", f"pasi: quarantine failed candidate {task_id}"],
+            root,
+            120,
+        )
+        if code:
+            raise RuntimeError(f"could not preserve failed candidate commit: {out}")
+        result["quarantine_commit"] = run(["git", "rev-parse", "HEAD"], root, 30)[1].strip()
+    except Exception as exc:
+        result["quarantine_error"] = str(exc)
+    finally:
+        if original_branch:
+            run(["git", "switch", original_branch], root, 60)
+        run(["git", "reset", "--hard", baseline], root, 60)
+        run(["git", "clean", "-fd"], root, 60)
+        result["restored_head"] = run(["git", "rev-parse", "HEAD"], root, 30)[1].strip()
+        status = run(["git", "status", "--porcelain", "--untracked-files=all"], root, 30)[1].strip()
+        result["restored_clean"] = str(not bool(status))
+
+    return result
+
 def extract_canonical_task_context(body: str, task_id: str) -> str:
     text = str(body or "")
     task_id = str(task_id or "").strip()
@@ -133,7 +209,10 @@ def main():
         code,msg=run(args,root,60,input_text); 
         if code:print(msg,file=sys.stderr);return 1
     code,msg=run(["git","diff","--check"],root,60)
-    if code:return 1
+    if code:
+        quarantine = quarantine_failed_candidate(root, before, task_id, patch, failure_reason="git diff --check failed", pytest_output=msg)
+        print(json.dumps({"verification_failure":"git diff --check","quarantine":quarantine},indent=2),file=sys.stderr)
+        return 1
     # The acceptance worktree is the task source of truth. Keep pytest from
     # importing an editable install that points at another checkout.
     test_env=os.environ.copy()
@@ -142,9 +221,26 @@ def main():
     inherited_parts=[p for p in inherited.split(os.pathsep) if p and Path(p).resolve()!=worktree_src.resolve()]
     test_env["PYTHONPATH"]=os.pathsep.join([str(worktree_src),*inherited_parts])
     code,msg=run([sys.executable,"-m","pytest","-q"],root,900,env=test_env)
-    if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1
+    pytest_output = msg
+    if code:
+        quarantine = quarantine_failed_candidate(
+            root, before, task_id, patch,
+            pytest_output=pytest_output,
+            failure_reason="pytest failed",
+        )
+        print(json.dumps({"verification_failure":"pytest","quarantine":quarantine},indent=2),file=sys.stderr)
+        return 1
     code,msg=run(["node","--test","web/app.test.js"],root,300)
-    if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1
+    frontend_output = msg
+    if code:
+        quarantine = quarantine_failed_candidate(
+            root, before, task_id, patch,
+            pytest_output=pytest_output,
+            frontend_output=frontend_output,
+            failure_reason="frontend tests failed",
+        )
+        print(json.dumps({"verification_failure":"frontend","quarantine":quarantine},indent=2),file=sys.stderr)
+        return 1
     run(["git","add","--all"],root,60);msg=re.sub(r"[^A-Za-z0-9 .:_/-]+","",os.environ["PASI_TASK_ID"]+" "+os.environ["PASI_TASK_TITLE"]).strip()[:120]
     code,out=run(["git","commit","-m",f"pasi: {msg}"],root,120)
     if code:print(out,file=sys.stderr);return 1

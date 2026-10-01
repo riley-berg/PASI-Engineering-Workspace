@@ -87,6 +87,40 @@
     return null;
   }
 
+  function extractAssistantCompletionState(payload) {
+    const type = String(payload?.type || '').toLowerCase();
+    if (
+      type === 'message_stream_complete' ||
+      payload?.message_stream_complete === true
+    ) {
+      return {
+        finished: true,
+        status: 'message_stream_complete',
+        source: 'message_stream_complete'
+      };
+    }
+
+    const path = String(payload?.p || '');
+    if (/\/message\/status$/.test(path) && typeof payload?.v === 'string') {
+      const status = payload.v.trim().toLowerCase();
+      if (status === 'finished_successfully' || status === 'finished' || status === 'completed') {
+        return {finished: true, status, source: 'message_status_patch'};
+      }
+    }
+
+    const message = payload?.message || payload?.v?.message;
+    const status = String(message?.status || '').trim().toLowerCase();
+    if (status === 'finished_successfully' || status === 'finished' || status === 'completed') {
+      return {finished: true, status, source: 'message_status'};
+    }
+
+    return {
+      finished: false,
+      status: status || null,
+      source: null
+    };
+  }
+
   function classifyHttpStatus(status) {
     const value = Number(status);
     if (value === 401 || value === 403) {
@@ -135,7 +169,7 @@
       const raw = line.slice(5).trim();
       if (!raw) continue;
       if (raw === '[DONE]') {
-        state.streamComplete = true;
+        state.doneMarkerSeen = true;
         continue;
       }
       let parsed;
@@ -144,6 +178,13 @@
       } catch (_) {
         continue;
       }
+      const completion = extractAssistantCompletionState(parsed);
+      if (completion.finished) {
+        state.assistantCompletionVerified = true;
+        state.assistantCompletionStatus = completion.status;
+        state.assistantCompletionSource = completion.source;
+      }
+
       const extracted = extractAssistantResponseText(parsed);
       if (extracted?.text) {
         if (
@@ -908,7 +949,16 @@
       let timer = null;
       let textBuffer = '';
       const decoder = new TextDecoder('utf-8');
-      const streamState = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
+      const streamState = {
+        responseText: '',
+        assistantMessageId: null,
+        terminal: null,
+        streamComplete: false,
+        doneMarkerSeen: false,
+        assistantCompletionVerified: false,
+        assistantCompletionStatus: null,
+        assistantCompletionSource: null
+      };
 
       const capture = (bytes) => {
         totalBytes += bytes.length;
@@ -944,6 +994,10 @@
         }
         textBuffer += decoder.decode();
         if (textBuffer) parseSseText(textBuffer + '\n', streamState);
+        streamState.streamComplete = (
+          streamState.doneMarkerSeen &&
+          streamState.assistantCompletionVerified === true
+        );
         await sendCommand(source.tabId, 'IO.close', {handle}).catch(() => undefined);
         const bodyBytes = concatBytes(byteChunks, totalBytes);
         if (streamState.streamComplete || streamState.terminal) {
@@ -969,8 +1023,21 @@
             ? decodeBase64(fallback.body || '')
             : new TextEncoder().encode(fallback?.body || '');
           if (bytes.length > MAX_REPLAY_BODY_BYTES) throw new Error('Fallback response body exceeded bound');
-          const state = {responseText: '', assistantMessageId: null, terminal: null, streamComplete: false};
+          const state = {
+            responseText: '',
+            assistantMessageId: null,
+            terminal: null,
+            streamComplete: false,
+            doneMarkerSeen: false,
+            assistantCompletionVerified: false,
+            assistantCompletionStatus: null,
+            assistantCompletionSource: null
+          };
           parseSseText(new TextDecoder('utf-8').decode(bytes) + '\n', state);
+          state.streamComplete = (
+            state.doneMarkerSeen &&
+            state.assistantCompletionVerified === true
+          );
           if (state.streamComplete || state.terminal) {
             await replayResponse(source, params, bytes);
           }
@@ -1021,6 +1088,14 @@
 
         const expectedPromptMatched = requestContainsPrompt(request.postData, binding.prompt);
         if (binding.prompt && !expectedPromptMatched) return;
+
+        const existingCorrelation = [...requests.values()].find((entry) =>
+          entry.tabId === tabId &&
+          entry.operationId === binding.operationId
+        );
+        if (existingCorrelation) {
+          return;
+        }
 
         const correlation = {
           tabId,
@@ -1084,7 +1159,12 @@
             eventType: 'COMPLETED',
             reason: 'RESPONSE_STREAM_FINISHED',
             classification: 'success',
-            telemetry: {bodyObserved: true, streamComplete: true},
+            telemetry: {
+              bodyObserved: true,
+              streamComplete: true,
+              completionSignal: state.assistantCompletionStatus,
+              completionSignalSource: state.assistantCompletionSource
+            },
             responseText: state.responseText,
             assistantMessageId: state.assistantMessageId,
             streamComplete: true
@@ -1187,6 +1267,7 @@
     createController,
     requestUrlIsGeneration,
     extractAssistantResponseText,
+    extractAssistantCompletionState,
     parseSseText,
     classifyHttpStatus,
     classifyPayload,

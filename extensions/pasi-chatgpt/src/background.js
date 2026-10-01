@@ -155,11 +155,21 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
     const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
+    let bridgeRetryMs = 250;
     while (true) {
       if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
       );
+      if (payload === null) {
+        // A bridge restart or transient localhost failure must not permanently
+        // orphan the controller. Keep the handoff waiter alive with bounded
+        // exponential backoff until the bridge is reachable again.
+        await new Promise((resolve) => setTimeout(resolve, bridgeRetryMs));
+        bridgeRetryMs = Math.min(5000, bridgeRetryMs * 2);
+        continue;
+      }
+      bridgeRetryMs = 250;
       const operation = payload?.operation;
       if (operation?.operation_id) {
         return dispatchOperationForController(tabId, controllerId, operation);

@@ -716,6 +716,39 @@
       }
       throw lastError || new Error('PASI_NATIVE: GitHub repository attachment could not be verified');
     }
+    async function waitForSubmissionAcknowledgement(tabId, operationId, prompt, timeoutMs = 3000) {
+      const deadline = now() + timeoutMs;
+      const expected = String(prompt || '').trim();
+      while (now() < deadline) {
+        const activeRequest = [...requests.values()].find((request) =>
+          request.tabId === tabId &&
+          request.operationId === String(operationId)
+        );
+        if (activeRequest) {
+          return {acknowledged: true, source: 'network_request'};
+        }
+
+        try {
+          const nodes = await readAXTree(tabId);
+          const target = findComposerAXNode(nodes);
+          const currentText = String(target.currentText || '').trim();
+          if (!currentText || currentText !== expected) {
+            return {acknowledged: true, source: 'composer_state'};
+          }
+        } catch (error) {
+          const message = String(error?.message || error);
+          if (
+            !message.includes('NO_ACCESSIBLE_COMPOSER') &&
+            !message.includes('ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE')
+          ) {
+            throw error;
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error('PASI_NATIVE: prompt submission not acknowledged');
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -752,8 +785,15 @@
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13
       });
+      const acknowledgement = await waitForSubmissionAcknowledgement(
+        tabId,
+        state.binding.operationId,
+        prompt,
+      );
       return {
         submitted: true,
+        acknowledged: true,
+        acknowledgementSource: acknowledgement.source,
         operationId: state.binding.operationId,
         controllerId: state.binding.controllerId,
         submissionMethod: 'cdp_input',

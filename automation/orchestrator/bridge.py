@@ -73,6 +73,7 @@ MAX_RUNNER_CAPABILITIES_BYTES = 256_000
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: CONTEXT_EXHAUSTED",
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
+    "PASI_CDP: NETWORK_RESPONSE_INCOMPLETE",
     "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
     "PASI_CDP: network failure",
     "PASI_CDP: CDP_DEBUGGER_DETACHED",
@@ -1003,8 +1004,16 @@ class BridgeState:
                     item["network_failure_source"] = "cdp"
 
             response_text = data.get("response_text")
+            cdp_response_complete = (
+                network_source != "cdp_fetch"
+                or (
+                    str(data.get("event_type") or "") == "COMPLETED"
+                    and data.get("stream_complete") is True
+                )
+            )
             response_verified = (
-                isinstance(response_text, str)
+                cdp_response_complete
+                and isinstance(response_text, str)
                 and len(response_text) <= MAX_RESPONSE_TEXT_CHARS
                 and bool(response_text.strip())
                 and completion_markers_satisfied(
@@ -1162,6 +1171,7 @@ class BridgeState:
 
                 if (
                     item.get("operation_type") == "prompt"
+                    and item.get("network_response_authoritative") is True
                     and item.get("response_text_available") is True
                     and isinstance(item.get("response_text"), str)
                     and bool(str(item.get("response_text")).strip())

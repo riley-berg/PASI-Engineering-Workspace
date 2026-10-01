@@ -15,8 +15,8 @@ def test_probe_reports_authenticated_cdp_health(monkeypatch):
         if path == "/browser/health":
             return {
                 "observation": {
+                    "schema_version": "pasi-native-chromium-v2",
                     "data": {
-                        "schema_version": "pasi-native-chromium-v2",
                         "kind": "chatgpt_health",
                         "controller_version": "cdp-worker-v1",
                         "native_controller": True,

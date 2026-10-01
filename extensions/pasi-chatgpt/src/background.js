@@ -154,14 +154,21 @@ function serializeOperationDispatch(task) {
 async function waitForNextOperationForController(tabId, controllerId, waitMs = 60000) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
-    if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
     const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
-    const payload = await bridgeJson(
-      '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
-    );
-    const operation = payload?.operation;
-    if (!operation || !operation.operation_id) return false;
-    return dispatchOperationForController(tabId, controllerId, operation);
+    while (true) {
+      if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
+      const payload = await bridgeJson(
+        '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
+      );
+      const operation = payload?.operation;
+      if (operation?.operation_id) {
+        return dispatchOperationForController(tabId, controllerId, operation);
+      }
+      // A prompt can take longer than one bridge long-poll to finish being
+      // parsed, patched, tested, committed, and acknowledged. Continue waiting
+      // instead of silently dropping the handoff after the first 60s window.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
   });
 }
 

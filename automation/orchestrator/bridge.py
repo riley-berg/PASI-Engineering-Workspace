@@ -1072,6 +1072,13 @@ class BridgeState:
         if data.get("active_operation_id") != item.get("operation_id"):
             return False
 
+        network_source = data.get("network_source")
+        if network_source == "cdp_fetch" and not (
+            str(data.get("event_type") or "") == "COMPLETED"
+            and data.get("stream_complete") is True
+        ):
+            return False
+
         response_text = data.get("response_text")
         if (
             not isinstance(response_text, str)
@@ -1110,6 +1117,7 @@ class BridgeState:
             error.startswith("PASI_NATIVE: ChatGPT generation timed out")
             or error.startswith("PASI_NATIVE: response text unavailable")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_INCOMPLETE")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
             or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
             or error.startswith("PASI_CDP: network failure")

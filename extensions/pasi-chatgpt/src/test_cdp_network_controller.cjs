@@ -576,7 +576,7 @@ test('detaching a tab consumes stale-tab runtime errors without rejecting cleanu
   const debuggerApi = fakeDebugger();
   const originalDetach = debuggerApi.detach;
   const sandboxChrome = {runtime: {lastError: null}};
-  globalThis.chrome = sandboxChrome;
+  sandbox.chrome = sandboxChrome;
   debuggerApi.detach = function(debuggee, callback) {
     sandboxChrome.runtime.lastError = {message: 'No tab with given id 1779180802'};
     originalDetach.call(this, debuggee, callback);

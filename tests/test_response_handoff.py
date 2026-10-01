@@ -90,6 +90,46 @@ def test_prequeued_next_operation_waits_for_runner_processing_ack(tmp_path: Path
     assert claimed_second["predecessor_completed_at_ms"] == 123_456
 
 
+def test_cancel_operation_can_clean_up_an_interrupted_queued_diagnostic(tmp_path: Path):
+    bridge = BridgeState(StateManager(tmp_path / "state"))
+    operation = bridge.queue_operation("prompt", "interrupted diagnostic")
+
+    cancelled = bridge.cancel_operation(
+        operation.operation_id,
+        reason="live diagnostic interrupted by operator",
+    )
+
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["failure_reason"] == "cancelled"
+    assert cancelled["error"] == "live diagnostic interrupted by operator"
+    assert bridge.claim_next_operation("controller-1") is None
+
+
+def test_cancel_operation_requires_matching_controller_for_claimed_work(tmp_path: Path):
+    bridge = BridgeState(StateManager(tmp_path / "state"))
+    operation = bridge.queue_operation("prompt", "claimed diagnostic")
+    claimed = bridge.claim_next_operation("controller-1")
+
+    assert claimed is not None
+    assert claimed["operation_id"] == operation.operation_id
+
+    try:
+        bridge.cancel_operation(operation.operation_id, "controller-2", "stale controller")
+    except Exception as exc:
+        assert "different controller" in str(exc)
+    else:
+        raise AssertionError("controller fencing did not reject mismatched cancellation")
+
+    cancelled = bridge.cancel_operation(
+        operation.operation_id,
+        "controller-1",
+        "operator interrupted diagnostic",
+    )
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+
+
 def test_next_operation_carries_predecessor_completion_evidence(tmp_path: Path):
     state = StateManager(tmp_path / "state")
     bridge = BridgeState(state)

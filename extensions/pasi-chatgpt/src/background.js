@@ -66,7 +66,11 @@ async function cdpNetworkObservation(event) {
       response_text: typeof event.responseText === 'string' ? event.responseText : '',
       response_text_available: typeof event.responseText === 'string' && Boolean(event.responseText.trim()),
       ack_only: true,
-      claim_next: true
+      // A prompt response must be fully consumed by the runner before the
+      // next task is allowed to start. The bridge therefore completes only;
+      // the worker then long-polls for the next operation to be queued after
+      // response processing has finished.
+      claim_next: false
     };
     if (Object.keys(timing).length) completionPayload.timing = timing;
 
@@ -84,15 +88,7 @@ async function cdpNetworkObservation(event) {
         operationId,
         controllerId
       );
-      try {
-        const completedPayload = JSON.parse(completion.text);
-        const next = completedPayload?.next_operation;
-        if (next?.operation_id) {
-          void serializeOperationDispatch(() =>
-            dispatchOperationForController(event.tabId, controllerId, next)
-          );
-        }
-      } catch (_) {}
+      void waitForNextOperationForController(event.tabId, controllerId);
       return;
     }
 
@@ -153,6 +149,20 @@ function serializeOperationDispatch(task) {
   const next = operationDispatchTail.then(task, task);
   operationDispatchTail = next.catch(() => undefined);
   return next;
+}
+
+async function waitForNextOperationForController(tabId, controllerId, waitMs = 60000) {
+  if (typeof tabId !== 'number' || !controllerId) return false;
+  return serializeOperationDispatch(async () => {
+    if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
+    const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
+    const payload = await bridgeJson(
+      '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
+    );
+    const operation = payload?.operation;
+    if (!operation || !operation.operation_id) return false;
+    return dispatchOperationForController(tabId, controllerId, operation);
+  });
 }
 
 async function waitForTabNavigation(tabId, timeoutMs = 20000) {

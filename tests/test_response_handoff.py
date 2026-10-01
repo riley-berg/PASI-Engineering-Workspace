@@ -67,11 +67,12 @@ def test_prequeued_next_operation_waits_for_runner_processing_ack(tmp_path: Path
     # The production completion path records CDP authority before acknowledging
     # completion. Mirror that durable evidence here so the processing-ack gate
     # is exercised rather than bypassed by the test fixture.
-    queue = bridge._load_queue()
-    for item in queue:
-        if item.get("operation_id") == first.operation_id:
-            item["network_response_authoritative"] = True
-    bridge._save_queue(queue)
+    with bridge.lock:
+        queue = bridge._load_queue()
+        for item in queue:
+            if item.get("operation_id") == first.operation_id:
+                item["network_response_authoritative"] = True
+        bridge._save_queue(queue)
 
     blocked = bridge.wait_for_next_operation("controller-1", 20)
     assert blocked is None
@@ -110,6 +111,23 @@ def test_next_operation_carries_predecessor_completion_evidence(tmp_path: Path):
     )
     assert completed is not None
     assert completed["status"] == "completed"
+
+    bridge.save_browser_observation({
+        "schema_version": "pasi-network-cdp-v1",
+        "captured_at": "2026-09-30T00:00:00Z",
+        "data": {
+            "kind": "chatgpt_network_response",
+            "network_source": "cdp_fetch",
+            "active_operation_id": first.operation_id,
+            "controller_id": "controller-1",
+            "event_type": "COMPLETED",
+            "response_text": "finished response",
+            "response_text_available": True,
+        },
+    })
+    processed = bridge.mark_response_processed(first.operation_id, "controller-1")
+    assert processed is not None
+    assert processed["response_processing_complete"] is True
 
     second = bridge.queue_operation("prompt", "second task")
     claimed_second = bridge.wait_for_next_operation("controller-1", 0)

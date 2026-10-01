@@ -77,3 +77,13 @@ def test_browser_health_requires_native_network_authority(monkeypatch):
     result = preflight.browser_health("token")
     assert result["network_authority"] is True
     assert result["controller_version"] == "cdp-worker-v1"
+
+
+def test_provision_extension_token_syncs_ignored_browser_credential(tmp_path: Path):
+    token = "bridge-secret-example"
+    target = preflight.provision_extension_token(tmp_path, token)
+
+    assert target == tmp_path / ".bridge-token"
+    assert target.read_text(encoding="utf-8").strip() == token
+    assert preflight.extension_token_matches_bridge(tmp_path, token) is True
+    assert preflight.extension_token_matches_bridge(tmp_path, "different-token") is False

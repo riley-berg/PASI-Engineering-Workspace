@@ -2,6 +2,9 @@
 from __future__ import annotations
 import json,os,re,subprocess,sys,time
 from pathlib import Path
+from urllib.parse import quote
+
+from automation.computer_use.chatgpt import ChatGPTAdapterError, UrllibBridgeTransport
 import subprocess
 REPO="th3-st0v3/PASI-Engineering-Workspace";BEGIN="PASI_RESULT_PATCH_BEGIN";END="PASI_RESULT_PATCH_END"
 MARKERS={k:re.compile(p,re.MULTILINE|re.IGNORECASE if k=="allow_delete" else re.MULTILINE) for k,p in {
@@ -43,6 +46,49 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+
+
+def acknowledge_response_processing(output: str) -> dict:
+    """Release the prompt handoff barrier only after the task is fully committed and clean."""
+    match = re.search(r"^Prompt operation:\s*(\S+)\s*$", output, re.MULTILINE)
+    if not match:
+        raise RuntimeError("prompt operation id missing from ChatGPT executor output")
+    operation_id = match.group(1).strip()
+    transport = UrllibBridgeTransport(timeout_seconds=10.0)
+    operation_payload = transport.request(
+        "GET",
+        f"/operation?operation_id={quote(operation_id, safe='')}"
+    )
+    operation = operation_payload.get("operation")
+    if not isinstance(operation, dict):
+        raise RuntimeError("bridge operation record missing after task commit")
+    controller_id = operation.get("controller_id")
+    if not isinstance(controller_id, str) or not controller_id.strip():
+        raise RuntimeError("bridge controller id missing after task commit")
+
+    last_error = None
+    for attempt in range(4):
+        try:
+            acknowledged = transport.request(
+                "POST",
+                "/chat/processed",
+                {
+                    "operation_id": operation_id,
+                    "controller_id": controller_id.strip(),
+                },
+            )
+            if acknowledged.get("ok") is True and acknowledged.get("response_processing_complete") is True:
+                return {
+                    "operation_id": operation_id,
+                    "controller_id": controller_id.strip(),
+                    "timing": acknowledged.get("timing") or {},
+                }
+            last_error = f"bridge rejected response-processing acknowledgement: {acknowledged}"
+        except ChatGPTAdapterError as exc:
+            last_error = str(exc)
+        if attempt < 3:
+            time.sleep(0.15)
+    raise RuntimeError(last_error or "response-processing acknowledgement failed")
 
 
 def quarantine_failed_candidate(root: Path, baseline: str, task_id: str, patch: str, *, pytest_output: str = "", frontend_output: str = "", failure_reason: str = "") -> dict[str, str]:
@@ -246,5 +292,6 @@ def main():
     if code:print(out,file=sys.stderr);return 1
     after=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip();code,status=run(["git","status","--porcelain","--untracked-files=all"],root,30)
     if code or status.strip() or after==before:return 1
-    print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"])},indent=2));return 0
+    processing_ack = acknowledge_response_processing(out)
+    print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"]),"response_processing_ack":processing_ack},indent=2));return 0
 if __name__=="__main__":raise SystemExit(main())

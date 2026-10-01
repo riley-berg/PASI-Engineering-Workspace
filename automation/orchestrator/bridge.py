@@ -413,6 +413,14 @@ class BridgeState:
                 if item.get("status") != "queued":
                     return None
 
+                predecessor = self._latest_completed_prompt_for_controller(
+                    queue,
+                    controller_id,
+                )
+                if predecessor is not None:
+                    predecessor_operation_id, predecessor_completed_at_ms = predecessor
+                    item["predecessor_operation_id"] = predecessor_operation_id
+                    item["predecessor_completed_at_ms"] = predecessor_completed_at_ms
                 claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
@@ -440,6 +448,38 @@ class BridgeState:
                 if remaining <= 0:
                     return None
                 self.operation_changed.wait(timeout=remaining)
+
+    @staticmethod
+    def _latest_completed_prompt_for_controller(
+        queue: list[dict[str, Any]],
+        controller_id: str | None,
+    ) -> tuple[str, int] | None:
+        if not controller_id:
+            return None
+
+        latest: tuple[str, int] | None = None
+        for candidate in queue:
+            if (
+                candidate.get("status") != "completed"
+                or candidate.get("operation_type") != "prompt"
+                or candidate.get("controller_id") != controller_id
+            ):
+                continue
+            operation_id = candidate.get("operation_id")
+            timing = candidate.get("timing")
+            completed_at_ms = timing.get("completed_at_ms") if isinstance(timing, dict) else None
+            if (
+                not isinstance(operation_id, str)
+                or not operation_id.strip()
+                or isinstance(completed_at_ms, bool)
+                or not isinstance(completed_at_ms, (int, float))
+                or completed_at_ms < 0
+            ):
+                continue
+            value = int(completed_at_ms)
+            if latest is None or value > latest[1]:
+                latest = (operation_id, value)
+        return latest
 
     def claim_next_operation(
         self,

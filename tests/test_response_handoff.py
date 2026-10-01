@@ -40,3 +40,33 @@ def test_wait_for_next_operation_times_out_without_a_queued_task(tmp_path: Path)
     elapsed = time.monotonic() - started
     assert operation is None
     assert elapsed < 0.5
+
+
+def test_next_operation_carries_predecessor_completion_evidence(tmp_path: Path):
+    state = StateManager(tmp_path / "state")
+    bridge = BridgeState(state)
+
+    first = bridge.queue_operation("prompt", "first response")
+    claimed_first = bridge.wait_for_next_operation("controller-1", 0)
+    assert claimed_first is not None
+    assert claimed_first["operation_id"] == first.operation_id
+
+    completed_at_ms = 123_456
+    completed = bridge.complete_operation(
+        first.operation_id,
+        response_text="finished response",
+        response_text_available=True,
+        timing={
+            "generation_start_ms": 120_000,
+            "completed_at_ms": completed_at_ms,
+        },
+    )
+    assert completed is not None
+    assert completed["status"] == "completed"
+
+    second = bridge.queue_operation("prompt", "second task")
+    claimed_second = bridge.wait_for_next_operation("controller-1", 0)
+    assert claimed_second is not None
+    assert claimed_second["operation_id"] == second.operation_id
+    assert claimed_second["predecessor_operation_id"] == first.operation_id
+    assert claimed_second["predecessor_completed_at_ms"] == completed_at_ms

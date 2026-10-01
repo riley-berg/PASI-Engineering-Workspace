@@ -3,14 +3,15 @@ from __future__ import annotations
 from typing import Final
 
 
-TERMINAL_OPERATION_STATUSES: Final[frozenset[str]] = frozenset({"completed", "failed"})
+TERMINAL_OPERATION_STATUSES: Final[frozenset[str]] = frozenset({"completed", "failed", "cancelled"})
 
 _ALLOWED_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
-    "queued": frozenset({"claimed", "failed"}),
-    "claimed": frozenset({"generating", "completed", "failed", "queued"}),
-    "generating": frozenset({"generating", "completed", "failed", "queued"}),
+    "queued": frozenset({"claimed", "failed", "cancelled"}),
+    "claimed": frozenset({"generating", "completed", "failed", "queued", "cancelled"}),
+    "generating": frozenset({"generating", "completed", "failed", "queued", "cancelled"}),
     "completed": frozenset(),
     "failed": frozenset(),
+    "cancelled": frozenset(),
 }
 
 

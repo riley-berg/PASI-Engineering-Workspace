@@ -121,6 +121,7 @@ def test_next_operation_carries_predecessor_completion_evidence(tmp_path: Path):
             "active_operation_id": first.operation_id,
             "controller_id": "controller-1",
             "event_type": "COMPLETED",
+            "stream_complete": True,
             "response_text": "finished response",
             "response_text_available": True,
         },

@@ -67,9 +67,11 @@ def test_failed_candidate_is_quarantined_and_known_good_restored(tmp_path, monke
     assert result["restored_head"] == baseline
     assert result["restored_clean"] == "True"
     assert result["quarantine_commit"]
-    assert (tmp_path / "failures").glob("p0.1-*")
+    failure_dirs = list((tmp_path / "failures").glob("p0.1-*"))
+    assert failure_dirs
+    assert (failure_dirs[0] / "candidate.patch").read_text(encoding="utf-8").strip() == "diff --git a/program.txt b/program.txt"
 
-    _git(repo, "show", f'{result["quarantine_commit"]}:program.txt') == "failed-candidate\n"
+    assert _git(repo, "show", f'{result["quarantine_commit"]}:program.txt') == "failed-candidate"
     candidate_new = subprocess.run(
         ["git", "show", f'{result["quarantine_commit"]}:new.txt'],
         cwd=repo,

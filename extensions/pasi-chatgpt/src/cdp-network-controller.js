@@ -87,6 +87,14 @@
     return null;
   }
 
+  function authoritativeStreamComplete(state) {
+    return Boolean(
+      state &&
+      state.doneMarkerSeen === true &&
+      state.assistantCompletionVerified === true
+    );
+  }
+
   function extractAssistantCompletionState(payload) {
     const type = String(payload?.type || '').toLowerCase();
     if (
@@ -994,10 +1002,7 @@
         }
         textBuffer += decoder.decode();
         if (textBuffer) parseSseText(textBuffer + '\n', streamState);
-        streamState.streamComplete = (
-          streamState.doneMarkerSeen &&
-          streamState.assistantCompletionVerified === true
-        );
+        streamState.streamComplete = authoritativeStreamComplete(streamState);
         await sendCommand(source.tabId, 'IO.close', {handle}).catch(() => undefined);
         const bodyBytes = concatBytes(byteChunks, totalBytes);
         if (streamState.streamComplete || streamState.terminal) {
@@ -1034,10 +1039,7 @@
             assistantCompletionSource: null
           };
           parseSseText(new TextDecoder('utf-8').decode(bytes) + '\n', state);
-          state.streamComplete = (
-            state.doneMarkerSeen &&
-            state.assistantCompletionVerified === true
-          );
+          state.streamComplete = authoritativeStreamComplete(state);
           if (state.streamComplete || state.terminal) {
             await replayResponse(source, params, bytes);
           }
@@ -1268,6 +1270,7 @@
     requestUrlIsGeneration,
     extractAssistantResponseText,
     extractAssistantCompletionState,
+    authoritativeStreamComplete,
     parseSseText,
     classifyHttpStatus,
     classifyPayload,

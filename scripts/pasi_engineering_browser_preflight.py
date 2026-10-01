@@ -52,6 +52,31 @@ def token() -> str:
     return value
 
 
+def provision_extension_token(root: Path, bridge_token: str) -> Path:
+    """Synchronize the ignored browser-readable token with the canonical bridge token."""
+    target = root / ".bridge-token"
+    value = bridge_token.strip()
+    if not value:
+        raise SystemExit("cannot provision an empty bridge token")
+    temporary = target.with_name(target.name + ".tmp")
+    temporary.write_text(value + "\n", encoding="utf-8")
+    try:
+        temporary.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        pass
+    temporary.replace(target)
+    return target
+
+
+def extension_token_matches_bridge(root: Path, expected_token: str) -> bool:
+    target = root / ".bridge-token"
+    try:
+        observed = target.read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    return bool(observed) and secrets.compare_digest(observed, expected_token.strip())
+
+
 def get(path: str, bridge_token: str, *, timeout: float = 3.0) -> dict:
     headers = {}
     if bridge_token:
@@ -231,6 +256,16 @@ def main() -> int:
     root = args.extension_root.expanduser().resolve()
     contract = read_extension_contract(root)
     bridge_token = token()
+    provision_extension_token(root, bridge_token)
+    extension_token = (root / ".bridge-token").read_text(encoding="utf-8").strip()
+    try:
+        extension_authorized = isinstance(get("/status", extension_token, timeout=5), dict)
+    except HTTPError:
+        extension_authorized = False
+    if not extension_authorized or not extension_token_matches_bridge(root, bridge_token):
+        raise SystemExit(
+            "extension bridge token is not synchronized with the canonical PASI bridge token"
+        )
 
     runtime = Path(
         os.environ.get(

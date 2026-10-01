@@ -854,7 +854,9 @@ class BridgeState:
                 owner = item.get("controller_id")
                 if owner != controller_id.strip():
                     return None
-                if item.get("response_text_available") is not True or not str(item.get("response_text") or "").strip():
+                stored_response = self.state_manager.load_terminal_response(operation_id)
+                response_text = stored_response if isinstance(stored_response, str) else item.get("response_text")
+                if item.get("response_text_available") is not True or not isinstance(response_text, str) or not response_text.strip():
                     return None
                 if item.get("network_response_authoritative") is not True:
                     return None

@@ -79,6 +79,60 @@ function fakeDebugger() {
   };
 }
 
+test('CDP controller keeps prompt bindings exclusive and exposes idle state', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+
+  assert.equal(controller.isIdle(31), true);
+  await controller.bindOperation({
+    tabId: 31,
+    operationId: 'op-31-a',
+    controllerId: 'controller-31',
+    prompt: 'first prompt'
+  });
+  assert.equal(controller.isIdle(31), false);
+
+  await assert.rejects(
+    controller.bindOperation({
+      tabId: 31,
+      operationId: 'op-31-b',
+      controllerId: 'controller-31',
+      prompt: 'second prompt'
+    }),
+    /active operation/
+  );
+
+  await controller.unbindOperation(31, 'op-31-a', 'controller-31');
+  assert.equal(controller.isIdle(31), true);
+
+  await controller.bindOperation({
+    tabId: 31,
+    operationId: 'op-31-c',
+    controllerId: 'controller-31',
+    prompt: 'third prompt'
+  });
+  await controller.handlePaused(
+    {tabId: 31},
+    'Fetch.requestPaused',
+    {
+      requestId: 'req-31',
+      request: {
+        url: 'https://chatgpt.com/backend-api/conversation',
+        method: 'POST',
+        postData: JSON.stringify({prompt: 'third prompt'})
+      }
+    }
+  );
+  assert.equal(controller.isIdle(31), false);
+
+  await controller.unbindOperation(31, 'op-31-c', 'controller-31');
+  assert.equal(controller.isIdle(31), false);
+
+  await controller.interruptOperation(31, 'op-31-c', 'controller-31');
+  assert.equal(controller.isIdle(31), true);
+});
+
 test('CDP reasoning control verifies an existing Thinking state and can enable it', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);

@@ -226,7 +226,7 @@ def test_cdp_started_event_moves_claimed_operation_to_generating(tmp_path):
 
     stored = bridge.get_operation(operation.operation_id, repair_response=False)
     assert stored is not None
-    assert stored["status"] == "claimed"
+    assert stored["status"] == "generating"
     assert stored["network_lifecycle_event"] == "STARTED"
     assert stored.get("network_terminal_event") is None
 
@@ -443,7 +443,7 @@ def test_incomplete_cdp_response_never_becomes_authoritative(tmp_path):
 
     stored = bridge.get_operation(operation.operation_id, repair_response=False)
     assert stored is not None
-    assert stored["status"] == "generating"
+    assert stored["status"] == "claimed"
     assert stored.get("response_text_available") is not True
     assert stored.get("network_response_authoritative") is not True
 

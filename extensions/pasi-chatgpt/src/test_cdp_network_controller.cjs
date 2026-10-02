@@ -82,6 +82,20 @@ function fakeDebugger() {
   };
 }
 
+test('completion markers reject fenced and quoted copies', () => {
+  assert.equal(
+    source.completionMarkersSatisfied('Previous answer:\n```text\nNETWORK_PATCH_OK_2026\n```', ['NETWORK_PATCH_OK_2026']),
+    false
+  );
+  assert.equal(
+    source.completionMarkersSatisfied('> NETWORK_PATCH_OK_2026', ['NETWORK_PATCH_OK_2026']),
+    false
+  );
+  assert.equal(
+    source.completionMarkersSatisfied('NETWORK_PATCH_OK_2026', ['NETWORK_PATCH_OK_2026']),
+    true
+  );
+});
 test('CDP controller keeps prompt bindings exclusive and exposes idle state', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

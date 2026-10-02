@@ -133,6 +133,35 @@ body {
   color: var(--text-secondary);
 }
 
+.profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-summary label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+#runnerSelect {
+  min-width: 220px;
+  padding: 5px 24px 5px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+#runnerSelect:focus {
+  outline: 2px solid rgba(59, 130, 246, .35);
+  outline-offset: 1px;
+}
+
+
 .status {
   min-height: 18px;
   margin: 0 0 8px;
@@ -330,3 +359,63 @@ body {
   border-radius: 6px;
 }
 
+
+.runner-card {
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+
+.runner-card.selected {
+  border-color: rgba(59, 130, 246, .65);
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, .18), 0 4px 6px -1px rgba(0,0,0,.1);
+}
+
+.status-text {
+  gap: 7px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--status-ready);
+}
+
+.status-dot.ready {
+  background: var(--status-ready);
+}
+
+.status-dot.running {
+  background: #3b82f6;
+  box-shadow: 0 0 0 0 rgba(59,130,246,.5);
+  animation: pasi-runner-pulse 1.4s infinite;
+}
+
+.status-dot.paused {
+  background: #f59e0b;
+}
+
+.status-dot.failed {
+  background: #ef4444;
+}
+
+.status-dot.completed {
+  background: #10b981;
+}
+
+.status-text.failed {
+  color: var(--danger-text);
+}
+
+@keyframes pasi-runner-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(59,130,246,.45); }
+  70% { box-shadow: 0 0 0 6px rgba(59,130,246,0); }
+  100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+}
+
+@media (max-width: 390px) {
+  body { width: 100%; }
+  .profile-summary { align-items: flex-start; flex-direction: column; }
+  #runnerSelect { width: 100%; min-width: 0; }
+}

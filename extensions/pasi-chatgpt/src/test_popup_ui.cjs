@@ -347,3 +347,24 @@ test("M1 startup phases are surfaced instead of appearing silently stuck", () =>
   assert.match(popupJs, /browser_diagnostics: "Reading the active ChatGPT browser state\."/);
   assert.match(popupJs, /ready_for_first_operation: "Ready for the first M1 operation\."/);
 });
+
+
+test("popup surfaces actual background-process diagnostics per runner profile", () => {
+  assert.match(popupJs, /function diagnosticText\(state, aggregateState, profileId\)/);
+  assert.match(popupJs, /Process alive:/);
+  assert.match(popupJs, /Detected PID:/);
+  assert.match(popupJs, /Detected command:/);
+  assert.match(popupJs, /Bridge PID:/);
+  assert.match(popupJs, /All detected PASI processes:/);
+  assert.match(popupJs, /state\.profiles/);
+  assert.match(popupJs, /profileState = profiles\[profileId\] \|\| state/);
+});
+
+test("popup renders terminal diagnostics from the matching profile state", () => {
+  assert.match(popupJs, /root\.append\(createRunnerCard\(\s*profileId,\s*profileState/);
+  assert.match(popupJs, /String\(state\?\.error \|\| "none"\)/);
+});
+
+test("popup card factory accepts aggregate process diagnostics", () => {
+  assert.match(popupJs, /function createRunnerCard\(profileId, state, aggregateState = state\)/);
+});

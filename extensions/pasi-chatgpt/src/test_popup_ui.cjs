@@ -177,6 +177,17 @@ test("runner cards do not animate theme surface or border changes", () => {
   assert.doesNotMatch(runnerCardRule, /background-color|border-color/);
 });
 
+test("runner controls use explicit start or stop actions", () => {
+  assert.match(popupJs, /async function controlRunner\(profileId\)/);
+  assert.match(popupJs, /const action = running && isActiveProfile \? "stop" : "start";/);
+  assert.match(popupJs, /action,\s*profile: profileId/);
+  assert.doesNotMatch(
+    popupJs,
+    /bridgeRequest\("POST", "\/runner\/control", \{\s*action:\s*"toggle"/
+  );
+  assert.match(popupJs, /await controlRunner\(profileId\);/);
+});
+
 test("runner action status survives the post-action render", () => {
   assert.match(
     popupJs,

@@ -69,6 +69,31 @@ def working_tree_entries() -> list[str]:
 def extension_manifests(paths: list[Path]) -> list[Path]:
     return [p for p in paths if p.name == "manifest.json" and str(p).startswith("extensions/")]
 
+def tracked_gitlinks() -> list[Path]:
+    gitlinks: list[Path] = []
+    for line in git("ls-files", "--stage").splitlines():
+        fields = line.split(None, 3)
+        if len(fields) == 4 and fields[0] == "160000":
+            gitlinks.append(Path(fields[3]))
+    return gitlinks
+
+
+def nested_git_metadata(root: Path = REPO_ROOT) -> list[Path]:
+    root_git = root / ".git"
+    return sorted((candidate for candidate in root.rglob(".git") if candidate != root_git), key=lambda path: str(path))
+
+
+def scan_repository_boundaries() -> list[str]:
+    findings: list[str] = []
+    for path in tracked_gitlinks():
+        findings.append(f"tracked embedded repository entry remains: {path}")
+    if (REPO_ROOT / ".gitmodules").exists():
+        findings.append("embedded git submodule metadata remains: .gitmodules")
+    for path in nested_git_metadata():
+        findings.append(f"nested repository metadata remains: {path.relative_to(REPO_ROOT)}")
+    return findings
+
+
 
 def read_json(path: Path) -> dict[str, Any]:
     payload = json.loads((REPO_ROOT / path).read_text(encoding="utf-8"))
@@ -191,8 +216,11 @@ def main() -> int:
     paths = tracked_paths()
     dirty = working_tree_entries()
 
+    repository_boundary_findings = scan_repository_boundaries()
+
     findings = []
     findings.extend(scan_paths(paths))
+    findings.extend(repository_boundary_findings
     findings.extend(scan_cdp_authority())
     findings.extend(check_python(paths))
     findings.extend(check_javascript(paths))
@@ -213,6 +241,7 @@ def main() -> int:
         "canonical_extension": manifest,
         "checks": {
             "legacy_runtime_paths": "passed" if not scan_paths(paths) else "failed",
+            "repository_boundaries": "passed" if not repository_boundary_findings else "failed",
             "cdp_dom_authority": "passed" if not scan_cdp_authority() else "failed",
             "python_syntax": "passed" if not check_python(paths) else "failed",
             "javascript_syntax": "passed" if not check_javascript(paths) else "failed",

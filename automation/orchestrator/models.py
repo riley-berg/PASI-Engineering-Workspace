@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from .operation_state import OperationState
+from pasi.core.operation_state import OperationState
 
 
 def utc_now() -> str:

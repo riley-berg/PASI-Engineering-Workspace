@@ -1,3 +1,8 @@
+"""Bridge-side lifecycle policy for the live ChatGPT handoff boundary.
+
+The canonical persisted operation-state shape lives in pasi.core.operation_state. This bridge policy intentionally remains separate because browser handoff recovery allows transport-specific requeue transitions that the durable core lifecycle does not need to permit globally.
+"""
+
 from __future__ import annotations
 
 from typing import Final

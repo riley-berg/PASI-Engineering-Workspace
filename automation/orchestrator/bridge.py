@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import CONFIG
 from .models import ChatOperation
-from .operation_state import OperationState
+from pasi.core.operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
 from scripts.pasi_timeout_policy import load_timeout_policy

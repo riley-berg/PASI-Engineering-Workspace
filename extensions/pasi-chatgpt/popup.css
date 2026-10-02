@@ -42,24 +42,24 @@ body {
 body.light-theme {
   color-scheme: light;
   --bg-main: #FAF8F5;
-  --bg-card: #EAE4DA;
+  --bg-card: #FFFFFF;
   --border-color: #DCD4C7;
-  --text-primary: #111215;
-  --text-secondary: #423731;
-  --text-muted: #665953;
-  --btn-primary: #1A1B20;
-  --btn-primary-hover: #2C2E35;
-  --btn-secondary: #F2EEE8;
-  --btn-secondary-hover: #D8D4CF;
-  --badge-m1: #1A1B20;
-  --badge-long: #1A1B20;
-  --status-ready: #1A1B20;
-  --status-badge-bg: rgba(26, 27, 32, .10);
-  --status-badge-active-bg: rgba(26, 27, 32, .16);
-  --status-badge-text: #1A1B20;
-  --danger-bg: rgba(26, 27, 32, .08);
-  --danger-text: #111215;
-  --idle-bg: rgba(234, 228, 218, .92);
+  --text-primary: #1A1B20;
+  --text-secondary: #707174;
+  --text-muted: #707174;
+  --btn-primary: #45464A;
+  --btn-primary-hover: #333438;
+  --btn-secondary: #FFFFFF;
+  --btn-secondary-hover: #F0ECE6;
+  --badge-m1: #45464A;
+  --badge-long: #45464A;
+  --status-ready: #45464A;
+  --status-badge-bg: rgba(69, 70, 74, .10);
+  --status-badge-active-bg: rgba(69, 70, 74, .16);
+  --status-badge-text: #45464A;
+  --danger-bg: rgba(69, 70, 74, .08);
+  --danger-text: #1A1B20;
+  --idle-bg: rgba(255, 255, 255, .95);
   --idle-border: #DCD4C7;
 }
 
@@ -224,8 +224,8 @@ body.light-theme #runnerSelect:focus {
 }
 
 body.light-theme .runner-card.selected {
-  border-color: #1A1B20;
-  box-shadow: 0 0 0 1px rgba(26, 27, 32, .24);
+  border-color: #45464A;
+  box-shadow: 0 0 0 1px rgba(69, 70, 74, .24);
 }
 
 .card-header {
@@ -317,7 +317,7 @@ body.light-theme .status-dot.running {
 }
 
 body.light-theme .status-dot.paused {
-  background: #8B7B70;
+  background: #707174;
 }
 
 .status-dot.failed {
@@ -325,15 +325,15 @@ body.light-theme .status-dot.paused {
 }
 
 body.light-theme .status-dot.failed {
-  background: #7C5B52;
+  background: #5F6064;
 }
 
 .status-dot.completed {
-  background: #6E756F;
+  background: #6E7074;
 }
 
 body.light-theme .status-dot.completed {
-  background: #6F766F;
+  background: #707174;
 }
 
 .card-actions {
@@ -463,7 +463,7 @@ body.light-theme .theme-toggle:focus-visible {
 }
 
 body.light-theme .warn {
-  color: #423731;
+  color: #45464A;
 }
 
 .idle-state {

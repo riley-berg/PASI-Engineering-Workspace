@@ -13,16 +13,12 @@
   const RUNNER_PROFILES = {
     m1: {
       id: "m1",
-      label: "M1",
       title: "20-Operation Acceptance",
-      executionMode: "supervised_m1",
       badgeClass: "m1",
     },
     "168h": {
       id: "168h",
-      label: "168h",
       title: "168-Hour Long-Run Acceptance",
-      executionMode: "supervised_168h",
       badgeClass: "long-run",
     },
   };
@@ -114,17 +110,12 @@
     }
   }
 
-  async function getProfile() {
-    const stored = await chrome.storage.local.get("pasi.runner.profile");
-    return stored?.["pasi.runner.profile"] === "168h" ? "168h" : "m1";
-  }
-
-  async function setProfile(profile) {
-    await chrome.storage.local.set({"pasi.runner.profile": profile});
-  }
-
   function runnerIsActive(state) {
-    return state?.available === true && (state?.status === "starting" || state?.status === "running");
+    return state?.available === true && (
+      state?.status === "starting" ||
+      state?.status === "running" ||
+      state?.status === "stopping"
+    );
   }
 
   function activeProfileForState(state) {
@@ -138,21 +129,31 @@
 
   function runnerStatusLabel(state, profileId) {
     if (!state?.available) return "Unavailable";
-    if (state.status === "starting") {
-      return activeProfileForState(state) === profileId ? "Starting" : "Another runner active";
+    const activeProfile = activeProfileForState(state);
+
+    if (state.status === "starting" || state.status === "running" || state.status === "stopping") {
+      return activeProfile === profileId
+        ? state.status === "starting"
+          ? "Starting"
+          : state.status === "stopping"
+            ? "Stopping"
+            : "Running"
+        : "Another runner active";
     }
-    if (state.status === "running") {
-      return activeProfileForState(state) === profileId ? "Running" : "Another runner active";
-    }
-    if (state.status === "paused") return "Stopped";
     if (state.status === "failed") return "Failed";
-    if (state.status === "completed" || state.status === "roadmap_complete" || state.status === "deadline_reached") return "Completed";
-    return "Stopped";
+    if (state.status === "completed" || state.status === "roadmap_complete" || state.status === "deadline_reached") {
+      return "Completed";
+    }
+
+    // Inactive runners deliberately have no status label. The Start control
+    // already communicates the only actionable inactive state.
+    return "";
   }
 
   function runnerSummary(state, profileId) {
     const status = runnerStatusLabel(state, profileId);
     if (status === "Starting") return "Starting runner…";
+    if (status === "Stopping") return "Stopping runner…";
     if (status === "Running") {
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
@@ -163,8 +164,9 @@
     }
     if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
-    if (status === "Stopped") return "Not running.";
-    if (status === "Failed") return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
+    if (status === "Failed") {
+      return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
+    }
     return "";
   }
 
@@ -278,28 +280,36 @@
     body.className = "card-body";
 
     const stateLabelText = runnerStatusLabel(state, profileId);
-    const statusText = document.createElement("div");
-    const stateClass =
-      stateLabelText === "Starting" ? "starting" :
-      stateLabelText === "Running" ? "running" :
-      stateLabelText === "Stopped" ? "stopped" :
-      stateLabelText === "Failed" ? "failed" :
-      stateLabelText === "Completed" ? "completed" :
-      "idle";
-    statusText.className = "status-text " + stateClass;
+    if (stateLabelText) {
+      const stateClass =
+        stateLabelText === "Starting" ? "starting" :
+        stateLabelText === "Stopping" ? "stopping" :
+        stateLabelText === "Running" ? "running" :
+        stateLabelText === "Failed" ? "failed" :
+        stateLabelText === "Completed" ? "completed" :
+        "unavailable";
 
-    const dot = document.createElement("span");
-    dot.className = "status-dot " + stateClass;
-    dot.setAttribute("aria-hidden", "true");
+      const statusText = document.createElement("div");
+      statusText.className = "status-text " + stateClass;
 
-    const label = document.createElement("span");
-    label.textContent = stateLabelText;
-    statusText.append(dot, label);
+      const dot = document.createElement("span");
+      dot.className = "status-dot " + stateClass;
+      dot.setAttribute("aria-hidden", "true");
 
-    const desc = document.createElement("div");
-    desc.className = "status-desc";
-    desc.textContent = runnerSummary(state, profileId);
-    body.append(statusText, desc);
+      const label = document.createElement("span");
+      label.textContent = stateLabelText;
+      statusText.append(dot, label);
+
+      const summary = runnerSummary(state, profileId);
+      if (summary) {
+        const desc = document.createElement("div");
+        desc.className = "status-desc";
+        desc.textContent = summary;
+        body.append(statusText, desc);
+      } else {
+        body.append(statusText);
+      }
+    }
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
@@ -308,13 +318,13 @@
     toggle.className = "btn btn-primary";
     toggle.type = "button";
     const activeThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
-    toggle.textContent = activeThisProfile ? "Stop" : "Start";
-    toggle.disabled = runnerIsActive(state) && activeProfileForState(state) !== profileId;
+    const stoppingThisProfile = activeThisProfile && state?.status === "stopping";
+    toggle.textContent = stoppingThisProfile ? "Stopping" : activeThisProfile ? "Stop" : "Start";
+    toggle.disabled = stoppingThisProfile || (runnerIsActive(state) && activeProfileForState(state) !== profileId);
 
     toggle.onclick = async () => {
       toggle.disabled = true;
       try {
-        await setProfile(profileId);
         await controlRunner(profileId, activeThisProfile ? "stop" : "start");
         await render();
       } catch (error) {
@@ -331,9 +341,7 @@
 
   function renderRunnerDashboard(state, visible) {
     const root = $("runnerCards");
-    const controls = $("runnerControls");
     root.replaceChildren();
-    controls.hidden = !visible;
 
     if (!visible) {
       $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";

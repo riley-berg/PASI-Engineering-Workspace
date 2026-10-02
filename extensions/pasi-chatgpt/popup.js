@@ -110,15 +110,25 @@
     }
   }
 
-  function runnerIsActive(state) {
-    return state?.available === true && (
+  function runnerProcessIsActive(state) {
+    if (!state?.available) return false;
+    if (typeof state.process_alive === "boolean") {
+      return state.process_alive;
+    }
+    return (
       state?.status === "starting" ||
       state?.status === "running" ||
       state?.status === "stopping"
     );
   }
 
+  function runnerIsActive(state) {
+    return runnerProcessIsActive(state);
+  }
+
   function activeProfileForState(state) {
+    const processProfile = String(state?.process_profile || "");
+    if (processProfile === "m1" || processProfile === "168h") return processProfile;
     const explicit = String(state?.runner_profile || "");
     if (explicit === "m1" || explicit === "168h") return explicit;
     const mode = String(state?.execution_mode || "");
@@ -127,32 +137,43 @@
     return null;
   }
 
+  function runnerIsReady(state, profileId) {
+    return (
+      state?.available === true &&
+      state?.ready === true &&
+      runnerProcessIsActive(state) &&
+      activeProfileForState(state) === profileId
+    );
+  }
+
   function runnerStatusLabel(state, profileId) {
     if (!state?.available) return "Unavailable";
     const activeProfile = activeProfileForState(state);
+    const processActive = runnerProcessIsActive(state);
 
-    if (state.status === "starting" || state.status === "running" || state.status === "stopping") {
-      return activeProfile === profileId
-        ? state.status === "starting"
-          ? "Starting"
-          : state.status === "stopping"
-            ? "Stopping"
-            : "Running"
-        : "Another runner active";
+    if (processActive) {
+      if (activeProfile !== profileId) return "Another runner active";
+      if (state.status === "running" && state.ready === true) return "Running";
+      if (state.status === "stopping") return "Stopping";
+      if (state.status === "starting") return "Launching";
+      return "Active process";
     }
+
     if (state.status === "failed") return "Failed";
-    if (state.status === "completed" || state.status === "roadmap_complete" || state.status === "deadline_reached") {
+    if (
+      state.status === "completed" ||
+      state.status === "roadmap_complete" ||
+      state.status === "deadline_reached"
+    ) {
       return "Completed";
     }
 
-    // Inactive runners deliberately have no status label. The Start control
-    // already communicates the only actionable inactive state.
     return "";
   }
 
   function runnerSummary(state, profileId) {
     const status = runnerStatusLabel(state, profileId);
-    if (status === "Starting") return "Starting runner…";
+    if (status === "Launching") return "Runner process launched; waiting for ready state.";
     if (status === "Stopping") return "Stopping runner…";
     if (status === "Running") {
       const completed = Number(state.completed_operations);
@@ -160,7 +181,10 @@
       if (Number.isFinite(completed) && Number.isFinite(target) && target > 0) {
         return String(completed) + " / " + String(target) + " operations complete";
       }
-      return "Runner is active.";
+      return "Runner is ready and active.";
+    }
+    if (status === "Active process") {
+      return "Runner process is alive, but its state is not ready.";
     }
     if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
@@ -176,12 +200,12 @@
 
     while (Date.now() < deadline) {
       const activeProfile = activeProfileForState(state);
-      const running = runnerIsActive(state);
+      const active = runnerIsActive(state);
 
       if (action === "start") {
-        if (running && activeProfile === profileId) return state;
-        if (state?.status === "failed" || state?.status === "completed" || state?.status === "cancelled") return state;
-      } else if (!running || activeProfile !== profileId) {
+        if (runnerIsReady(state, profileId)) return state;
+        if (!active || state?.status === "failed") return state;
+      } else if (!active || activeProfile !== profileId) {
         return state;
       }
 
@@ -231,22 +255,27 @@
     }
 
     const settledState = await waitForRunnerState(profileId, action);
-    if (action === "start" && settledState?.status === "failed") {
-      throw new Error(
-        String(
-          settledState?.error ||
-          settledState?.stop_reason ||
-          settledState?.last_result ||
-          (profileId === "168h" ? "168h" : "M1") + " runner failed during startup."
-        )
-      );
+    if (action === "start") {
+      if (settledState?.status === "failed") {
+        throw new Error(
+          String(
+            settledState?.error ||
+            settledState?.stop_reason ||
+            settledState?.last_result ||
+            (profileId === "168h" ? "168h" : "M1") + " runner failed during launch."
+          )
+        );
+      }
+      if (runnerIsReady(settledState, profileId)) {
+        setStatus((profileId === "168h" ? "168h" : "M1") + " runner ready.");
+      } else {
+        setStatus((profileId === "168h" ? "168h" : "M1") + " runner is still launching; it is not ready yet.");
+      }
+    } else if (runnerIsActive(settledState)) {
+      setStatus((profileId === "168h" ? "168h" : "M1") + " runner is still stopping.");
+    } else {
+      setStatus((profileId === "168h" ? "168h" : "M1") + " runner stopped.");
     }
-
-    setStatus(
-      action === "stop"
-        ? (profileId === "168h" ? "168h" : "M1") + " runner stopped."
-        : (profileId === "168h" ? "168h" : "M1") + " runner started."
-    );
 
     return action;
   }
@@ -282,9 +311,10 @@
     const stateLabelText = runnerStatusLabel(state, profileId);
     if (stateLabelText) {
       const stateClass =
-        stateLabelText === "Starting" ? "starting" :
+        stateLabelText === "Launching" ? "launching" :
         stateLabelText === "Stopping" ? "stopping" :
         stateLabelText === "Running" ? "running" :
+        stateLabelText === "Active process" ? "active" :
         stateLabelText === "Failed" ? "failed" :
         stateLabelText === "Completed" ? "completed" :
         "unavailable";

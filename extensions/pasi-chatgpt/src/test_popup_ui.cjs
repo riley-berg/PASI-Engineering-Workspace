@@ -82,7 +82,7 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
-  assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#1A1B20/);
+  assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
 });
 
 test("popup islands stay inside the compact popup width", () => {

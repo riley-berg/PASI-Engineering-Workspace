@@ -223,7 +223,9 @@ test("popup remains inside the compact width and hides only intentional UI regio
   assert.match(popupCss, /^\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/m);
 });
 
-\n\ntest("popup control and text colors meet WCAG AA targets", () => {
+
+
+test("popup control and text colors meet WCAG AA targets", () => {
   const relativeLuminance = (hex) => {
     const value = hex.replace("#", "");
     const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);

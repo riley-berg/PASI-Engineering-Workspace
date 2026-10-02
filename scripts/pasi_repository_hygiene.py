@@ -31,6 +31,11 @@ REMOVED_LEGACY_PATH_MARKERS = (
     "dom-controller.js",
 )
 
+RETIRED_TRACKED_PATH_MARKERS = (
+    "extensions/pasi-chatgpt/src/protocol.js",
+    "extensions/pasi-chatgpt/src/copy-api.js",
+)
+
 SUSPICIOUS_TRACKED_NAMES = (
     ".env",
     ".env.local",
@@ -102,7 +107,12 @@ def check_manifest(paths: list[Path]) -> dict[str, Any]:
 def scan_paths(paths: list[Path]) -> list[str]:
     findings: list[str] = []
     for path in paths:
-        lower = str(path).lower()
+        normalized = str(path).replace("\\", "/")
+        lower = normalized.lower()
+        if normalized in RETIRED_TRACKED_PATH_MARKERS:
+            findings.append(f"retired extension path remains tracked: {path}")
+        if lower.startswith("scripts/test_") and lower.endswith(".py"):
+            findings.append(f"test module is outside canonical tests/ tree: {path}")
         if any(marker in lower for marker in REMOVED_LEGACY_PATH_MARKERS):
             # Unit-test/document references may mention these names explicitly.
             if not (str(path).startswith("tests/") or str(path).startswith("docs/")):

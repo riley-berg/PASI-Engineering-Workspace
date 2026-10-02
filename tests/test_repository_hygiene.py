@@ -37,3 +37,20 @@ class RepositoryHygieneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_retired_extension_paths_and_script_level_tests_are_absent(self) -> None:
+        tracked = {
+            str(path)
+            for path in ROOT.rglob("*")
+            if path.is_file() and ".git" not in path.parts
+        }
+        self.assertNotIn("extensions/pasi-chatgpt/src/protocol.js", tracked)
+        self.assertNotIn("extensions/pasi-chatgpt/src/copy-api.js", tracked)
+        self.assertFalse(any(
+            path.startswith("scripts/test_") and path.endswith(".py")
+            for path in tracked
+        ))
+        self.assertTrue((ROOT / "tests" / "test_cleanup_duplicate_branches.py").is_file())
+        self.assertTrue((ROOT / "tests" / "test_github_project_v2.py").is_file())
+        self.assertTrue((ROOT / "tests" / "test_workflow_contracts.py").is_file())

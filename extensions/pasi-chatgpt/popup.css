@@ -368,8 +368,8 @@ html.light-theme body .runner-card.selected {
   color: var(--status-idle-summary);
 }
 
-.status-dot.idle {
-  display: none;
+.status-dot.ready {
+  background: var(--status-idle);
 }
 
 .status-dot {

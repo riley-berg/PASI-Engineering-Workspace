@@ -436,10 +436,36 @@ async function runNextQueuedOperation(trigger = 'explicit') {
     const controllerId = controllerIdForTab(tabId);
     await cdpNetworkController?.attachTab?.(tabId);
     await reportWorkerHealth(tab);
-    const dispatched = await waitForNextOperationForController(tabId, controllerId);
+    const payload = await bridgeJson(
+      '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=0',
+      10000
+    );
+    if (!payload) {
+      return {
+        ok: false,
+        dispatched: false,
+        reason: 'bridge_unreachable',
+        controller_id: controllerId,
+        tab_id: tabId,
+        trigger
+      };
+    }
+    const operation = payload.operation;
+    if (!operation?.operation_id) {
+      return {
+        ok: false,
+        dispatched: false,
+        reason: 'no_queued_operation',
+        controller_id: controllerId,
+        tab_id: tabId,
+        trigger
+      };
+    }
+    const dispatched = await dispatchOperationForController(tabId, controllerId, operation);
     return {
       ok: Boolean(dispatched),
       dispatched: Boolean(dispatched),
+      operation_id: operation.operation_id,
       controller_id: controllerId,
       tab_id: tabId,
       trigger

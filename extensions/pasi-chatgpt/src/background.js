@@ -89,7 +89,7 @@ async function cdpNetworkObservation(event) {
         operationId,
         controllerId
       );
-      ensureSupervisedExecutionWaiter(event.tabId, controllerId);
+      ensureSupervisedExecutionWaiter(event.tabId);
       return;
     }
 
@@ -118,7 +118,7 @@ async function cdpNetworkObservation(event) {
     operationId,
     controllerId
   );
-  ensureSupervisedExecutionWaiter(event.tabId, controllerId);
+  ensureSupervisedExecutionWaiter(event.tabId);
 
 }
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
@@ -150,8 +150,8 @@ function runnerStateIsDispatchable(state) {
   return String(state.execution_mode || '') === 'supervised_' + profile;
 }
 
-async function waitForNextOperationForController(tabId, controllerId, waitMs = 3000) {
-  if (typeof tabId !== 'number' || !controllerId) return false;
+async function waitForNextOperationForController(tabId, waitMs = 3000) {
+  if (typeof tabId !== 'number') return false;
   return serializeOperationDispatch(async () => {
     const boundedWaitMs = Math.max(1000, Math.min(5000, Number(waitMs) || 3000));
     let bridgeRetryMs = 250;
@@ -179,6 +179,12 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 3
         continue;
       }
 
+      const runId = String(runnerState.run_id || '').trim();
+      if (!runId) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      const controllerId = controllerIdForTab(tabId, runId);
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
         boundedWaitMs + 5000
@@ -205,12 +211,12 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 3
   });
 }
 
-function ensureSupervisedExecutionWaiter(tabId, controllerId) {
-  if (typeof tabId !== 'number' || !controllerId) return false;
-  const key = String(tabId) + ':' + String(controllerId);
+function ensureSupervisedExecutionWaiter(tabId) {
+  if (typeof tabId !== 'number') return false;
+  const key = String(tabId);
   if (supervisedExecutionWaiters.has(key)) return true;
 
-  const waiter = waitForNextOperationForController(tabId, controllerId)
+  const waiter = waitForNextOperationForController(tabId)
     .catch((error) => {
       console.warn('[PASI supervised worker]', String(error?.message || error));
       return false;
@@ -663,8 +669,11 @@ function isChatGPTUrl(url) {
   return /^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(String(url || ''));
 }
 
-function controllerIdForTab(tabId) {
-  return 'cdp-tab:' + String(tabId);
+function controllerIdForTab(tabId, runId = '') {
+  const normalizedRunId = String(runId || '').trim();
+  return normalizedRunId
+    ? 'cdp-tab:' + String(tabId) + ':run:' + normalizedRunId
+    : 'cdp-tab:' + String(tabId);
 }
 
 async function reportWorkerHealth(tab) {
@@ -696,7 +705,7 @@ async function attachAndObserveTab(tab) {
   try {
     await cdpNetworkController.attachTab(tabId);
     await reportWorkerHealth(tab);
-    ensureSupervisedExecutionWaiter(tabId, controllerIdForTab(tabId));
+    ensureSupervisedExecutionWaiter(tabId);
     return true;
   } catch (_) {
     return false;

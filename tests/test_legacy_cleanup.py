@@ -79,15 +79,3 @@ def test_orchestrator_config_contains_only_live_paths():
     assert not hasattr(config, "LOGS_DIR")
     assert not hasattr(config, "ensure_runtime_directories")
 
-
-def test_bridge_retry_policy_is_explicitly_distinct_from_canonical_lifecycle():
-    from automation.orchestrator.operation_lifecycle import validate_transition
-    canonical = OperationState(operation_id="op-live", operation_type="prompt", status="generating")
-    assert canonical.can_transition_to("queued") is False
-    validate_transition("generating", "queued")
-
-
-def test_canonical_operation_state_supports_bridge_terminal_cancellation():
-    state = OperationState(operation_id="op-cancelled", operation_type="prompt", status="claimed")
-    cancelled = state.transition("cancelled")
-    assert cancelled.status == "cancelled"

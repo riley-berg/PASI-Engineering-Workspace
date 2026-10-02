@@ -41,3 +41,13 @@ def test_chat_operation_adapter_emits_canonical_v2_state_and_digests():
     assert state.prompt_digest == digest_text("hello")
     assert state.response_digest == digest_text("world")
     assert state.provider == "chatgpt_browser"
+
+
+def test_claimed_operation_can_complete_when_terminal_evidence_arrives_before_started():
+    state = OperationState(
+        operation_id="op-fast-complete",
+        operation_type="prompt",
+        status="claimed",
+    )
+    assert state.can_transition_to("completed")
+    assert state.transition("completed").status == "completed"

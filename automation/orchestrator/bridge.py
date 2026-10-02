@@ -232,7 +232,13 @@ def load_runner_state() -> dict[str, Any]:
         result.pop("error", None)
         result.pop("failed_at", None)
         result.pop("completed_at", None)
-    elif not process_alive and status in {"starting", "running"}:
+    elif not process_alive and status == "starting":
+        result["status"] = "failed"
+        result.setdefault(
+            "error",
+            "runner exited before initialization completed",
+        )
+    elif not process_alive and status == "running":
         result["status"] = "failed"
         result.setdefault(
             "error",

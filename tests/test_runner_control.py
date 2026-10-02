@@ -119,7 +119,7 @@ def test_runner_python_prefers_workspace_venv(monkeypatch, tmp_path):
     venv_python.parent.mkdir(parents=True)
     venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
     venv_python.chmod(0o755)
-    monkeypatch.setattr(bridge.CONFIG, "project_root", tmp_path)
+    monkeypatch.setattr(bridge, "CONFIG", type("Config", (), {"project_root": tmp_path})())
 
     assert bridge.runner_python() == str(venv_python)
 

@@ -169,7 +169,8 @@ html.light-theme body {
 
 .runner-select:hover,
 .runner-select.open {
-  border-color: var(--btn-primary);
+  outline: 1px solid var(--runner-option-outline);
+  outline-offset: 0;
 }
 
 .runner-select:focus-visible {

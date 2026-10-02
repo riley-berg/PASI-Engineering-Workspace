@@ -303,17 +303,17 @@ test("popup control and text colors meet WCAG AA targets", () => {
 
 test("popup scopes terminal runner diagnostics to the matching profile", () => {
   assert.match(
-    popup,
+    popupJs,
     /state\.status === "failed"[\s\S]*state\.runner_profile === profileId/
   );
   assert.match(
-    popup,
+    popupJs,
     /state\.status === "completed"[\s\S]*state\.runner_profile === profileId/
   );
 });
 
 test("popup surfaces M1 dispatch wait diagnostics", () => {
-  assert.match(popup, /waiting_for_cdp_dispatch/);
-  assert.match(popup, /Waiting for CDP dispatch/);
-  assert.match(popup, /current_operation_id/);
+  assert.match(popupJs, /waiting_for_cdp_dispatch/);
+  assert.match(popupJs, /Waiting for CDP dispatch/);
+  assert.match(popupJs, /current_operation_id/);
 });

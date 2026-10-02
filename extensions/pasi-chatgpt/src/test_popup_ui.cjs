@@ -94,22 +94,21 @@ test("popup critical surfaces are painted before external CSS", () => {
   assert.doesNotMatch(popupHtml, /visibility:\s*hidden/);
 });
 
-test("light and dark surface palettes are explicit and stable", () => {
-  assert.match(popupCss, /--bg-main:\s*#0D0E11/);
-  assert.match(popupCss, /--bg-card:\s*#17191E/);
-  assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--bg-main:\s*#FAF8F5/);
+test("light and dark palettes are unmistakably distinct", () => {
+  assert.match(popupCss, /--bg-main:\s*#0B0D10/);
+  assert.match(popupCss, /--bg-card:\s*#15181D/);
+  assert.match(popupCss, /--text-primary:\s*#F5F7FA/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--bg-main:\s*#F5F7FA/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--bg-card:\s*#FFFFFF/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-primary:\s*#1A1B20/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-secondary:\s*#55565A/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#707174/);
-  assert.match(popupCss, /--btn-primary:\s*#E7E2DA/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#F4F1EC/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#24272D/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#3A3E46/);
-  assert.match(popupCss, /--status-badge-text:\s*#45464A/);
-  assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
-  assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6|6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-primary:\s*#171A20/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-secondary:\s*#4F5661/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#707780/);
+  assert.match(popupCss, /--btn-primary:\s*#2B3138/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#37404A/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#20252B/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#2F353D/);
+  assert.doesNotMatch(popupCss, /#E7E2DA|#F4F1EC/);
+  assert.doesNotMatch(popupCss, /runner-option|status-stopped/);
 });
 
 test("popup uses connected and operational runner semantics", () => {

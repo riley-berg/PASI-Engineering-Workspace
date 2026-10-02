@@ -46,3 +46,23 @@ test("popup runner start explicitly rearms the ChatGPT dispatcher", () => {
     /await attachExistingChatTabs\(\)/
   );
 });
+
+
+test("CDP controller identity is scoped to the supervised runner run", () => {
+  assert.match(
+    background,
+    /function controllerIdForTab\(tabId, runId = ''\)/
+  );
+  assert.match(
+    background,
+    /'cdp-tab:' \+ String\(tabId\) \+ ':run:' \+ normalizedRunId/
+  );
+  assert.match(
+    background,
+    /const runId = String\(runnerState\.run_id \|\| ''\)\.trim\(\)/
+  );
+  assert.match(
+    background,
+    /const controllerId = controllerIdForTab\(tabId, runId\)/
+  );
+});

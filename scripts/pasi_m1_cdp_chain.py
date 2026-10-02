@@ -71,8 +71,32 @@ def fail_closed_if_active(transport: UrllibBridgeTransport) -> None:
         payload = dict(transport.request("GET", "/runner/state"))
     except Exception:
         return
-    if payload.get("available") is True and payload.get("status") == "running":
-        raise RuntimeError("a supervised PASI runner is already active; stop it before starting the M1 chain")
+    if payload.get("available") is not True or payload.get("status") != "running":
+        return
+
+    # The bridge launches this script as the runner process. Once this process
+    # is alive, a generic "runner is running" state can refer to this very
+    # process rather than a competing run. Only fail closed when the recorded
+    # PID belongs to a different live process.
+    pid_path = BRIDGE_RUNTIME_DIR / "runner.pid"
+    try:
+        recorded_pid = int(pid_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return
+
+    if recorded_pid <= 1 or recorded_pid == os.getpid():
+        return
+
+    try:
+        os.kill(recorded_pid, 0)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        pass
+    except OSError:
+        return
+
+    raise RuntimeError("a supervised PASI runner is already active; stop it before starting the M1 chain")
 
 
 def validate_completed_operation(

@@ -83,9 +83,16 @@ RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
 RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
 RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+def runner_python() -> str:
+    workspace_python = CONFIG.project_root / ".venv" / "bin" / "python"
+    if workspace_python.is_file() and os.access(workspace_python, os.X_OK):
+        return str(workspace_python)
+    return sys.executable
+
+
 RUNNER_PROFILES = {
-    "m1": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
-    "168h": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
+    "m1": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
+    "168h": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
 }
 
 
@@ -202,10 +209,14 @@ def load_runner_state() -> dict[str, Any]:
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
-        "execution_mode", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
+        "execution_mode", "runner_profile", "runner_pid", "log_path", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
         "last_operation_id", "last_request_id", "updated_at", "completed_at",
     }
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    result = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    if result.get("status") == "starting" and not runner_process_is_alive():
+        result["status"] = "failed"
+        result.setdefault("error", "runner exited before initialization completed")
+    return result
 
 def _runner_pid() -> int | None:
     try:
@@ -320,9 +331,29 @@ def _start_runner(profile: str) -> dict[str, Any]:
 
     environment = os.environ.copy()
     environment.setdefault("PYTHONUNBUFFERED", "1")
+    environment["PASI_RUNNER_PROFILE"] = profile
     if profile == "168h":
         environment["PASI_GITHUB_TOKEN"] = github_token
         environment["PASI_PUSH"] = "1"
+
+    starting_state = {
+        "status": "starting",
+        "execution_mode": "supervised_" + profile,
+        "runner_profile": profile,
+        "log_path": str(log_path),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        atomic_write_json(RUNNER_STATE_PATH, starting_state)
+    except OSError:
+        log_handle.close()
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner state could not be initialized",
+        }
+
     try:
         process = subprocess.Popen(
             command,
@@ -335,6 +366,13 @@ def _start_runner(profile: str) -> dict[str, Any]:
         )
     except OSError as exc:
         log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({
+            "status": "failed",
+            "error": "runner launch failed: " + str(exc),
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        atomic_write_json(RUNNER_STATE_PATH, failed_state)
         return {
             "accepted": False,
             "action": "start",
@@ -343,6 +381,13 @@ def _start_runner(profile: str) -> dict[str, Any]:
         }
     except Exception as exc:
         log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({
+            "status": "failed",
+            "error": "runner launch failed: " + type(exc).__name__ + ": " + str(exc),
+            "failed_at": datetime.now(timezone.utc).isoformat(),
+        })
+        atomic_write_json(RUNNER_STATE_PATH, failed_state)
         return {
             "accepted": False,
             "action": "start",
@@ -351,6 +396,21 @@ def _start_runner(profile: str) -> dict[str, Any]:
         }
 
     log_handle.close()
+    try:
+        current = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(current, dict):
+            current = {}
+    except (OSError, json.JSONDecodeError):
+        current = {}
+    if current.get("status") not in {"running", "failed", "completed", "paused"}:
+        current = dict(starting_state)
+    current.update({
+        "runner_profile": profile,
+        "runner_pid": process.pid,
+        "log_path": str(log_path),
+    })
+    atomic_write_json(RUNNER_STATE_PATH, current)
+
     return {
         "accepted": True,
         "action": "start",

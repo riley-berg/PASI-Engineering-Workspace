@@ -98,6 +98,11 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /html {\n  background: #0D0E11/);
   assert.match(popupCss, /--runner-option-selected:\s*#45464A/);
   assert.match(popupCss, /--runner-option-selected-hover:\s*#333438/);
+  assert.match(popupCss, /--runner-option-outline:\s*#DCD4C7/);
+  assert.match(
+    popupCss,
+    /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):hover,[\s\S]*background-color:\s*#F0ECE6\s*!important,[\s\S]*box-shadow:\s*inset 0 0 0 1px #DCD4C7/
+  );
   assert.match(
     popupCss,
     /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):hover,[\s\S]*background-color:\s*#F0ECE6\s*!important/
@@ -107,7 +112,7 @@ test("light theme overrides the complete popup surface palette", () => {
   const pickerHoverRule = popupCss.match(/\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[^}]*\}/)?.[0];
   assert.ok(pickerHoverRule);
   assert.doesNotMatch(pickerHoverRule, /font-weight:\s*700/);
-  assert.doesNotMatch(popupCss, /\.runner-select-option:hover,[\s\S]*box-shadow:\s*inset/);
+  assert.match(popupCss, /\.runner-select-option:hover,[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/);
   assert.match(popupCss, /--status-idle-summary:\s*#707174/);
   assert.match(popupCss, /\.status-dot\.idle\s*\{\s*display:\s*none/);
 });
@@ -211,7 +216,7 @@ test("popup uses a custom themed runner picker with no native select styling", (
   assert.match(popupCss, /transition:\s*none/);
   assert.match(popupCss, /\.runner-select-option\[aria-selected="true"\]:hover/);
   assert.match(popupCss, /--runner-option-selected-hover:\s*#333438/);
-  assert.doesNotMatch(popupCss, /\.runner-select-option:hover,[\s\S]*box-shadow:\s*inset/);
+  assert.match(popupCss, /\.runner-select-option:hover,[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/);
 });
 
 test("popup islands stay inside the compact popup width", () => {

@@ -299,32 +299,39 @@
     return "Awaiting start.";
   }
 
-  async function toggleRunner(profileId, state) {
-    const activeProfile = activeProfileForState(state);
-    if (runnerIsRunning(state) && activeProfile && activeProfile !== profileId) {
-      setStatus(
-        String(activeProfile).toUpperCase() + " is already running. Pause it before starting " +
-        (profileId === "168h" ? "168h" : "M1") + ".",
-        true
+  async function controlRunner(profileId) {
+    const currentState = await getRunnerState();
+    const activeProfile = activeProfileForState(currentState);
+    const running = runnerIsRunning(currentState);
+    const isActiveProfile = activeProfile === profileId;
+
+    if (running && !isActiveProfile) {
+      throw new Error(
+        String(activeProfile || "Another").toUpperCase() +
+        " runner is already running. Pause it before starting " +
+        (profileId === "168h" ? "168h" : "M1") +
+        "."
       );
-      return;
     }
 
+    const action = running && isActiveProfile ? "stop" : "start";
     const raw = await bridgeRequest("POST", "/runner/control", {
-      action: "toggle",
+      action,
       profile: profileId,
     });
     const result = parseBridgeResponse(raw);
 
-    if (!result.accepted) {
+    if (!result.accepted || result.action !== action) {
       throw new Error(String(result.reason || "Runner action was rejected."));
     }
 
     setStatus(
-      result.action === "stop"
+      action === "stop"
         ? (profileId === "168h" ? "168h" : "M1") + " runner paused."
         : (profileId === "168h" ? "168h" : "M1") + " runner started."
     );
+
+    return action;
   }
 
   function createRunnerCard(profileId, state, selectedProfile) {
@@ -394,7 +401,7 @@
       try {
         await setProfile(profileId);
         setRunnerSelection(profileId);
-        await toggleRunner(profileId, state);
+        await controlRunner(profileId);
         await render();
       } catch (error) {
         setStatus(String(error?.message || error), true);

@@ -351,6 +351,10 @@ body.light-theme .runner-card.selected {
   line-height: 1.35;
 }
 
+.status-desc.ready-summary {
+  color: var(--status-ready);
+}
+
 .status-dot {
   width: 7px;
   height: 7px;

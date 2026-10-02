@@ -138,9 +138,9 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
     /\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-hover\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/
   );
   assert.match(popupCss, /--runner-option-hover:\s*#24262C/);
-  assert.match(popupCss, /--runner-option-outline:\s*#292A2E/);
+  assert.match(popupCss, /--runner-option-outline:\s*#45464A/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-hover:\s*#F2F2F2/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-outline:\s*#DCD4C7/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-outline:\s*#45464A/);
   assert.match(
     popupCss,
     /\.runner-select-option\[aria-selected="true"\]:hover,\s*\.runner-select-option\[aria-selected="true"\]:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-selected\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/

@@ -47,7 +47,7 @@ test("popup theme architecture has one synchronous initialization path", () => {
   assert.ok(stylesheetIndex >= 0);
   assert.ok(themeScriptIndex < stylesheetIndex);
   assert.ok(
-    popupHtml.includes('<html lang="en" style="background:#0D0E11;color-scheme:dark">')
+    popupHtml.includes('<html lang="en" style="background:#0B0D10;color-scheme:dark">')
   );
   assert.ok(popupHtml.includes('<meta name="color-scheme" content="dark light">'));
   assert.match(themeInit, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
@@ -73,22 +73,22 @@ test("popup critical surfaces are painted before external CSS", () => {
   assert.ok(criticalStyleIndex < stylesheetIndex);
   assert.ok(
     popupHtml.includes(
-      "html {\n      background: #0D0E11;\n      color-scheme: dark;"
+      "html {\n      background: #0B0D10;\n      color-scheme: dark;"
     )
   );
   assert.ok(
     popupHtml.includes(
-      "html.light-theme {\n      background: #FAF8F5;\n      color-scheme: light;"
+      "html.light-theme {\n      background: #F5F7FA;\n      color-scheme: light;"
     )
   );
   assert.ok(
     popupHtml.includes(
-      "body {\n      background: #0D0E11;\n      color: #F4F1EC;"
+      "body {\n      background: #0B0D10;\n      color: #F5F7FA;"
     )
   );
   assert.ok(
     popupHtml.includes(
-      "html.light-theme body {\n      background: #FAF8F5;\n      color: #1A1B20;"
+      "html.light-theme body {\n      background: #F5F7FA;\n      color: #171A20;"
     )
   );
   assert.doesNotMatch(popupHtml, /visibility:\s*hidden/);
@@ -141,25 +141,27 @@ test("dashboard remains the native toolbar popup", () => {
   assert.doesNotMatch(backgroundJs, /chrome\.system\.display/);
 });
 
-test("runner readiness labels are operational states, not static ready claims", () => {
-  assert.doesNotMatch(popupJs, /return "Ready";/);
-  assert.doesNotMatch(popupJs, /Ready to execute/);
-  assert.match(popupJs, /status === "starting"/);
-  assert.match(popupJs, /return "Stopped";/);
-  assert.match(popupJs, /stateLabelText === "Starting" \? "starting"/);
+test("runner state labels never claim inactive work is running", () => {
+  assert.doesNotMatch(popupJs, /return "Ready";|Ready to execute/);
+  assert.match(popupJs, /state\.status === "starting"/);
+  assert.match(popupJs, /state\.status === "stopping"/);
+  assert.match(popupJs, /return "";/);
+  assert.doesNotMatch(popupJs, /return "Stopped";|Not running/);
 });
 
-test("active runner cards expose Stop immediately during startup", () => {
+test("active runner cards expose Stop during startup and running states", () => {
   assert.match(popupJs, /function runnerIsActive\(state\)/);
-  assert.match(popupJs, /status === "starting" \|\| state\?\.status === "running"/);
+  assert.match(popupJs, /status === "starting"/);
+  assert.match(popupJs, /status === "running"/);
+  assert.match(popupJs, /status === "stopping"/);
   assert.match(popupJs, /const activeThisProfile = runnerIsActive\(state\)/);
-  assert.match(popupJs, /toggle\.textContent = activeThisProfile \? "Stop" : "Start";/);
+  assert.match(popupJs, /toggle\.textContent = stoppingThisProfile \? "Stopping" : activeThisProfile \? "Stop" : "Start";/);
 });
 
 test("light and dark primary controls use distinct high-contrast palettes", () => {
-  assert.match(popupCss, /--btn-primary:\s*#E7E2DA/);
-  assert.match(popupCss, /--btn-primary-text:\s*#17191E/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#24272D/);
+  assert.match(popupCss, /--btn-primary:\s*#2B3138/);
+  assert.match(popupCss, /--btn-primary-text:\s*#FFFFFF/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#20252B/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-text:\s*#FFFFFF/);
 });
 
@@ -250,12 +252,12 @@ test("popup control and text colors meet WCAG AA targets", () => {
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
   };
 
-  assert.ok(contrastRatio("#1A1B20", "#FAF8F5") >= 4.5);
-  assert.ok(contrastRatio("#707174", "#FAF8F5") >= 4.5);
-  assert.ok(contrastRatio("#55565A", "#FFFFFF") >= 4.5);
-  assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
-  assert.ok(contrastRatio("#FFFFFF", "#1A1B20") >= 4.5);
-  assert.ok(contrastRatio("#45464A", "#FFFFFF") >= 4.5);
-  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
-  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
+  assert.ok(contrastRatio("#171A20", "#F5F7FA") >= 4.5);
+  assert.ok(contrastRatio("#707780", "#F5F7FA") >= 4.5);
+  assert.ok(contrastRatio("#4F5661", "#FFFFFF") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#343A42") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#171A20") >= 4.5);
+  assert.ok(contrastRatio("#343A42", "#FFFFFF") >= 4.5);
+  assert.ok(contrastRatio("#F5F7FA", "#15181D") >= 4.5);
+  assert.ok(contrastRatio("#707780", "#FFFFFF") >= 4.5);
 });

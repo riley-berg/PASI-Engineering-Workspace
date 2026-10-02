@@ -412,7 +412,7 @@
     toggle.className = "btn btn-primary";
     toggle.type = "button";
     const runningThisProfile = runnerIsRunning(state) && activeProfileForState(state) === profileId;
-    toggle.textContent = runningThisProfile ? "Pause runner" : "Start runner";
+    toggle.textContent = runningThisProfile ? "Stop" : "Start";
     toggle.disabled = runnerIsRunning(state) && activeProfileForState(state) !== profileId;
 
     toggle.onclick = async () => {

@@ -147,6 +147,43 @@ def clear_runner_pid() -> None:
             pass
 
 
+def record_initialization_failure(
+    run_id: str,
+    worktree: Path,
+    branch: str,
+    phase: str,
+    exc: BaseException,
+) -> None:
+    error = f"{type(exc).__name__}: {exc}"[:2000]
+    try:
+        emit({
+            "event": "run_failed",
+            "at": utcnow().isoformat(),
+            "run_id": run_id,
+            "phase": phase,
+            "branch": branch,
+            "worktree": str(worktree),
+            "error": error,
+        })
+    except OSError:
+        pass
+    try:
+        write_state({
+            "run_id": run_id,
+            "branch": branch,
+            "worktree": str(worktree),
+            "status": "failed",
+            "execution_mode": "supervised_168h",
+            "phase": "initialization_failed",
+            "error": error,
+            "failed_at": utcnow().isoformat(),
+            "runner_pid": os.getpid(),
+        })
+    except OSError:
+        pass
+    print(f"PASI 168h initialization failed: {error}", file=sys.stderr, flush=True)
+
+
 def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str:
     result = subprocess.run(["git", *args], cwd=cwd, text=True, capture_output=True, timeout=timeout, check=False)
     output = (result.stdout + result.stderr).strip()
@@ -298,12 +335,39 @@ def main() -> int:
 
     root = Path.cwd().resolve()
     run_id = f"ew-168h-{uuid.uuid4().hex}"
-    runner_pid_path = write_runner_pid()
     atexit.register(clear_runner_pid)
     worktree = args.worktree.expanduser().resolve()
-    ensure_worktree(root, worktree, args.branch)
-    head = git(worktree, "rev-parse", "HEAD")
-    phases = schedule()
+    initial_started_at = utcnow().isoformat()
+    write_runner_pid()
+    try:
+        write_state({
+            "run_id": run_id,
+            "repo": REPO,
+            "branch": args.branch,
+            "worktree": str(worktree),
+            "started_at": initial_started_at,
+            "status": "starting",
+            "execution_mode": "supervised_168h",
+            "phase": "initializing_worktree",
+            "runner_pid": os.getpid(),
+        })
+        ensure_worktree(root, worktree, args.branch)
+        head = git(worktree, "rev-parse", "HEAD")
+        write_state({
+            "run_id": run_id,
+            "repo": REPO,
+            "branch": args.branch,
+            "worktree": str(worktree),
+            "started_at": initial_started_at,
+            "status": "starting",
+            "execution_mode": "supervised_168h",
+            "phase": "loading_schedule",
+            "runner_pid": os.getpid(),
+        })
+        phases = schedule()
+    except Exception as exc:
+        record_initialization_failure(run_id, worktree, args.branch, "initialization", exc)
+        return 1
 
     emit({
         "event": "run_started" if not args.smoke else "smoke_started",
@@ -331,10 +395,12 @@ def main() -> int:
         "repo": REPO,
         "branch": args.branch,
         "worktree": str(worktree),
-        "started_at": utcnow().isoformat(),
+        "started_at": initial_started_at,
         "deadline_at": deadline.isoformat(),
         "status": "running",
         "execution_mode": "supervised_168h",
+        "phase": "ready_for_task_dispatch",
+        "runner_pid": os.getpid(),
     })
 
     while utcnow() < deadline:

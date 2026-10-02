@@ -114,10 +114,12 @@ test("light and dark palettes are unmistakably distinct", () => {
 test("popup uses connected and operational runner semantics", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
-  assert.match(popupJs, /return "Stopped";/);
   assert.match(popupJs, /state\.status === "starting"/);
-  assert.match(popupJs, /activeProfileForState\(state\) === profileId \? "Starting" : "Another runner active"/);
+  assert.match(popupJs, /state\.status === "stopping"/);
+  assert.match(popupJs, /activeProfileForState\(state\) === profileId/);
   assert.doesNotMatch(popupJs, /Ready to execute|return "Ready";/);
+  assert.doesNotMatch(popupJs, /return "Stopped"|Not running/);
+  assert.doesNotMatch(popupCss, /status-text\.stopped|status-dot\.stopped/);
 });
 
 test("runner cards do not animate theme surface or border changes", () => {
@@ -180,6 +182,12 @@ test("runner controls display Start when stopped and Stop when active", () => {
     popupJs,
     /toggle\.textContent = activeThisProfile \? "Stop" : "Start";/
   );
+});
+
+test("inactive runner cards do not render redundant stopped status", () => {
+  assert.match(popupJs, /if \(stateLabelText\) \{/);
+  assert.match(popupJs, /return "";/);
+  assert.doesNotMatch(popupJs, /Not running\./);
 });
 
 test("runner picker is absent because each runner card owns its own control", () => {

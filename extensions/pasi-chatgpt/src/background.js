@@ -609,8 +609,21 @@ async function bridgeJson(path, timeoutMs = 10000) {
 }
 
 chrome.commands?.onCommand?.addListener((command) => {
-  if (command !== 'pasi-run-next') return;
-  void runNextQueuedOperation('keyboard');
+  if (command !== 'pasi-toggle-runner') return;
+  void (async () => {
+    let profile = 'm1';
+    try {
+      const stored = await chrome.storage.local.get('pasi.runner.profile');
+      if (stored?.['pasi.runner.profile'] === '168h') profile = '168h';
+    } catch (_) {}
+    const result = await bridgeFetch('/runner/control', 'POST', {
+      action: 'toggle',
+      profile
+    }, 10000);
+    if (result.ok && profile === 'm1') {
+      await attachExistingChatTabs();
+    }
+  })();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

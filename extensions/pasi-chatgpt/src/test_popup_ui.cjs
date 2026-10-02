@@ -84,11 +84,16 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
   assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Ready" \? " ready-summary" : ""\)/);
-  assert.match(popupCss, /\.status-desc\.ready-summary[\s\S]*color:\s*var\(--status-ready\)/);
+  assert.match(popupCss, /\.status-desc\.ready-summary[\s\S]*color:\s*var\(--status-ready-summary\)/);
   assert.match(popupCss, /--status-ready:\s*#1A1B20/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--status-ready:\s*#1A1B20/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
-  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);\n  assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);\n  assert.match(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);\n  assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);\n  assert.match(popupCss, /--status-ready-summary:\s*#707174/);\n  assert.match(popupCss, /\.status-dot\.ready\s*\{\s*display:\s*none/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
+  assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);
+  assert.match(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);
+  assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);
+  assert.match(popupCss, /--status-ready-summary:\s*#707174/);
+  assert.match(popupCss, /\.status-dot\.ready\s*\{\s*display:\s*none/);
 });
 
 test("popup uses a custom themed runner picker with no native select styling", () => {

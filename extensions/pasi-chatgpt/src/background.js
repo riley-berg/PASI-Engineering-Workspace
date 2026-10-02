@@ -614,7 +614,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
 
-    bridgeFetch(path, method, message.body ?? null, 5000).then(sendResponse);
+    bridgeFetch(path, method, message.body ?? null, 5000).then(async (response) => {
+      if (response?.ok && method === 'POST' && path === '/runner/control') {
+        let body = {};
+        try {
+          body = JSON.parse(response.text || '{}');
+        } catch (_) {}
+        // A popup Start action must explicitly wake/re-arm the ChatGPT
+        // dispatcher. MV3 service workers can be suspended after a period of
+        // inactivity, so relying on an old in-memory waiter is not sufficient.
+        if (body?.accepted === true && body?.action === 'start') {
+          await attachExistingChatTabs();
+        }
+      }
+      sendResponse(response);
+    });
     return true;
   }
 

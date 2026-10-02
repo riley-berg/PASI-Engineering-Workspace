@@ -23,7 +23,7 @@ body {
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
   --runner-option-hover: #24262C;
-  --runner-option-outline: #292A2E;
+  --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #F4F1EC;
   --status-idle-summary: #A39892;
@@ -55,7 +55,7 @@ html.light-theme body {
   --text-secondary: #55565A;
   --text-muted: #707174;
   --runner-option-hover: #F2F2F2;
-  --runner-option-outline: #DCD4C7;
+  --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #1A1B20;
   --status-idle-summary: #707174;

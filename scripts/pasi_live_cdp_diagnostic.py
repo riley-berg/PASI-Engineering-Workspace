@@ -438,7 +438,7 @@ def main() -> int:
         local_tests: dict[str, Any] | None = None
         if not args.skip_tests:
             local_tests = run_local_tests(root)
-            step_results.append({"ok": True, "step": "local_tests", "summary": "pytest and frontend tests passed"})
+            step_results.append({"ok": True, "step": "local_tests", "summary": "pytest, frontend, and extension tests passed"})
 
         marker = f"PASI_LIVE_CDP_{uuid.uuid4().hex[:10].upper()}"
         adapter = ChatGPTAdapter(

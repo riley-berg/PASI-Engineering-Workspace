@@ -14,8 +14,7 @@
     "declarativeNetRequest",
     "userScripts",
     "alarms",
-    "debugger",
-    "system.display"
+    "debugger"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -52,7 +51,8 @@
     }
   ],
   "action": {
-    "default_title": "PASI ChatGPT Handoff"
+    "default_title": "PASI ChatGPT Handoff",
+    "default_popup": "popup.html"
   },
   "commands": {
     "pasi-toggle-runner": {

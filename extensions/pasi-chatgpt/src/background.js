@@ -616,13 +616,39 @@ chrome.commands?.onCommand?.addListener((command) => {
       const stored = await chrome.storage.local.get('pasi.runner.profile');
       if (stored?.['pasi.runner.profile'] === '168h') profile = '168h';
     } catch (_) {}
+
     const result = await bridgeFetch('/runner/control', 'POST', {
       action: 'toggle',
       profile
     }, 10000);
+
+    let detail = '';
+    try {
+      detail = JSON.parse(result.text || '{}')?.error || '';
+    } catch (_) {}
+
     if (result.ok) {
+      const body = JSON.parse(result.text || '{}');
       await attachExistingChatTabs();
+      try {
+        await chrome.notifications.create({
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+          title: 'PASI runner',
+          message: body.action === 'stop' ? 'Runner paused.' : 'Runner started.'
+        });
+      } catch (_) {}
+      return;
     }
+
+    try {
+      await chrome.notifications.create({
+        type: 'basic',
+        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
+        title: 'PASI runner control failed',
+        message: detail || (result.status ? 'Bridge request failed (HTTP ' + result.status + ').' : 'Bridge is unreachable.')
+      });
+    } catch (_) {}
   })();
 });
 

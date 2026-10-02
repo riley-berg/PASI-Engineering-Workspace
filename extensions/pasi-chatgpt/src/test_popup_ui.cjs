@@ -167,6 +167,19 @@ test("popup bootstraps the saved theme before first paint", () => {
   assert.match(popupJs, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
   assert.match(popupJs, /document\.documentElement\.classList\.toggle\("light-theme"/);
   assert.match(popupJs, /document\.documentElement\.removeAttribute\("data-theme-pending"\)/);
+  assert.match(popupHtml, /<meta name="color-scheme" content="dark light">/);
+  assert.ok(
+    popupHtml.indexOf('<meta name="color-scheme" content="dark light">') <
+    popupHtml.indexOf('<script src="theme-init.js"></script>')
+  );
+  assert.match(themeInit, /meta\[name="color-scheme"\]/);
+  assert.match(themeInit, /setInitialColorScheme/);
+  assert.match(popupJs, /document\.startViewTransition/);
+  assert.match(popupJs, /function applyThemeDom\(light\)/);
+  assert.match(popupCss, /::view-transition-group\(root\)/);
+  assert.match(popupCss, /::view-transition-old\(root\)/);
+  assert.match(popupCss, /::view-transition-new\(root\)/);
+  assert.match(popupCss, /animation-duration:\s*1ms/);
 });
 
 test("popup uses Connected plus Idle runner semantics without duplicate Ready labels", () => {

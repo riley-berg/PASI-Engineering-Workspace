@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  document.documentElement.setAttribute("data-popup-paint-pending", "true");
+
   try {
     const theme = localStorage.getItem("pasi.popup.theme");
     if (theme === "light") {

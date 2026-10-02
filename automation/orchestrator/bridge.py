@@ -240,10 +240,28 @@ def _github_token() -> str:
             text=True,
             timeout=5,
         )
+        token = result.stdout.strip()
+        if token:
+            return token
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
     except (OSError, subprocess.SubprocessError):
         return ""
 
-    return result.stdout.strip()
+    for line in result.stdout.splitlines():
+        if line.startswith("password="):
+            return line.removeprefix("password=").strip()
+    return ""
 
 
 def _start_runner(profile: str) -> dict[str, Any]:

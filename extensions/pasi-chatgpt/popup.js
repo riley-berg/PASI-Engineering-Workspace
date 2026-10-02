@@ -595,7 +595,17 @@
         getRunnerState(),
       ]);
 
-      const activeUrl = String(activeResult.url || "");
+      // Runner authorization is based on the actual active browser tab,
+      // not the userscript manager's asynchronous view of that tab. The
+      // userscript registry can briefly return an empty/stale URL during an
+      // extension lifecycle transition, which must not flash "Page not
+      // authorized" while the user is still on ChatGPT.
+      let activeUrl = String(activeResult.url || "");
+      try {
+        const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
+        const tabUrl = String(tabs?.[0]?.url || "");
+        if (tabUrl) activeUrl = tabUrl;
+      } catch (_) {}
       const runnerSupported = isRunnerTargetUrl(activeUrl);
       const userscriptsMatched = hasMatchedUserscripts(activeResult);
 

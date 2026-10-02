@@ -220,7 +220,7 @@ def main() -> int:
 
     findings = []
     findings.extend(scan_paths(paths))
-    findings.extend(repository_boundary_findings
+    findings.extend(repository_boundary_findings)
     findings.extend(scan_cdp_authority())
     findings.extend(check_python(paths))
     findings.extend(check_javascript(paths))

@@ -207,6 +207,7 @@ def request_runner_control(action: str) -> dict[str, Any]:
             "pasi_overnight_engine_v2.py" not in cmdline
             and "pasi_168h_supervisor.sh" not in cmdline
             and "pasi_168h_acceptance.py" not in cmdline
+            and "pasi_m1_cdp_chain.py" not in cmdline
         ):
             return {"accepted": False, "action": action, "reason": "runner pid does not identify as PASI"}
         try:

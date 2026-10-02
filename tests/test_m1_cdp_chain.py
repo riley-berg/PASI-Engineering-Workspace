@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 
 from scripts import pasi_m1_cdp_chain as chain
 
@@ -50,3 +51,22 @@ def test_runner_pid_cleanup_removes_all_pid_locations(tmp_path, monkeypatch) -> 
     assert not (state_dir / "runner.pid").exists()
     assert not (runtime_dir / "runner.pid").exists()
     assert not legacy.exists()
+
+
+def test_fail_closed_allows_m1_process_to_ignore_its_own_running_state(tmp_path, monkeypatch):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    monkeypatch.setattr(chain, "BRIDGE_RUNTIME_DIR", runtime_dir)
+    (runtime_dir / "runner.pid").write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    class Transport:
+        def request(self, method, path, payload=None):
+            assert method == "GET"
+            assert path == "/runner/state"
+            return {
+                "available": True,
+                "status": "running",
+                "execution_mode": "supervised_m1",
+            }
+
+    chain.fail_closed_if_active(Transport())

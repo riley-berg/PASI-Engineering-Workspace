@@ -61,6 +61,11 @@ def test_cdp_network_authority_contract():
     assert "chrome.tabs.onActivated" in background
     assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background
+    assert "pasi-run-next" in background
+    assert "chrome.commands" in background
+    assert "runNextQueuedOperation" in background
+    assert "dispatchNextOperationForController" not in background
+    assert "claim_next: true" not in background
     assert "BRIDGE_NEXT_OPERATION_RE" in background
     assert "&wait_ms=[0-9]{1,5}" in background
 

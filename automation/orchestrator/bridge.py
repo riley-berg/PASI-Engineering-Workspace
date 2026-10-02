@@ -3,6 +3,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -217,6 +218,46 @@ def load_runner_state() -> dict[str, Any]:
         result["status"] = "failed"
         result.setdefault("error", "runner exited before initialization completed")
     return result
+
+def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
+    """Stop a supervised runner and its children without stopping the bridge."""
+    try:
+        process_group = os.getpgid(pid)
+    except OSError as exc:
+        raise RuntimeError("runner process is no longer present") from exc
+
+    try:
+        if process_group == pid:
+            # _start_runner uses start_new_session=True, so the runner has an
+            # isolated process group. Terminating that group stops the runner
+            # and any subprocesses it spawned for the current task.
+            os.killpg(process_group, signal.SIGTERM)
+        else:
+            # Legacy runners may not have their own process group.
+            os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process signal denied") from exc
+
+    deadline = time.monotonic() + max(0.1, grace_seconds)
+    while time.monotonic() < deadline:
+        if not runner_process_is_alive():
+            return
+        time.sleep(0.05)
+
+    try:
+        if process_group == pid:
+            os.killpg(process_group, signal.SIGKILL)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process could not be force-stopped") from exc
+
+    if runner_process_is_alive():
+        raise RuntimeError("runner process did not stop after force termination")
 
 def _runner_pid() -> int | None:
     try:
@@ -462,21 +503,37 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
             return {"accepted": False, "action": "stop", "reason": "runner pid does not identify as PASI"}
 
         state = load_runner_state()
-        if state.get("available"):
-            paused = dict(state)
-            paused["status"] = "paused"
-            paused["execution_mode"] = "manual"
-            paused["paused_at"] = datetime.now(timezone.utc).isoformat()
-            try:
-                atomic_write_json(RUNNER_STATE_PATH, paused)
-            except OSError:
-                return {"accepted": False, "action": "stop", "reason": "runner state could not be persisted"}
+        stopping = dict(state) if state.get("available") else {}
+        stopping.update({
+            "status": "stopping",
+            "execution_mode": "manual",
+            "paused_at": datetime.now(timezone.utc).isoformat(),
+        })
         try:
-            os.kill(pid, 15)
-        except ProcessLookupError:
-            pass
-        except PermissionError:
-            return {"accepted": False, "action": "stop", "reason": "runner process signal denied"}
+            atomic_write_json(RUNNER_STATE_PATH, stopping)
+            _terminate_runner_process(pid)
+        except (OSError, RuntimeError) as exc:
+            failed = dict(stopping)
+            failed.update({
+                "status": "failed",
+                "error": "runner stop failed: " + str(exc),
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            try:
+                atomic_write_json(RUNNER_STATE_PATH, failed)
+            except OSError:
+                pass
+            return {
+                "accepted": False,
+                "action": "stop",
+                "pid": pid,
+                "reason": failed["error"],
+            }
+
+        paused = dict(stopping)
+        paused["status"] = "paused"
+        paused["paused_at"] = datetime.now(timezone.utc).isoformat()
+        atomic_write_json(RUNNER_STATE_PATH, paused)
         try:
             (RUNNER_STATE_PATH.parent / "runner.pid").unlink()
         except FileNotFoundError:

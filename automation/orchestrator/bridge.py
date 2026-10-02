@@ -87,6 +87,17 @@ RUNNER_PROFILES = {
     "m1": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
     "168h": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
 }
+
+
+def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically persist a small JSON control/state document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: CONTEXT_EXHAUSTED",
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",

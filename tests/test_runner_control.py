@@ -59,3 +59,12 @@ def test_github_token_falls_back_to_git_credential(monkeypatch):
         ["gh", "auth", "token", "--hostname", "github.com"],
         ["git", "credential", "fill"],
     ]
+
+
+def test_github_token_accepts_projects_and_gh_names(monkeypatch):
+    monkeypatch.delenv("PASI_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("PASI_PROJECTS_TOKEN", "projects-token")
+    monkeypatch.setenv("GH_TOKEN", "gh-token")
+
+    assert bridge._github_token() == "projects-token"

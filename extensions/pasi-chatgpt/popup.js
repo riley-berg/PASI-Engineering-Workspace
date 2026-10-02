@@ -40,6 +40,41 @@
       const executionTitle = document.createElement("div");
       executionTitle.className = "name";
       executionTitle.textContent = "Execution";
+
+      const runnerProfile = document.createElement("select");
+      runnerProfile.innerHTML = '<option value="m1">M1 · 20-operation acceptance</option><option value="168h">168h · long-run acceptance</option>';
+      const storedProfile = await chrome.storage.local.get("pasi.runner.profile");
+      runnerProfile.value = storedProfile?.["pasi.runner.profile"] === "168h" ? "168h" : "m1";
+      runnerProfile.onchange = async () => {
+        await chrome.storage.local.set({"pasi.runner.profile": runnerProfile.value});
+      };
+
+      const runnerToggle = document.createElement("button");
+      runnerToggle.textContent = "Start / Pause runner";
+      runnerToggle.onclick = async () => {
+        runnerToggle.disabled = true;
+        try {
+          const raw = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({
+              type: "pasi-control-center-bridge-request",
+              method: "POST",
+              path: "/runner/control",
+              body: {action: "toggle", profile: runnerProfile.value}
+            }, (result) => {
+              const error = chrome.runtime.lastError;
+              if (error) return reject(new Error(error.message));
+              resolve(result || null);
+            });
+          });
+          if (!raw?.ok) throw new Error(raw?.text || "runner control request failed");
+          const result = JSON.parse(raw.text || "{}");
+          status(result.accepted ? (result.action === "stop" ? "Runner paused." : "Runner started.") : String(result.reason || "Runner action rejected."), !result.accepted);
+        } catch (error) {
+          status(String(error.message || error), true);
+        } finally {
+          runnerToggle.disabled = false;
+        }
+      };
       const runNext = document.createElement("button");
       runNext.textContent = "Run next queued operation";
       runNext.onclick = async () => {
@@ -71,7 +106,7 @@
           runNext.disabled = false;
         }
       };
-      executionCard.append(executionTitle, runNext);
+      executionCard.append(executionTitle, runnerProfile, runnerToggle, runNext);
       root.append(executionCard);
       const menu = await send(TYPES.menu);
       if (menu.commands?.length) {

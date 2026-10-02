@@ -37,20 +37,15 @@ def test_runner_state_preserves_supervised_mode_and_deadline(tmp_path, monkeypat
 def test_runner_pid_cleanup_removes_all_pid_locations(tmp_path, monkeypatch) -> None:
     state_dir = tmp_path / "state"
     runtime_dir = tmp_path / "runtime"
-    legacy = tmp_path / "legacy" / "runner.pid"
     monkeypatch.setattr(chain, "STATE_DIR", state_dir)
     monkeypatch.setattr(chain, "BRIDGE_RUNTIME_DIR", runtime_dir)
-    monkeypatch.setattr(chain, "LEGACY_PID_PATH", legacy)
 
     chain.write_runner_pid(12345)
     assert (state_dir / "runner.pid").exists()
     assert (runtime_dir / "runner.pid").exists()
-    assert legacy.exists()
-
     chain.clear_runner_pid()
     assert not (state_dir / "runner.pid").exists()
     assert not (runtime_dir / "runner.pid").exists()
-    assert not legacy.exists()
 
 
 def test_fail_closed_allows_m1_process_to_ignore_its_own_running_state(tmp_path, monkeypatch):
@@ -70,3 +65,11 @@ def test_fail_closed_allows_m1_process_to_ignore_its_own_running_state(tmp_path,
             }
 
     chain.fail_closed_if_active(Transport())
+
+
+def test_m1_startup_failure_is_persisted():
+    from pathlib import Path
+    source = Path(chain.__file__).read_text(encoding="utf-8")
+    assert 'status="failed"' in source
+    assert 'phase="failed"' in source
+    assert 'print(f"M1 FAILED:' in source

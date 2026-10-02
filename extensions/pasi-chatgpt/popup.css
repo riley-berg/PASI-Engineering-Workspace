@@ -16,64 +16,63 @@ body {
   background: var(--bg-main);
   color: var(--text-primary);
   --runner-pulse-animation: pasi-runner-pulse;
-  --bg-main: #0D0E11;
-  --bg-card: #17191E;
-  --border-color: #292A2E;
-  --text-primary: #F4F1EC;
-  --text-secondary: #D6CEC8;
-  --text-muted: #A39892;
-  --status-idle: #F4F1EC;
-  --status-starting: #D6CEC8;
-  --status-stopped: #A39892;
-
-  --status-failed: #F4F1EC;
-  --status-completed: #6E7074;
-  --warning-text: #D6CEC8;
-  --btn-primary: #E7E2DA;
-  --btn-primary-hover: #F4F1EC;
-  --btn-primary-text: #17191E;
-  --btn-secondary: #24262C;
-  --btn-secondary-hover: #3A3538;
-  --badge-m1: #45464A;
-  --badge-long: #45464A;
-  --status-badge-bg: rgba(112, 113, 116, .12);
-  --status-badge-active-bg: rgba(112, 113, 116, .18);
-  --status-badge-text: #F4F1EC;
-  --danger-bg: rgba(69, 70, 74, .18);
-  --danger-text: #F4F1EC;
-  --idle-bg: rgba(23, 25, 30, .78);
-  --idle-border: #292A2E;
+  --bg-main: #0B0D10;
+  --bg-card: #15181D;
+  --border-color: #2A3038;
+  --text-primary: #F5F7FA;
+  --text-secondary: #BCC4CE;
+  --text-muted: #8A94A3;
+  --status-unavailable: #8A94A3;
+  --status-starting: #AEB7C4;
+  --status-running: #DDE6F0;
+  --status-failed: #F3B0B0;
+  --status-completed: #A4ADB8;
+  --warning-text: #C5CDD6;
+  --btn-primary: #2B3138;
+  --btn-primary-hover: #37404A;
+  --btn-primary-text: #FFFFFF;
+  --btn-secondary: #181C21;
+  --btn-secondary-hover: #222830;
+  --badge-m1: #343B44;
+  --badge-long: #343B44;
+  --status-badge-bg: rgba(221, 230, 240, .10);
+  --status-badge-active-bg: rgba(221, 230, 240, .16);
+  --status-badge-text: #E6EBF0;
+  --danger-bg: rgba(243, 176, 176, .10);
+  --danger-text: #F3B0B0;
+  --idle-bg: rgba(21, 24, 29, .92);
+  --idle-border: #2A3038;
 }
 
 html.light-theme body {
   --runner-pulse-animation: pasi-runner-pulse-light;
-  --bg-main: #FAF8F5;
+  --bg-main: #F5F7FA;
   --bg-card: #FFFFFF;
-  --border-color: #DCD4C7;
-  --text-primary: #1A1B20;
-  --text-secondary: #55565A;
-  --text-muted: #707174;
-  --runner-option-hover: #F2F2F2;
-  --runner-option-outline: #45464A;
-  --runner-option-selected: #45464A;
-  --status-idle: #1A1B20;
-  --status-failed: #333438;
-  --status-completed: #707174;
-  --warning-text: #45464A;
-  --btn-primary: #24272D;
-  --btn-primary-hover: #3A3E46;
+  --border-color: #D7DDE5;
+  --text-primary: #171A20;
+  --text-secondary: #4F5661;
+  --text-muted: #707780;
+  --status-unavailable: #707780;
+  --status-starting: #56606C;
+  --status-running: #27313D;
+  --status-failed: #A23D3D;
+  --status-completed: #56606C;
+  --warning-text: #4F5661;
+  --btn-primary: #20252B;
+  --btn-primary-hover: #2F353D;
   --btn-primary-text: #FFFFFF;
-  --btn-secondary: #FFFFFF;
-  --btn-secondary-hover: #F0ECE6;
-  --badge-m1: #45464A;
-  --badge-long: #45464A;
-  --status-badge-bg: rgba(112, 113, 116, .12);
-  --status-badge-active-bg: rgba(112, 113, 116, .18);
-  --status-badge-text: #45464A;
-  --danger-bg: rgba(69, 70, 74, .08);
-  --danger-text: #1A1B20;
-  --idle-bg: rgba(255, 255, 255, .95);
-  --idle-border: #DCD4C7;
+  --btn-secondary: #EEF1F4;
+  --btn-secondary-hover: #E4E8ED;
+  --badge-m1: #38414B;
+  --badge-long: #38414B;
+  --status-badge-bg: rgba(32, 37, 43, .08);
+  --status-badge-active-bg: rgba(32, 37, 43, .13);
+  --status-badge-text: #343A42;
+  --danger-bg: rgba(162, 61, 61, .08);
+  --danger-text: #8D2F2F;
+  --idle-bg: rgba(255, 255, 255, .98);
+  --idle-border: #D7DDE5;
+}
 }
 
 .popup-header {
@@ -124,21 +123,6 @@ html.light-theme body {
 .theme-toggle:hover {
   background: var(--btn-secondary);
 }
-
-.runner-controls {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-
-
-
-
-
-
-
 
 
 
@@ -236,7 +220,7 @@ html.light-theme body {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--status-idle);
+  color: var(--status-unavailable);
   font-size: 11px;
   font-weight: 600;
 }
@@ -261,29 +245,22 @@ html.light-theme body {
   line-height: 1.35;
 }
 
-.status-desc.idle-summary {
-  color: var(--status-idle-summary);
-}
-
 .status-dot {
   width: 7px;
   height: 7px;
   min-width: 7px;
   border-radius: 50%;
-  background: var(--status-idle);
+  background: var(--status-unavailable);
 }
 
-.status-dot.starting {
+.status-dot.starting,
+.status-dot.stopping {
   background: var(--status-starting);
 }
 
 .status-dot.running {
-  background: var(--status-running, #45464A);
+  background: var(--status-running);
   animation: var(--runner-pulse-animation) 1.4s infinite;
-}
-
-.status-dot.stopped {
-  background: var(--status-stopped);
 }
 
 .status-dot.failed {
@@ -324,13 +301,13 @@ html.light-theme body {
 
 .btn:focus-visible,
 .theme-toggle:focus-visible {
-  outline: 1px solid #F4F1EC;
+  outline: 1px solid #F5F7FA;
   outline-offset: 1px;
 }
 
 html.light-theme body .btn:focus-visible,
 html.light-theme body .theme-toggle:focus-visible {
-  outline-color: #45464A;
+  outline-color: #343A42;
 }
 
 .btn-primary:hover:not(:disabled) {

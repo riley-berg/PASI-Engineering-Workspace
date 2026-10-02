@@ -43,7 +43,11 @@ def utcnow() -> datetime:
 
 
 def token() -> str:
-    return os.environ.get("PASI_GITHUB_TOKEN", "").strip() or os.environ.get("GITHUB_TOKEN", "").strip()
+    for name in ("PASI_PROJECTS_TOKEN", "PASI_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def github(url: str, *, method: str = "GET", body: str | None = None) -> dict:

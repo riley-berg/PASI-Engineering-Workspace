@@ -42,7 +42,6 @@
         "src/api_contract.js",
         "src/api_v2.js",
         "src/api_v3.js",
-        "src/api_v4.js",
         "src/timeout-config.js"
       ],
       "run_at": "document_idle"

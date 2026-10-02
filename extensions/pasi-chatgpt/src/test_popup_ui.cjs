@@ -86,6 +86,11 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.match(popupCss, /--bg-main:\s*#0B0C0C/);
   assert.match(popupCss, /--bg-card:\s*#1A1D1E/);
   assert.match(popupCss, /--btn-primary:\s*#604830/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#765A3D/);
+  assert.match(popupCss, /--badge-m1:\s*#604830/);
+  assert.match(popupCss, /--badge-long:\s*#604830/);
+  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#8A6A49/);
+  assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#fff/);
   assert.match(popupCss, /--text-primary:\s*#EADBCB/);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
 });

@@ -97,3 +97,11 @@ def test_m1_conversation_identity_ignores_url_query_changes() -> None:
     assert chat_conversation_identity("https://www.chatgpt.com/c/abc123/") == "www.chatgpt.com/c/abc123"
     assert chat_conversation_identity("https://chatgpt.com/c/xyz789") != "chatgpt.com/c/abc123"
 
+def test_168h_runtime_default_matches_bridge_runtime(monkeypatch) -> None:
+    from pathlib import Path
+    from scripts import pasi_168h_acceptance as acceptance
+
+    monkeypatch.delenv("PASI_RUNTIME_DIR", raising=False)
+
+    assert acceptance.runtime_state_dir() == (Path.home() / ".pasi" / "overnight").resolve()
+

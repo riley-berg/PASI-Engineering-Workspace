@@ -98,14 +98,18 @@ def emit(event: dict) -> None:
 
 
 def runtime_state_dir() -> Path:
-    # Match the bridge's canonical default runtime location even when an older
-    # already-running bridge process did not inject PASI_RUNTIME_DIR.
-    return Path(
+    # Match the bridge's profile-isolated runtime location even when the
+    # environment does not explicitly provide PASI_RUNTIME_DIR.
+    root = Path(
         os.environ.get(
             "PASI_RUNTIME_DIR",
             str(Path.home() / ".pasi" / "overnight"),
         )
     ).expanduser().resolve()
+    profile = os.environ.get("PASI_RUNNER_PROFILE", "168h").strip().casefold() or "168h"
+    if profile not in {"m1", "168h"}:
+        profile = "168h"
+    return root / profile
 
 
 def atomic_write_json(path: Path, payload: dict) -> None:

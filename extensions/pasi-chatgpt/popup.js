@@ -280,11 +280,11 @@
     const stateLabelText = runnerStatusLabel(state, profileId);
     const statusText = document.createElement("div");
     const stateClass =
+      stateLabelText === "Starting" ? "starting" :
       stateLabelText === "Running" ? "running" :
-      stateLabelText === "Paused" ? "paused" :
+      stateLabelText === "Stopped" ? "stopped" :
       stateLabelText === "Failed" ? "failed" :
       stateLabelText === "Completed" ? "completed" :
-      stateLabelText === "Ready" ? "ready" :
       "idle";
     statusText.className = "status-text " + stateClass;
 
@@ -297,7 +297,7 @@
     statusText.append(dot, label);
 
     const desc = document.createElement("div");
-    desc.className = "status-desc" + (stateLabelText === "Ready" ? " idle-summary" : "");
+    desc.className = "status-desc";
     desc.textContent = runnerSummary(state, profileId);
     body.append(statusText, desc);
 
@@ -307,15 +307,15 @@
     const toggle = document.createElement("button");
     toggle.className = "btn btn-primary";
     toggle.type = "button";
-    const runningThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
-    toggle.textContent = runningThisProfile ? "Stop" : "Start";
+    const activeThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
+    toggle.textContent = activeThisProfile ? "Stop" : "Start";
     toggle.disabled = runnerIsActive(state) && activeProfileForState(state) !== profileId;
 
     toggle.onclick = async () => {
       toggle.disabled = true;
       try {
         await setProfile(profileId);
-        await controlRunner(profileId, runningThisProfile ? "stop" : "start");
+        await controlRunner(profileId, activeThisProfile ? "stop" : "start");
         await render();
       } catch (error) {
         setStatus(String(error?.message || error), true);

@@ -55,9 +55,6 @@
     "default_popup": "popup.html"
   },
   "commands": {
-    "pasi-run-next": {
-      "description": "Run exactly one queued PASI operation"
-    },
     "pasi-toggle-runner": {
       "suggested_key": {
         "default": "Ctrl+Shift+K"

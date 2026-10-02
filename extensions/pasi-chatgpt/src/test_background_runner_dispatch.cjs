@@ -26,3 +26,23 @@ test("background accepts the long-poll query on the bridge route", () => {
     /bridgeJson\(\s*['"]\/next-operation\?controller_id=['"]\s*\+\s*encodeURIComponent\(controllerId\)\s*\+\s*['"]&wait_ms=['"]\s*\+\s*String\(Math\.round\(boundedWaitMs\)\)/
   );
 });
+
+
+test("popup runner start explicitly rearms the ChatGPT dispatcher", () => {
+  assert.match(
+    background,
+    /pasi-control-center-bridge-request/
+  );
+  assert.match(
+    background,
+    /method === 'POST' && path === '\/runner\/control'/
+  );
+  assert.match(
+    background,
+    /body\?\.accepted === true && body\?\.action === 'start'/
+  );
+  assert.match(
+    background,
+    /await attachExistingChatTabs\(\)/
+  );
+});

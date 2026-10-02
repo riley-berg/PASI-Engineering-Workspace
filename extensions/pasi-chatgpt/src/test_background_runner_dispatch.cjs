@@ -15,7 +15,7 @@ test("background keeps the dispatcher dormant until a live supervised runner exi
   assert.match(background, /execution_mode[^\n]+supervised_/);
   assert.match(background, /if \(!runnerStateIsDispatchable\(runnerState\)\)/);
   assert.match(background, /setTimeout\(resolve, 500\)/);
-  assert.match(background, /waitForNextOperationForController\(tabId, controllerId\)/);
+  assert.match(background, /waitForNextOperationForController\\(tabId, waitMs = 3000\\)/);
   assert.doesNotMatch(background, /waitForSupervisedRunnerReady\(/);
   assert.match(background, /ensureSupervisedExecutionWaiter\(tabId, controllerIdForTab\(tabId\)\);/);
 });

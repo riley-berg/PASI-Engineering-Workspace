@@ -177,6 +177,17 @@ test("runner cards do not animate theme surface or border changes", () => {
   assert.doesNotMatch(runnerCardRule, /background-color|border-color/);
 });
 
+test("runner action status survives the post-action render", () => {
+  assert.match(
+    popupJs,
+    /async function render\(\{clearStatus = false\} = \{\}\)/
+  );
+  assert.match(
+    popupJs,
+    /if \(clearStatus && !\$\("status"\)\.classList\.contains\("error"\)\)/
+  );
+});
+
 test("popup remains inside the compact width and hides only intentional UI regions", () => {
   assert.match(popupCss, /width:\s*360px/);
   assert.match(popupCss, /\.runner-card,\s*\.card[\s\S]*width:\s*100%/);

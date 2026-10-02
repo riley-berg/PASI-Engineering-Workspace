@@ -59,7 +59,7 @@
       "suggested_key": {
         "default": "Ctrl+Shift+K"
       },
-      "description": "Start or pause the selected PASI runner"
+      "description": "Start the idle PASI runner or stop the active PASI runner"
     }
   },
   "minimum_chrome_version": "120",

@@ -26,7 +26,7 @@ test("ChatGPT is a supported runner target independently of userscript matches",
   assert.match(popupJs, /parsed\.hostname === "chatgpt\.com"/);
   assert.match(popupJs, /parsed\.hostname === "www\.chatgpt\.com"/);
   assert.match(popupJs, /const runnerSupported = isRunnerTargetUrl\(activeUrl\);/);
-  assert.match(popupJs, /renderRunnerDashboard\(runnerState, selectedProfile, runnerSupported\);/);
+  assert.match(popupJs, /renderRunnerDashboard\(runnerState, runnerSupported\);/);
   assert.match(popupJs, /idle\.hidden = runnerSupported \|\| userscriptsMatched;/);
 });
 
@@ -103,7 +103,8 @@ test("light and dark surface palettes are explicit and stable", () => {
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#707174/);
   assert.match(popupCss, /--btn-primary:\s*#45464A/);
   assert.match(popupCss, /--btn-primary-hover:\s*#5B5C61/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#45464A/);\n  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#5B5C61/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#45464A/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#5B5C61/);
   assert.match(popupCss, /--status-badge-text:\s*#45464A/);
   assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6|6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
@@ -145,7 +146,7 @@ test("runner controls use explicit start or stop actions", () => {
 test("runner controls display Start when stopped and Stop when running", () => {
   assert.match(
     popupJs,
-    /toggle\\.textContent = runningThisProfile \\? "Stop" : "Start";/
+    /toggle\.textContent = runningThisProfile \? "Stop" : "Start";/
   );
 });
 
@@ -156,18 +157,18 @@ test("runner picker is absent because each runner card owns its own control", ()
 });
 
 test("runner cards no longer depend on a selected runner", () => {
-  assert.match(popupJs, /function createRunnerCard\\(profileId, state\\)/);
-  assert.match(popupJs, /function renderRunnerDashboard\\(state, visible\\)/);
+  assert.match(popupJs, /function createRunnerCard\(profileId, state\)/);
+  assert.match(popupJs, /function renderRunnerDashboard\(state, visible\)/);
   assert.doesNotMatch(popupJs, /selectedProfile/);
 });
 
 test("runner start waits for a real state transition", () => {
-  assert.match(popupJs, /async function waitForRunnerState\\(profileId, action, timeoutMs = 5000\\)/);
-  assert.match(popupJs, /const settledState = await waitForRunnerState\\(profileId, action\\);/);
+  assert.match(popupJs, /async function waitForRunnerState\(profileId, action, timeoutMs = 5000\)/);
+  assert.match(popupJs, /const settledState = await waitForRunnerState\(profileId, action\);/);
 });
 
 test("failed runner state exposes its diagnostic error", () => {
-  assert.match(popupJs, /state\\?\\.error \\|\\| state\\?\\.stop_reason/);
+  assert.match(popupJs, /state\?\.error \|\| state\?\.stop_reason/);
 });
 
 test("runner action status survives the post-action render", () => {

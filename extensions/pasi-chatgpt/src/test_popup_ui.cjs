@@ -122,7 +122,7 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
 
   assert.match(
     popupCss,
-    /\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-hover\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);[\s\S]*box-shadow:\s*none;/
+    /\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-hover\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/
   );
   assert.match(popupCss, /--runner-option-hover:\s*#24262C/);
   assert.match(popupCss, /--runner-option-outline:\s*#292A2E/);

@@ -234,10 +234,11 @@ test("runner picker is absent because each runner card owns its own control", ()
 });
 
 test("runner cards no longer depend on a selected runner", () => {
-  assert.match(popupJs, /function createRunnerCard\\(profileId, state, aggregateState = state\\)/);
+  assert.match(popupJs, /function createRunnerCard\(profileId, state, aggregateState = state\)/);
   assert.match(popupJs, /function renderRunnerDashboard\(state, visible\)/);
   assert.doesNotMatch(popupJs, /selectedProfile/);
 });
+
 
 test("runner start requires ready state before claiming the runner is ready", () => {
   assert.match(popupJs, /function runnerIsReady\(state, profileId\)/);
@@ -371,7 +372,12 @@ test("popup card factory accepts aggregate process diagnostics", () => {
 
 
 test("popup refreshes live runner state while it remains open", () => {
-  assert.match(popupJs, /const runnerRefreshTimer = setInterval\(\(\) =>/);
-  assert.match(popupJs, /void render\(\);[s\S]*\}, 750\);/);
+  const timerIndex = popupJs.indexOf("const runnerRefreshTimer = setInterval(() => {");
+  assert.notEqual(timerIndex, -1);
+  const timerSource = popupJs.slice(timerIndex, timerIndex + 180);
+  assert.match(timerSource, /void render\(\);/);
+  assert.match(timerSource, /\}, 750\);/);
   assert.match(popupJs, /clearInterval\(runnerRefreshTimer\)/);
+});
+
 });

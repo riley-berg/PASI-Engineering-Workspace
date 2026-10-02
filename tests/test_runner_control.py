@@ -94,3 +94,20 @@ def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
     assert result["available"] is True
     assert result["status"] == "running"
     assert result["execution_mode"] == "supervised_m1"
+
+
+def test_load_runner_state_preserves_failure_details(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"failed","error":"M1 startup failed","failed_at":"2026-10-02T00:00:00+00:00",'
+        '"execution_mode":"manual"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+
+    result = bridge.load_runner_state()
+
+    assert result["status"] == "failed"
+    assert result["error"] == "M1 startup failed"
+    assert result["failed_at"].startswith("2026-10-02T00:00:00")

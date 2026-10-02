@@ -8,7 +8,8 @@ html.light-theme {
   background: #FAF8F5;
 }
 
-html[data-theme-pending] body { visibility: hidden; }
+html[data-theme-pending] body,
+html[data-popup-paint-pending] body { visibility: hidden; }
 
 * {
   box-sizing: border-box;
@@ -33,7 +34,9 @@ body {
   --text-primary: #F4F1EC;
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
-  --runner-option-hover: #24262C;
+  --runner-option-hover: #2C2927;
+  --runner-option-selected: #45464A;
+  --runner-option-selected-hover: #5B5C61;
   --status-idle: #F4F1EC;
   --status-idle-summary: #A39892;
   --status-paused: #6E7074;
@@ -64,6 +67,8 @@ html.light-theme body {
   --text-secondary: #55565A;
   --text-muted: #707174;
   --runner-option-hover: #F0ECE6;
+  --runner-option-selected: #45464A;
+  --runner-option-selected-hover: #333438;
   --status-idle: #1A1B20;
   --status-idle-summary: #707174;
   --status-paused: #707174;
@@ -87,6 +92,8 @@ html.light-theme body {
 
 button {
   font: inherit;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 .popup-header {
@@ -176,7 +183,7 @@ button {
   font-weight: 600;
   text-align: left;
   cursor: pointer;
-  transition: border-color .15s, box-shadow .15s, background-color .15s;
+  transition: none;
 }
 
 .runner-select:hover,
@@ -228,15 +235,38 @@ button {
   outline: none;
 }
 
+.runner-select-option {
+  transition: none;
+}
+
 .runner-select-option:hover,
 .runner-select-option:focus-visible {
   background: var(--runner-option-hover);
-  box-shadow: inset 0 0 0 1px var(--border-color);
 }
 
 .runner-select-option[aria-selected="true"] {
-  background: var(--btn-primary);
+  background: var(--runner-option-selected);
   color: #FFFFFF;
+}
+
+.runner-select-option[aria-selected="true"]:hover,
+.runner-select-option[aria-selected="true"]:focus-visible {
+  background: var(--runner-option-selected-hover);
+}
+
+.runner-select-option:focus-visible::before {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 3px;
+  width: 2px;
+  content: "";
+  border-radius: 2px;
+  background: var(--text-primary);
+}
+
+.runner-select-option[aria-selected="true"]:focus-visible::before {
+  background: #FFFFFF;
 }
 
 .runner-select-option[aria-selected="true"]::after {

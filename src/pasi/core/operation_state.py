@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Final, Mapping
 
 MAX_METADATA_KEYS = 64
 MAX_METADATA_KEY_CHARS = 128
@@ -17,9 +17,9 @@ MAX_PROVIDER_CHARS = 128
 MAX_PHASE_CHARS = 128
 MAX_SIGNATURE_CHARS = 512
 
-_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
+OPERATION_ALLOWED_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
     "queued": frozenset({"claimed", "failed", "cancelled"}),
-    "claimed": frozenset({"generating", "failed", "cancelled"}),
+    "claimed": frozenset({"generating", "completed", "failed", "cancelled"}),
     "generating": frozenset({"completed", "failed", "cancelled"}),
     "failed": frozenset({"claimed"}),
     "completed": frozenset(),
@@ -231,7 +231,7 @@ class OperationState:
         normalized = _bounded_string(status, name="status", limit=64, allow_empty=False)
         if normalized not in OPERATION_STATUSES:
             raise InvalidOperationTransition(f"unsupported operation status: {normalized!r}")
-        return normalized in _ALLOWED_TRANSITIONS[self.status]
+        return normalized in OPERATION_ALLOWED_TRANSITIONS[self.status]
 
     def transition(self, status: str, *, expected_revision: int | None = None, phase: str | None = None, provider: str | None = None, prompt_digest: str | None = None, response_digest: str | None = None, verification_status: str | None = None, commit_sha: str | None = None, pr_number: int | None = None, failure_signature: str | None = None, metadata: dict[str, str] | None = None) -> "OperationState":
         if expected_revision is not None and expected_revision != self.state_revision:

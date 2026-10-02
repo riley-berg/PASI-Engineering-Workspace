@@ -17,6 +17,11 @@ def test_supervised_execution_authorization_requires_live_acceptance_runner(monk
         "execution_mode": "supervised_168h",
     }) is True
 
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_m1",
+    }) is True
+
     monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: False)
     assert bridge_module.runner_execution_authorized({
         "status": "running",

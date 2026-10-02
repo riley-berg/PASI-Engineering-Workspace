@@ -11,7 +11,7 @@ from automation.orchestrator.state import StateManager
 def test_supervised_execution_authorization_requires_live_acceptance_runner(monkeypatch):
     from automation.orchestrator import bridge as bridge_module
 
-    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: True)
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: True)
     assert bridge_module.runner_execution_authorized({
         "status": "running",
         "execution_mode": "supervised_168h",
@@ -25,7 +25,7 @@ def test_supervised_execution_authorization_requires_live_acceptance_runner(monk
     assert bridge_module._runner_profile("m1") == "m1"
     assert bridge_module._runner_profile("168h") == "168h"
 
-    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: False)
     assert bridge_module.runner_execution_authorized({
         "status": "running",
         "execution_mode": "supervised_168h",
@@ -50,7 +50,7 @@ def test_runner_start_reports_missing_script_instead_of_raising_server_error(tmp
     from automation.orchestrator import bridge as bridge_module
 
     missing_script = tmp_path / "missing-runner.py"
-    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: False)
     monkeypatch.setattr(bridge_module, "RUNNER_LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(
         bridge_module,

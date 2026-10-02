@@ -3,31 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PASI Runner Control</title>
+  <title>PASI Dashboard</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <header class="popup-header">
     <div class="brand-group">
-      <div>
-        <div class="brand">PASI</div>
-        <div id="site" class="site-label">Loading…</div>
-      </div>
+      <span class="brand">PASI Dashboard</span>
       <span id="connectionBadge" class="status-badge">Ready</span>
     </div>
     <div class="header-actions">
-      <button id="themeToggle" class="theme-toggle" type="button" title="Switch to light theme" aria-label="Switch to light theme">🌙</button>
+      <button id="themeToggle" class="theme-toggle" type="button" title="Toggle UI Mode" aria-label="Toggle UI Mode">🌙</button>
       <a href="options.html" target="_blank">Dashboard</a>
     </div>
   </header>
 
-  <div id="status" class="status" role="status" aria-live="polite"></div>
-  <div class="profile-hint" id="profileHint" title="Click to switch the selected default profile">Selected profile: M1 acceptance</div>
+  <div class="profile-summary">
+    Selected profile: <strong id="profileSummary">M1 · 20-operation acceptance</strong>
+  </div>
 
-  <main>
-    <section id="runnerCards" class="runners-list" aria-label="PASI runners"></section>
-    <section id="scripts" aria-label="PASI userscripts"></section>
-  </main>
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <main id="runnerCards" class="runners-list" aria-label="PASI runners"></main>
+
+  <section id="scripts" aria-label="PASI userscripts"></section>
+
+  <footer id="systemWarning" class="system-warning">
+    ⚠️ No PASI userscripts match this page.
+  </footer>
 
   <script src="popup.js"></script>
 </body>

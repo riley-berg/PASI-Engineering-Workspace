@@ -61,7 +61,7 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--text-muted:\s*#665953/);
   assert.match(popupCss, /--btn-primary:\s*#1A1B20/);
   assert.match(popupCss, /--btn-primary-hover:\s*#2C2E35/);
-  assert.match(popupCss, /--btn-secondary:\s*#EAE4DA/);
+  assert.match(popupCss, /--btn-secondary:\s*#F2EEE8/);
   assert.doesNotMatch(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
@@ -98,7 +98,7 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.match(popupCss, /--badge-m1:\s*#45464A/);
   assert.match(popupCss, /--badge-long:\s*#45464A/);
   assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#45464A/);
-  assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#fff/);
+  assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#FFFFFF/);
   assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
   assert.match(popupCss, /\.btn-primary[\s\S]*color:\s*#FFFFFF/);
   assert.match(popupCss, /#runnerSelect:focus[\s\S]*outline|#runnerSelect:focus[\s\S]*box-shadow:\s*0 0 0 2px rgba\(244, 241, 236/);

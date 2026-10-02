@@ -75,7 +75,7 @@ def test_explicit_start_never_becomes_stop(monkeypatch):
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
-        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+        lambda profile=None: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True},
     )
 
     result = bridge.request_runner_control("start", "m1")
@@ -97,7 +97,7 @@ def test_load_runner_state_keeps_terminal_state_but_exposes_live_process(monkeyp
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
-        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+        lambda profile=None: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True},
     )
 
     result = bridge.load_runner_state()
@@ -139,7 +139,7 @@ def test_load_runner_state_exposes_live_process_without_claiming_ready(monkeypat
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
-        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+        lambda profile=None: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True},
     )
 
     result = bridge.load_runner_state()
@@ -165,7 +165,7 @@ def test_stop_targets_live_runner_process_even_when_state_is_terminal(monkeypatc
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
-        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+        lambda profile=None: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True},
     )
     terminated = []
     monkeypatch.setattr(bridge, "_terminate_runner_process", lambda pid: terminated.append(pid))
@@ -193,7 +193,7 @@ def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
-        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+        lambda profile=None: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True},
     )
 
     result = bridge.load_runner_state()
@@ -255,7 +255,7 @@ def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     executable.chmod(0o755)
 
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", tmp_path / "runtime" / "state.json")
+    monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", tmp_path / "runtime")
     monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(bridge, "RUNNER_PROFILES", {"m1": (str(executable), str(script))})
     monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
@@ -269,8 +269,8 @@ def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
     monkeypatch.setattr(bridge.subprocess, "Popen", fake_popen)
 
     result = bridge._start_runner("m1")
-    state = json.loads((tmp_path / "runtime" / "state.json").read_text(encoding="utf-8"))
-    pid = (tmp_path / "runtime" / "runner.pid").read_text(encoding="utf-8").strip()
+    state = json.loads((tmp_path / "runtime" / "m1" / "state.json").read_text(encoding="utf-8"))
+    pid = (tmp_path / "runtime" / "m1" / "runner.pid").read_text(encoding="utf-8").strip()
 
     assert result["accepted"] is True
     assert state["runner_profile"] == "m1"

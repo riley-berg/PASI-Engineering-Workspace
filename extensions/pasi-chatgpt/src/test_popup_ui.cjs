@@ -107,7 +107,7 @@ test("light and dark palettes are unmistakably distinct", () => {
   assert.match(popupCss, /--btn-primary-hover:\s*#37404A/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#20252B/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#2F353D/);
-  assert.doesNotMatch(popupCss, /#E7E2DA|#F4F1EC/);
+  assert.doesNotMatch(popupCss, /#E7E2DA|#F5F7FA/);
   assert.doesNotMatch(popupCss, /runner-option|status-stopped/);
 });
 
@@ -179,10 +179,10 @@ test("runner controls use explicit start or stop actions", () => {
   );
 });
 
-test("runner controls display Start when stopped and Stop when active", () => {
+test("runner controls display Start when inactive and Stop when active", () => {
   assert.match(
     popupJs,
-    /toggle\.textContent = activeThisProfile \? "Stop" : "Start";/
+    /toggle\.textContent = stoppingThisProfile \? "Stopping" : activeThisProfile \? "Stop" : "Start";/
   );
 });
 
@@ -255,7 +255,7 @@ test("popup control and text colors meet WCAG AA targets", () => {
   assert.ok(contrastRatio("#171A20", "#F5F7FA") >= 4.5);
   assert.ok(contrastRatio("#707780", "#F5F7FA") >= 4.5);
   assert.ok(contrastRatio("#4F5661", "#FFFFFF") >= 4.5);
-  assert.ok(contrastRatio("#FFFFFF", "#343A42") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#20252B") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#171A20") >= 4.5);
   assert.ok(contrastRatio("#343A42", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#F5F7FA", "#15181D") >= 4.5);

@@ -23,17 +23,17 @@ body {
   --text-primary: #F4F1EC;
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
-  --btn-primary: #54433A;
-  --btn-primary-hover: #69564B;
+  --btn-primary: #45464A;
+  --btn-primary-hover: #5B5C61;
   --btn-secondary: #24262C;
   --btn-secondary-hover: #3A3538;
-  --badge-m1: #54433A;
-  --badge-long: #54433A;
+  --badge-m1: #45464A;
+  --badge-long: #45464A;
   --status-ready: #A39892;
-  --status-badge-bg: rgba(84, 67, 58, .22);
-  --status-badge-active-bg: rgba(84, 67, 58, .30);
+  --status-badge-bg: rgba(69, 70, 74, .22);
+  --status-badge-active-bg: rgba(69, 70, 74, .30);
   --status-badge-text: #F4F1EC;
-  --danger-bg: rgba(84, 67, 58, .18);
+  --danger-bg: rgba(69, 70, 74, .18);
   --danger-text: #F4F1EC;
   --idle-bg: rgba(23, 25, 30, .78);
   --idle-border: #342F2C;
@@ -41,15 +41,15 @@ body {
 
 body.light-theme {
   color-scheme: light;
-  --bg-main: #F7F4F0;
-  --bg-card: #EDEAE6;
-  --border-color: #D1CCC6;
+  --bg-main: #FAF8F5;
+  --bg-card: #F2EEE8;
+  --border-color: #D9D4CD;
   --text-primary: #111215;
   --text-secondary: #423731;
   --text-muted: #665953;
   --btn-primary: #1A1B20;
   --btn-primary-hover: #2C2E35;
-  --btn-secondary: #EDEAE6;
+  --btn-secondary: #F2EEE8;
   --btn-secondary-hover: #D8D4CF;
   --badge-m1: #1A1B20;
   --badge-long: #1A1B20;
@@ -149,7 +149,7 @@ select {
 
 #runnerSelect:focus {
   border-color: var(--btn-primary);
-  box-shadow: 0 0 0 2px rgba(84, 67, 58, .18);
+  box-shadow: 0 0 0 2px rgba(69, 70, 74, .18);
 }
 
 body.light-theme #runnerSelect:focus {
@@ -196,8 +196,8 @@ body.light-theme #runnerSelect:focus {
 }
 
 .runner-card.selected {
-  border-color: #54433A;
-  box-shadow: 0 0 0 1px rgba(84, 67, 58, .30);
+  border-color: #45464A;
+  box-shadow: 0 0 0 1px rgba(69, 70, 74, .30);
 }
 
 body.light-theme .runner-card.selected {
@@ -281,7 +281,7 @@ body.light-theme .runner-card.selected {
 }
 
 .status-dot.running {
-  background: #54433A;
+  background: #45464A;
   animation: pasi-runner-pulse 1.4s infinite;
 }
 
@@ -342,7 +342,7 @@ body.light-theme .status-dot.completed {
 }
 
 body.light-theme .btn-primary {
-  color: #F7F4F0;
+  color: #FAF8F5;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -463,9 +463,9 @@ body.light-theme .warn {
 }
 
 @keyframes pasi-runner-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(84, 67, 58, .34); }
-  70% { box-shadow: 0 0 0 5px rgba(84, 67, 58, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(84, 67, 58, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(69, 70, 74, .34); }
+  70% { box-shadow: 0 0 0 5px rgba(69, 70, 74, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(69, 70, 74, 0); }
 }
 
 body.light-theme .status-dot.running {

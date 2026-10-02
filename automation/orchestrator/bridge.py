@@ -364,7 +364,7 @@ def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
     )
 
 
-def _terminate_runner_processdef _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
+def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
     """Stop a supervised runner and its children without stopping the bridge."""
     try:
         process_group = os.getpgid(pid)

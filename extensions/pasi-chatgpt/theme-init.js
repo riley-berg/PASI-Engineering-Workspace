@@ -1,28 +1,22 @@
 (() => {
   "use strict";
 
-  document.documentElement.setAttribute("data-popup-paint-pending", "true");
-
+  const root = document.documentElement;
   const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
-  const setInitialColorScheme = (light) => {
-    if (colorSchemeMeta) colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");
-    document.documentElement.style.colorScheme = light ? "light" : "dark";
-    document.documentElement.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
-  };
 
+  let theme = "dark";
   try {
-    const theme = localStorage.getItem("pasi.popup.theme");
-    if (theme === "light") {
-      document.documentElement.classList.add("light-theme");
-      setInitialColorScheme(true);
-    } else if (theme === "dark") {
-      setInitialColorScheme(false);
-    } else {
-      document.documentElement.style.backgroundColor = "#0D0E11";
-      document.documentElement.style.colorScheme = "dark";
-      document.documentElement.setAttribute("data-theme-pending", "true");
-    }
+    theme = localStorage.getItem("pasi.popup.theme") === "light" ? "light" : "dark";
   } catch (_) {
-    // Fall back to the stylesheet's dark theme if localStorage is unavailable.
+    theme = "dark";
+  }
+
+  const light = theme === "light";
+  root.classList.toggle("light-theme", light);
+  root.style.colorScheme = light ? "light" : "dark";
+  root.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
+
+  if (colorSchemeMeta) {
+    colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");
   }
 })();

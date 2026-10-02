@@ -193,20 +193,28 @@
         browser_diagnostics: "Reading the active ChatGPT browser state.",
         ready_for_first_operation: "Ready for the first M1 operation."
       };
-      if (startupPhases[phase]) return startupPhases[phase];
-      if (phase === "waiting_for_cdp_dispatch" || currentStatus === "queued") {
-        return currentId
-          ? "Waiting for CDP dispatch of " + currentId
-          : "Waiting for CDP dispatch.";
-      }
-      if (phase === "processing_response" || currentStatus === "generating") {
-        return "Waiting for the current response to finish processing.";
-      }
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
-      if (Number.isFinite(completed) && Number.isFinite(target) && target > 0) {
-        return String(completed) + " / " + String(target) + " operations complete";
+      const hasProgress = Number.isFinite(completed) && Number.isFinite(target) && target > 0;
+      if (hasProgress) {
+        const progress = String(completed) + " / " + String(target) + " operations complete";
+        if (phase === "waiting_for_cdp_dispatch" || currentStatus === "queued") {
+          return currentId
+            ? progress + " — Waiting for CDP dispatch of " + currentId
+            : progress + " — Waiting for CDP dispatch.";
+        }
+        if (phase === "processing_response" || currentStatus === "generating") {
+          return progress + " — Waiting for the current response to finish processing.";
+        }
+        if (phase === "ready_for_first_operation") {
+          return progress + " — Ready for the first M1 operation.";
+        }
+        if (phase === "ready_for_next_operation") {
+          return progress + " — Ready for the next M1 operation.";
+        }
+        return progress;
       }
+      if (startupPhases[phase]) return startupPhases[phase];
       return "Runner is ready and active.";
     }
     if (status === "Active process") {

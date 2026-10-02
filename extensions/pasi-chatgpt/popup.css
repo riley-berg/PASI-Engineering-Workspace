@@ -22,9 +22,6 @@ body {
   --text-primary: #F4F1EC;
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
-  --runner-option-hover: #24262C;
-  --runner-option-outline: #45464A;
-  --runner-option-selected: #45464A;
   --status-idle: #F4F1EC;
   --status-starting: #D6CEC8;
   --status-stopped: #A39892;
@@ -60,9 +57,6 @@ html.light-theme body {
   --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #1A1B20;
-  --status-ready: #383A3F;
-  --status-idle-summary: #707174;
-  --status-paused: #707174;
   --status-failed: #333438;
   --status-completed: #707174;
   --warning-text: #45464A;

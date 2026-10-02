@@ -211,37 +211,40 @@
     const header = document.createElement("div");
     header.className = "card-header";
 
-    const identity = document.createElement("div");
-    identity.className = "identity";
-
-    const runnerName = document.createElement("div");
-    runnerName.className = "runner-name";
-    runnerName.textContent = profile.title;
-
-    const site = document.createElement("div");
-    site.className = "runner-site";
-    site.textContent = $("site").textContent || "chatgpt.com";
-
-    identity.append(runnerName, site);
+    const url = document.createElement("span");
+    url.className = "url";
+    url.title = $("currentUrl")?.textContent || "https://chatgpt.com/";
+    url.textContent = $("currentUrl")?.textContent || "chatgpt.com";
 
     const badge = document.createElement("span");
     badge.className = "badge " + profile.badgeClass;
-    badge.textContent = profile.label + " · " + profile.title;
-    header.append(identity, badge);
+    badge.textContent = profileId === "m1"
+      ? "M1 · 20-op acceptance"
+      : "168h · long-run";
 
-    const stateRow = document.createElement("div");
-    stateRow.className = "runner-state-row";
+    header.append(url, badge);
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = profile.title;
+
+    const body = document.createElement("div");
+    body.className = "card-body";
 
     const stateLabelText = runnerStatusLabel(state, profileId);
-    const stateLabel = document.createElement("span");
-    stateLabel.className = "runner-state " + stateLabelText.toLowerCase().replace(/[^a-z]+/g, "-");
-    stateLabel.textContent = stateLabelText;
+    const statusText = document.createElement("div");
+    statusText.className = "status-text " + stateLabelText.toLowerCase().replace(/[^a-z]+/g, "-");
+    statusText.textContent =
+      stateLabelText === "Running" ? "🟢 Running" :
+      stateLabelText === "Paused" ? "🟡 Paused" :
+      stateLabelText === "Failed" ? "🔴 Failed" :
+      stateLabelText === "Completed" ? "🟢 Completed" :
+      "🟢 Ready";
 
-    const summary = document.createElement("span");
-    summary.className = "runner-summary";
-    summary.textContent = runnerSummary(state, profileId);
-
-    stateRow.append(stateLabel, summary);
+    const desc = document.createElement("div");
+    desc.className = "status-desc";
+    desc.textContent = runnerSummary(state, profileId);
+    body.append(statusText, desc);
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
@@ -280,7 +283,7 @@
     };
 
     actions.append(toggle, runNextButton);
-    card.append(header, stateRow, actions);
+    card.append(header, title, body, actions);
     return card;
   }
 
@@ -442,12 +445,24 @@
         getProfile(),
       ]);
 
-      $("site").textContent = activeResult.url || "No inspectable page";
+      const activeUrl = activeResult.url || "https://chatgpt.com/";
+      const currentUrl = $("currentUrl") || document.createElement("div");
+      currentUrl.id = "currentUrl";
+      currentUrl.textContent = activeUrl;
+      currentUrl.hidden = true;
+      if (!currentUrl.parentElement) document.body.append(currentUrl);
+
       renderRunnerDashboard(runnerState, selectedProfile);
       await renderUserscripts(activeResult);
+      const warning = $("systemWarning");
+      if (warning) {
+        warning.hidden = Boolean(activeResult.scripts?.length);
+      }
       await applyTheme();
-      $("profileHint").textContent =
-        "Selected profile: " + (selectedProfile === "168h" ? "168h long-run" : "M1 acceptance");
+      $("profileSummary").textContent =
+        selectedProfile === "168h"
+          ? "168h long-run · 20-operation acceptance"
+          : "M1 · 20-operation acceptance";
       if (!$("status").classList.contains("error")) {
         setStatus("");
       }

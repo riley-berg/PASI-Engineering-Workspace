@@ -37,6 +37,26 @@ def test_supervised_execution_authorization_requires_live_acceptance_runner(monk
     }) is False
 
 
+def test_runner_start_reports_missing_script_instead_of_raising_server_error(tmp_path: Path, monkeypatch):
+    from automation.orchestrator import bridge as bridge_module
+
+    missing_script = tmp_path / "missing-runner.py"
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge_module, "RUNNER_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(
+        bridge_module,
+        "RUNNER_PROFILES",
+        {"m1": (bridge_module.sys.executable, str(missing_script))},
+    )
+
+    result = bridge_module.request_runner_control("start", "m1")
+
+    assert result["accepted"] is False
+    assert result["action"] == "start"
+    assert result["profile"] == "m1"
+    assert result["reason"] == "runner script is missing from the active PASI workspace"
+
+
 def test_wait_for_next_operation_wakes_when_runner_queues_after_response_processing(tmp_path: Path):
     state = StateManager(tmp_path / "state")
     bridge = BridgeState(state)

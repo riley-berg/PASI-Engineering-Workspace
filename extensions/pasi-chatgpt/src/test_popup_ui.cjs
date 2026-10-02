@@ -103,24 +103,22 @@ test("light and dark surface palettes are explicit and stable", () => {
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-primary:\s*#1A1B20/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-secondary:\s*#55565A/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#707174/);
-  assert.match(popupCss, /--btn-primary:\s*#45464A/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#5B5C61/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#45464A/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#5B5C61/);
+  assert.match(popupCss, /--btn-primary:\s*#E7E2DA/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#F4F1EC/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#24272D/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#3A3E46/);
   assert.match(popupCss, /--status-badge-text:\s*#45464A/);
   assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6|6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
 });
 
-test("popup uses connected and ready runner semantics", () => {
+test("popup uses connected and operational runner semantics", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
-  assert.match(popupJs, /return "Ready";/);
-  assert.match(popupJs, /return "Ready to execute\.";/);
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
-  assert.doesNotMatch(popupHtml, /class="status-badge">Ready<\/span>/);
-});
-
-test("runner cards do not animate theme surface or border changes", () => {
+  assert.match(popupJs, /return "Stopped";/);
+  assert.match(popupJs, /return "Starting";/);
+  assert.doesNotMatch(popupJs, /Ready to execute|return "Ready";/);
+});\n\ntest("runner cards do not animate theme surface or border changes", () => {
   const runnerCardStart = popupCss.indexOf(".runner-card {");
   const runnerCardEnd = popupCss.indexOf("}", runnerCardStart);
   assert.ok(runnerCardStart >= 0);
@@ -172,14 +170,14 @@ test("runner controls use explicit start or stop actions", () => {
   );
   assert.match(
     popupJs,
-    /await controlRunner\(profileId, runningThisProfile \? "stop" : "start"\);/
+    /await controlRunner\(profileId, activeThisProfile \? "stop" : "start"\);/
   );
 });
 
-test("runner controls display Start when stopped and Stop when running", () => {
+test("runner controls display Start when stopped and Stop when active", () => {
   assert.match(
     popupJs,
-    /toggle\.textContent = runningThisProfile \? "Stop" : "Start";/
+    /toggle\.textContent = activeThisProfile \? "Stop" : "Start";/
   );
 });
 
@@ -223,12 +221,7 @@ test("popup remains inside the compact width and hides only intentional UI regio
   assert.match(popupCss, /^\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/m);
 });
 
-test("ready indicator uses a dedicated high-contrast token", () => {
-  assert.match(popupCss, /\.status-text\.ready\s*\{[\s\S]*color:\s*var\(--status-ready\)/);
-  assert.match(popupCss, /\.status-dot\.ready\s*\{[\s\S]*background:\s*var\(--status-ready\)/);
-});
-
-test("popup control and text colors meet WCAG AA targets", () => {
+\n\ntest("popup control and text colors meet WCAG AA targets", () => {
   const relativeLuminance = (hex) => {
     const value = hex.replace("#", "");
     const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);

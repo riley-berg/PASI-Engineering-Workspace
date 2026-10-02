@@ -159,11 +159,19 @@
       return "Active process";
     }
 
-    if (state.status === "failed") return "Failed";
     if (
-      state.status === "completed" ||
-      state.status === "roadmap_complete" ||
-      state.status === "deadline_reached"
+      state.status === "failed" &&
+      (!state.runner_profile || state.runner_profile === profileId)
+    ) {
+      return "Failed";
+    }
+    if (
+      (
+        state.status === "completed" ||
+        state.status === "roadmap_complete" ||
+        state.status === "deadline_reached"
+      ) &&
+      (!state.runner_profile || state.runner_profile === profileId)
     ) {
       return "Completed";
     }
@@ -176,6 +184,17 @@
     if (status === "Launching") return "Runner process launched; waiting for ready state.";
     if (status === "Stopping") return "Stopping runner…";
     if (status === "Running") {
+      const phase = String(state?.phase || "");
+      const currentStatus = String(state?.current_operation_status || "");
+      const currentId = String(state?.current_operation_id || "");
+      if (phase === "waiting_for_cdp_dispatch" || currentStatus === "queued") {
+        return currentId
+          ? "Waiting for CDP dispatch of " + currentId
+          : "Waiting for CDP dispatch.";
+      }
+      if (phase === "processing_response" || currentStatus === "generating") {
+        return "Waiting for the current response to finish processing.";
+      }
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
       if (Number.isFinite(completed) && Number.isFinite(target) && target > 0) {

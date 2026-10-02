@@ -29,9 +29,9 @@ body {
   --btn-secondary-hover: #3A3538;
   --badge-m1: #45464A;
   --badge-long: #45464A;
-  --status-ready: #A39892;
-  --status-badge-bg: rgba(69, 70, 74, .22);
-  --status-badge-active-bg: rgba(69, 70, 74, .30);
+  --status-ready: #707174;
+  --status-badge-bg: rgba(112, 113, 116, .12);
+  --status-badge-active-bg: rgba(112, 113, 116, .18);
   --status-badge-text: #F4F1EC;
   --danger-bg: rgba(69, 70, 74, .18);
   --danger-text: #F4F1EC;
@@ -53,9 +53,9 @@ body.light-theme {
   --btn-secondary-hover: #F0ECE6;
   --badge-m1: #45464A;
   --badge-long: #45464A;
-  --status-ready: #45464A;
-  --status-badge-bg: rgba(69, 70, 74, .10);
-  --status-badge-active-bg: rgba(69, 70, 74, .16);
+  --status-ready: #707174;
+  --status-badge-bg: rgba(112, 113, 116, .12);
+  --status-badge-active-bg: rgba(112, 113, 116, .18);
   --status-badge-text: #45464A;
   --danger-bg: rgba(69, 70, 74, .08);
   --danger-text: #1A1B20;

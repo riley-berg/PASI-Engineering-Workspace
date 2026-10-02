@@ -323,9 +323,6 @@ select {
   background: var(--btn-secondary-hover);
 }
 
-.queue-button {
-  width: 100%;
-}
 
 #scripts {
   display: grid;

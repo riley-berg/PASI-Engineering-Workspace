@@ -14,7 +14,7 @@
   const light = theme === "light";
   root.classList.toggle("light-theme", light);
   root.style.colorScheme = light ? "light" : "dark";
-  root.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
+  root.style.backgroundColor = light ? "#F5F7FA" : "#0B0D10";
 
   if (colorSchemeMeta) {
     colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");

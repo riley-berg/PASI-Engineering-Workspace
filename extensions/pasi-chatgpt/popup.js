@@ -604,7 +604,7 @@
     }
   }
 
-  async function render() {
+  async function render({clearStatus = false} = {}) {
     try {
       applyTheme();
 
@@ -634,7 +634,7 @@
 
       setRunnerSelection(selectedProfile);
 
-      if (!$("status").classList.contains("error")) {
+      if (clearStatus && !$("status").classList.contains("error")) {
         setStatus("");
       }
     } catch (error) {

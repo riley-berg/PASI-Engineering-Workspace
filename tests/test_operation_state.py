@@ -18,3 +18,11 @@ def test_operation_state_rejects_unknown_status():
     except InvalidOperationState:
         return
     raise AssertionError("unknown status was accepted")
+
+
+def test_operation_state_schema_and_transition_support_terminal_cancellation():
+    state = OperationState(operation_id="op-cancel", operation_type="task", status="generating")
+    assert state.can_transition_to("cancelled")
+    next_state = state.transition("cancelled")
+    assert next_state.schema_version == 2
+    assert next_state.status == "cancelled"

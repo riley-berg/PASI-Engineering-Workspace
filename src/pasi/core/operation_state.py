@@ -11,18 +11,19 @@ MAX_METADATA_VALUE_CHARS = 1024
 
 OPERATION_STATE_SCHEMA_VERSION = 2
 SUPPORTED_OPERATION_STATE_SCHEMA_VERSIONS = frozenset({1, 2})
-OPERATION_STATUSES = frozenset({"queued", "claimed", "generating", "completed", "failed"})
+OPERATION_STATUSES = frozenset({"queued", "claimed", "generating", "completed", "failed", "cancelled"})
 MAX_ID_CHARS = 256
 MAX_PROVIDER_CHARS = 128
 MAX_PHASE_CHARS = 128
 MAX_SIGNATURE_CHARS = 512
 
 _ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "queued": frozenset({"claimed", "failed"}),
-    "claimed": frozenset({"generating", "failed"}),
-    "generating": frozenset({"completed", "failed"}),
+    "queued": frozenset({"claimed", "failed", "cancelled"}),
+    "claimed": frozenset({"generating", "failed", "cancelled"}),
+    "generating": frozenset({"completed", "failed", "cancelled"}),
     "failed": frozenset({"claimed"}),
     "completed": frozenset(),
+    "cancelled": frozenset(),
 }
 
 

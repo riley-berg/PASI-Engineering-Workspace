@@ -105,8 +105,8 @@ test("light and dark palettes are unmistakably distinct", () => {
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#666E78/);
   assert.match(popupCss, /--btn-primary:\s*#2B3138/);
   assert.match(popupCss, /--btn-primary-hover:\s*#37404A/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#20252B/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#2F353D/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#4A5563/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#5B6877/);
   assert.doesNotMatch(popupCss, /#E7E2DA|#F4F1EC/);
   assert.doesNotMatch(popupCss, /runner-option|status-stopped/);
 });
@@ -161,7 +161,7 @@ test("active runner cards expose Stop during startup and running states", () => 
 test("light and dark primary controls use distinct high-contrast palettes", () => {
   assert.match(popupCss, /--btn-primary:\s*#2B3138/);
   assert.match(popupCss, /--btn-primary-text:\s*#FFFFFF/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#20252B/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#4A5563/);
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-text:\s*#FFFFFF/);
 });
 

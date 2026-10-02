@@ -17,50 +17,50 @@ body {
   color: var(--text-primary);
   color-scheme: dark;
   transition: background-color .18s ease, color .18s ease;
-  --bg-main: #0B0C0C;
-  --bg-card: #1A1D1E;
-  --border-color: #2F261D;
-  --text-primary: #EADBCB;
-  --text-secondary: #CBBBAA;
-  --text-muted: #9A8978;
-  --btn-primary: #604830;
-  --btn-primary-hover: #765A3D;
-  --btn-secondary: #2F261D;
-  --btn-secondary-hover: #604830;
-  --badge-m1: #604830;
-  --badge-long: #604830;
-  --status-ready: #B59B7D;
-  --status-badge-bg: rgba(96, 72, 48, .18);
-  --status-badge-active-bg: rgba(96, 72, 48, .26);
-  --status-badge-text: #EADBCB;
-  --danger-bg: rgba(96, 72, 48, .16);
-  --danger-text: #EADBCB;
-  --idle-bg: rgba(26, 29, 30, .72);
-  --idle-border: #2F261D;
+  --bg-main: #0D0E11;
+  --bg-card: #17191E;
+  --border-color: #342F2C;
+  --text-primary: #F4F1EC;
+  --text-secondary: #D6CEC8;
+  --text-muted: #A39892;
+  --btn-primary: #54433A;
+  --btn-primary-hover: #69564B;
+  --btn-secondary: #24262C;
+  --btn-secondary-hover: #3A3538;
+  --badge-m1: #54433A;
+  --badge-long: #54433A;
+  --status-ready: #A39892;
+  --status-badge-bg: rgba(84, 67, 58, .22);
+  --status-badge-active-bg: rgba(84, 67, 58, .30);
+  --status-badge-text: #F4F1EC;
+  --danger-bg: rgba(84, 67, 58, .18);
+  --danger-text: #F4F1EC;
+  --idle-bg: rgba(23, 25, 30, .78);
+  --idle-border: #342F2C;
 }
 
 body.light-theme {
   color-scheme: light;
-  --bg-main: #F4ECE1;
-  --bg-card: #EAE0D2;
-  --border-color: #C8B9A7;
-  --text-primary: #121415;
-  --text-secondary: #4A3728;
-  --text-muted: #6B5847;
-  --btn-primary: #2F261D;
-  --btn-primary-hover: #4A3728;
-  --btn-secondary: #EAE0D2;
-  --btn-secondary-hover: #D8CBB9;
-  --badge-m1: #604830;
-  --badge-long: #604830;
-  --status-ready: #2F261D;
-  --status-badge-bg: rgba(47, 38, 29, .10);
-  --status-badge-active-bg: rgba(47, 38, 29, .16);
-  --status-badge-text: #2F261D;
-  --danger-bg: rgba(47, 38, 29, .10);
-  --danger-text: #121415;
-  --idle-bg: rgba(234, 224, 210, .78);
-  --idle-border: #C8B9A7;
+  --bg-main: #F7F4F0;
+  --bg-card: #EDEAE6;
+  --border-color: #D1CCC6;
+  --text-primary: #111215;
+  --text-secondary: #423731;
+  --text-muted: #665953;
+  --btn-primary: #1A1B20;
+  --btn-primary-hover: #2C2E35;
+  --btn-secondary: #EDEAE6;
+  --btn-secondary-hover: #D8D4CF;
+  --badge-m1: #1A1B20;
+  --badge-long: #1A1B20;
+  --status-ready: #1A1B20;
+  --status-badge-bg: rgba(26, 27, 32, .10);
+  --status-badge-active-bg: rgba(26, 27, 32, .16);
+  --status-badge-text: #1A1B20;
+  --danger-bg: rgba(26, 27, 32, .08);
+  --danger-text: #111215;
+  --idle-bg: rgba(237, 234, 230, .86);
+  --idle-border: #D1CCC6;
 }
 
 button,
@@ -149,11 +149,11 @@ select {
 
 #runnerSelect:focus {
   border-color: var(--btn-primary);
-  box-shadow: 0 0 0 2px rgba(96, 72, 48, .18);
+  box-shadow: 0 0 0 2px rgba(84, 67, 58, .18);
 }
 
 body.light-theme #runnerSelect:focus {
-  box-shadow: 0 0 0 2px rgba(47, 38, 29, .18);
+  box-shadow: 0 0 0 2px rgba(26, 27, 32, .18);
 }
 
 .status {
@@ -196,13 +196,13 @@ body.light-theme #runnerSelect:focus {
 }
 
 .runner-card.selected {
-  border-color: #604830;
-  box-shadow: 0 0 0 1px rgba(96, 72, 48, .28);
+  border-color: #54433A;
+  box-shadow: 0 0 0 1px rgba(84, 67, 58, .30);
 }
 
 body.light-theme .runner-card.selected {
-  border-color: #2F261D;
-  box-shadow: 0 0 0 1px rgba(47, 38, 29, .24);
+  border-color: #1A1B20;
+  box-shadow: 0 0 0 1px rgba(26, 27, 32, .24);
 }
 
 .card-header {
@@ -281,36 +281,36 @@ body.light-theme .runner-card.selected {
 }
 
 .status-dot.running {
-  background: #8A6A49;
+  background: #54433A;
   animation: pasi-runner-pulse 1.4s infinite;
 }
 
 body.light-theme .status-dot.running {
-  background: #604830;
+  background: #1A1B20;
 }
 
 .status-dot.paused {
-  background: #f59e0b;
+  background: #8D7768;
 }
 
 body.light-theme .status-dot.paused {
-  background: #8A6748;
+  background: #8B7B70;
 }
 
 .status-dot.failed {
-  background: #ef4444;
+  background: #8A6258;
 }
 
 body.light-theme .status-dot.failed {
-  background: #7A3F32;
+  background: #7C5B52;
 }
 
 .status-dot.completed {
-  background: #10b981;
+  background: #6E756F;
 }
 
 body.light-theme .status-dot.completed {
-  background: #4F5D42;
+  background: #6F766F;
 }
 
 .card-actions {
@@ -342,7 +342,7 @@ body.light-theme .status-dot.completed {
 }
 
 body.light-theme .btn-primary {
-  color: #F4ECE1;
+  color: #F7F4F0;
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -424,12 +424,12 @@ body.light-theme .btn-primary {
 
 .warn {
   margin-top: 7px;
-  color: #d97706;
+  color: #7C6B5F;
   font-size: 9px;
 }
 
 body.light-theme .warn {
-  color: var(--btn-primary);
+  color: #423731;
 }
 
 .idle-state {
@@ -463,9 +463,9 @@ body.light-theme .warn {
 }
 
 @keyframes pasi-runner-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(96, 72, 48, .38); }
-  70% { box-shadow: 0 0 0 5px rgba(96, 72, 48, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(96, 72, 48, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(84, 67, 58, .34); }
+  70% { box-shadow: 0 0 0 5px rgba(84, 67, 58, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(84, 67, 58, 0); }
 }
 
 body.light-theme .status-dot.running {
@@ -473,7 +473,7 @@ body.light-theme .status-dot.running {
 }
 
 @keyframes pasi-runner-pulse-light {
-  0% { box-shadow: 0 0 0 0 rgba(47, 38, 29, .32); }
-  70% { box-shadow: 0 0 0 5px rgba(47, 38, 29, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(47, 38, 29, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(26, 27, 32, .28); }
+  70% { box-shadow: 0 0 0 5px rgba(26, 27, 32, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(26, 27, 32, 0); }
 }

@@ -53,8 +53,10 @@ test("popup theme architecture has one synchronous initialization path", () => {
   assert.doesNotMatch(themeInit, /data-theme-pending|data-popup-paint-pending/);
   assert.doesNotMatch(popupJs, /data-theme-pending|data-popup-paint-pending|startViewTransition/);
   assert.doesNotMatch(popupCss, /data-theme-pending|data-popup-paint-pending|::view-transition/);
+  assert.match(popupJs, /function updateThemeToggleButton\(light\)/);
   assert.match(popupJs, /function applyThemeDom\(light\)/);
-  assert.match(popupJs, /applyThemeDom\(theme === "light"\)/);
+  assert.match(popupJs, /updateThemeToggleButton\(\s*document\.documentElement\.classList\.contains\("light-theme"\)/);
+  assert.doesNotMatch(popupJs, /applyThemeDom\(theme === "light"\)/);
   assert.match(popupJs, /setLocalTheme\(theme\);\s*applyThemeDom\(light\);/);
 });
 
@@ -130,7 +132,7 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-outline:\s*#DCD4C7/);
   assert.match(
     popupCss,
-    /\.runner-select-option\[aria-selected="true"\]:hover,\s*\.runner-select-option\[aria-selected="true"\]:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-selected\);[\s\S]*outline:\s*none;/
+    /\.runner-select-option\[aria-selected="true"\]:hover,\s*\.runner-select-option\[aria-selected="true"\]:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-selected\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/
   );
 
   assert.doesNotMatch(popupCss, /html\.light-theme body \.runner-select-option/);
@@ -139,6 +141,7 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
   assert.doesNotMatch(popupCss, /html\.light-theme body \.btn-primary/);
   assert.doesNotMatch(popupCss, /html\.light-theme body \.warn/);
   assert.doesNotMatch(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/);
+  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*outline-offset:\s*0/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*transition:\s*none/);
 });

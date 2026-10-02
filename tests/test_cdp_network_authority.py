@@ -68,6 +68,9 @@ def test_cdp_network_authority_contract():
     assert "claim_next: true" not in background
     assert "BRIDGE_NEXT_OPERATION_RE" in background
     assert "&wait_ms=[0-9]{1,5}" in background
+    assert "network_request_id: String(event.requestId" not in background
+    assert "network_classification: String(event.classification" not in background
+    assert "network_reason: String(event.reason" not in background
 
     for source in (cdp, extension / "src" / "background.js"):
         result = subprocess.run(

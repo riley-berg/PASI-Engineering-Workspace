@@ -1,0 +1,18 @@
+{
+  "schema_version": "pasi-native-chromium-v2",
+  "captured_at": "2026-09-28T22:44:46.349Z",
+  "data": {
+    "kind": "chatgpt_health",
+    "controller_version": "2.4.11",
+    "chat_url": "https://chatgpt.com/c/6aba04ac-7350-83e9-a523-772d12bb2613",
+    "provider_usage_limited": false,
+    "auth_required": false,
+    "conversation_context_exhausted": false,
+    "thinking_enabled": true,
+    "thinking_capability": "available",
+    "page_visible": true,
+    "composer_present": true,
+    "native_controller": true,
+    "active_operation_id": null
+  }
+}

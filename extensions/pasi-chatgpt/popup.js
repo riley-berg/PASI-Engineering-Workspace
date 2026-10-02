@@ -375,7 +375,7 @@
     statusText.append(dot, label);
 
     const desc = document.createElement("div");
-    desc.className = "status-desc";
+    desc.className = "status-desc" + (stateLabelText === "Ready" ? " ready-summary" : "");
     desc.textContent = runnerSummary(state, profileId);
     body.append(statusText, desc);
 

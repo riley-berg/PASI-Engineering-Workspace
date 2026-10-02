@@ -54,17 +54,20 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
-  assert.match(popupCss, /--bg-main:\s*#FAF9F6/);
-  assert.match(popupCss, /--bg-card:\s*#FFFFFF/);
-  assert.match(popupCss, /--text-primary:\s*#1A1D1E/);
-  assert.match(popupCss, /--text-secondary:\s*#40372F/);
-  assert.match(popupCss, /--text-muted:\s*#6E6258/);
+  assert.match(popupCss, /--bg-main:\s*#F4ECE1/);
+  assert.match(popupCss, /--bg-card:\s*#EAE0D2/);
+  assert.match(popupCss, /--text-primary:\s*#121415/);
+  assert.match(popupCss, /--text-secondary:\s*#4A3728/);
+  assert.match(popupCss, /--text-muted:\s*#6B5847/);
+  assert.match(popupCss, /--btn-primary:\s*#2F261D/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#4A3728/);
+  assert.match(popupCss, /--btn-secondary:\s*#EAE0D2/);
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);
   assert.match(popupCss, /--status-badge-bg:\s*rgba\(96, 72, 48/);
   assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(96, 72, 48/);
-  assert.match(popupCss, /--status-badge-text:\s*#604830/);
+  assert.match(popupCss, /--status-badge-text:\s*#2F261D/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
 });

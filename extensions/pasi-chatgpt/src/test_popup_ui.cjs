@@ -177,6 +177,8 @@ test("popup bootstraps the saved theme before first paint", () => {
   assert.match(popupJs, /document\.startViewTransition/);
   assert.match(popupJs, /function applyThemeDom\(light\)/);
   assert.match(popupCss, /::view-transition-group\(root\)/);
+  assert.match(popupCss, /::view-transition\s*\{[\s\S]*background:\s*#0D0E11/);
+  assert.match(popupCss, /html\.light-theme::view-transition\s*\{[\s\S]*background:\s*#FAF8F5/);
   assert.match(popupCss, /::view-transition-old\(root\)/);
   assert.match(popupCss, /::view-transition-new\(root\)/);
   assert.match(popupCss, /animation-duration:\s*1ms/);

@@ -486,7 +486,11 @@ def test_network_failure_with_legacy_network_recovery_context_is_retried(tmp_pat
     captured = {}
 
     handler = BridgeRequestHandler.__new__(BridgeRequestHandler)
-    handler.bridge_state = bridge
+
+    class FakeServer:
+        bridge_state = bridge
+
+    handler.server = FakeServer()
     handler._send_json = lambda payload, status=200: captured.update(
         {"payload": payload, "status": status}
     )

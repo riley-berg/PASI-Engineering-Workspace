@@ -54,15 +54,15 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
-  assert.match(popupCss, /--bg-main:\s*#F7F4F0/);
-  assert.match(popupCss, /--bg-card:\s*#EDEAE6/);
+  assert.match(popupCss, /--bg-main:\s*#FAF8F5/);
+  assert.match(popupCss, /--bg-card:\s*#F2EEE8/);
   assert.match(popupCss, /--text-primary:\s*#111215/);
   assert.match(popupCss, /--text-secondary:\s*#423731/);
   assert.match(popupCss, /--text-muted:\s*#665953/);
   assert.match(popupCss, /--btn-primary:\s*#1A1B20/);
   assert.match(popupCss, /--btn-primary-hover:\s*#2C2E35/);
-  assert.match(popupCss, /--btn-secondary:\s*#EDEAE6/);
-  assert.match(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
+  assert.match(popupCss, /--btn-secondary:\s*#F2EEE8/);
+  assert.doesNotMatch(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
@@ -85,12 +85,14 @@ test("popup islands stay inside the compact popup width", () => {
 test("popup uses the requested sepia/obsidian dark palette and no blue primary buttons", () => {
   assert.match(popupCss, /--bg-main:\s*#0D0E11/);
   assert.match(popupCss, /--bg-card:\s*#17191E/);
-  assert.match(popupCss, /--btn-primary:\s*#54433A/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#69564B/);
-  assert.match(popupCss, /--badge-m1:\s*#54433A/);
-  assert.match(popupCss, /--badge-long:\s*#54433A/);
-  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#54433A/);
+  assert.match(popupCss, /--btn-primary:\s*#45464A/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#5B5C61/);
+  assert.match(popupCss, /--badge-m1:\s*#45464A/);
+  assert.match(popupCss, /--badge-long:\s*#45464A/);
+  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#45464A/);
   assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#fff/);
   assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
+  assert.doesNotMatch(popupCss, /--btn-primary:\s*#54433A/);
+  assert.doesNotMatch(popupCss, /--btn-primary-hover:\s*#69564B/);
 });

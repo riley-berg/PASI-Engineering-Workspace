@@ -444,7 +444,7 @@
         // searchbox/combobox or as a generic editable AX node. Editability
         // plus semantic context are stronger signals than the exact role.
         const name = axName(node).toLowerCase();
-        const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(name);
+        const semantic = /\b(?:message|prompt|chat|ask)\b/.test(name);
         const focused = axBooleanProperty(node, 'focused') === true;
         const supportedRole = editableRoles.has(role);
         const genericEditable = editable === true || multiline === true;
@@ -472,7 +472,9 @@
       return {
         backendNodeId,
         kind: 'accessibility_textbox',
+        role,
         name: axName(best),
+        semantic,
         currentText: axValue(best.value),
         focused: axBooleanProperty(best, 'focused') === true
       };
@@ -889,7 +891,16 @@
       const target = await focusEditableTarget(tabId);
       const currentText = String(target.currentText || '').trim();
       if (currentText && currentText !== prompt.trim()) {
-        throw new Error('CDP submit target contains unrelated draft text');
+        throw new Error(
+          'CDP submit target contains unrelated draft text: ' +
+          JSON.stringify({
+            role: target.role,
+            name: target.name,
+            semantic: target.semantic === true,
+            focused: target.focused === true,
+            current_text_length: currentText.length
+          })
+        );
       }
       const insertedAt = now();
       if (!currentText) {
@@ -1381,7 +1392,8 @@
     classifyHttpStatus,
     classifyPayload,
     completionMarkersSatisfied,
-    requestContainsPrompt
+    requestContainsPrompt,
+    findComposerAXNode
   };
 
   globalThis.PASI_CDP_NETWORK = api;

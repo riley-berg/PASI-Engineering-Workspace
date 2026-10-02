@@ -118,7 +118,9 @@ test("popup uses connected and operational runner semantics", () => {
   assert.match(popupJs, /return "Stopped";/);
   assert.match(popupJs, /return "Starting";/);
   assert.doesNotMatch(popupJs, /Ready to execute|return "Ready";/);
-});\n\ntest("runner cards do not animate theme surface or border changes", () => {
+});
+
+test("runner cards do not animate theme surface or border changes", () => {
   const runnerCardStart = popupCss.indexOf(".runner-card {");
   const runnerCardEnd = popupCss.indexOf("}", runnerCardStart);
   assert.ok(runnerCardStart >= 0);

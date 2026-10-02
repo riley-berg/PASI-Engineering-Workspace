@@ -67,6 +67,11 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);
+  assert.match(popupCss, /#runnerSelect[\s\S]*color-scheme:\s*dark/);
+  assert.match(popupCss, /#runnerSelect option[\s\S]*background:\s*var\(--bg-card\)/);
+  assert.match(popupCss, /#runnerSelect option:checked[\s\S]*background:\s*var\(--btn-primary\)/);
+  assert.match(popupCss, /body\.light-theme #runnerSelect\s*\{[\s\S]*color-scheme:\s*light/);
+  assert.match(popupCss, /body\.light-theme #runnerSelect option[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /--status-badge-bg:\s*rgba\(26, 27, 32/);
   assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(26, 27, 32/);
   assert.match(popupCss, /--status-badge-text:\s*#1A1B20/);
@@ -101,4 +106,30 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#54433A/);
   assert.doesNotMatch(popupCss, /--btn-primary-hover:\s*#69564B/);
+});
+
+test("popup critical text and control colors meet WCAG AA contrast targets", () => {
+  const relativeLuminance = (hex) => {
+    const value = hex.replace("#", "");
+    const channels = [0, 2, 4].map((offset) => parseInt(value.slice(offset, offset + 2), 16) / 255);
+    const linear = channels.map((channel) =>
+      channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4
+    );
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+
+  const contrastRatio = (foreground, background) => {
+    const a = relativeLuminance(foreground);
+    const b = relativeLuminance(background);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+
+  assert.ok(contrastRatio("#111215", "#FAF8F5") >= 4.5);
+  assert.ok(contrastRatio("#665953", "#FAF8F5") >= 4.5);
+  assert.ok(contrastRatio("#423731", "#EAE4DA") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
+  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#1A1B20") >= 4.5);
 });

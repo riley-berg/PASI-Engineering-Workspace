@@ -96,7 +96,9 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
   assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
-  assert.doesNotMatch(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);
+  const pickerHoverRule = popupCss.match(/\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[^}]*\}/)?.[0];
+  assert.ok(pickerHoverRule);
+  assert.doesNotMatch(pickerHoverRule, /font-weight:\s*700/);
   assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);
   assert.match(popupCss, /--status-idle-summary:\s*#707174/);
   assert.match(popupCss, /\.status-dot\.idle\s*\{\s*display:\s*none/);
@@ -163,7 +165,7 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#FFFFFF/);
   assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
   assert.match(popupCss, /\.btn-primary[\s\S]*color:\s*#FFFFFF/);
-  assert.match(popupCss, /#runnerSelect:focus[\s\S]*outline|#runnerSelect:focus[\s\S]*box-shadow:\s*0 0 0 2px rgba\(244, 241, 236/);
+  assert.match(popupCss, /\.runner-select:focus-visible\s*\{[^}]*box-shadow:\s*0 0 0 2px rgba\(244, 241, 236/);
   assert.match(popupCss, /\.btn:focus-visible/);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#54433A/);

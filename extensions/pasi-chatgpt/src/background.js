@@ -1,4 +1,3 @@
-try { importScripts("vendor/typescript.js"); } catch (_) {}
 importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';
@@ -42,6 +41,7 @@ const BRIDGE_ROUTES = new Set([
   'GET /next-operation'
 ]);
 const BRIDGE_OPERATION_RE = /^\/operation\?operation_id=[^&]{1,200}$/;
+const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}$/;
 
 async function bridgeToken(forceRefresh = false) {
   if (!forceRefresh && cachedBridgeToken) return cachedBridgeToken;
@@ -66,7 +66,10 @@ async function bridgeToken(forceRefresh = false) {
 function allowedBridgeRequest(method, path) {
   const normalized = String(method || 'GET').toUpperCase();
   const value = String(path || '');
-  if (normalized === 'GET' && BRIDGE_OPERATION_RE.test(value)) return true;
+  if (normalized === 'GET' && (
+    BRIDGE_OPERATION_RE.test(value) ||
+    BRIDGE_NEXT_OPERATION_RE.test(value)
+  )) return true;
   return BRIDGE_ROUTES.has(`${normalized} ${value}`);
 }
 
@@ -119,9 +122,44 @@ async function bridgeJson(path) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'pasi-network-bind-operation') {
+    const senderUrl = String(sender?.url || '');
+    const tabId = sender?.tab?.id;
+    const rawOperationId = message?.operation_id;
+    const operationId = rawOperationId == null ? null : String(rawOperationId).trim();
+    if (
+      typeof tabId !== 'number' ||
+      !/^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(senderUrl) ||
+      (operationId !== null && (!operationId || operationId.length > 200))
+    ) {
+      sendResponse({ ok: false, bound: false });
+      return undefined;
+    }
+
+    chrome.scripting?.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: (value) => {
+        const interceptor = globalThis.__PASI_NETWORK_INTERCEPTOR__;
+        if (!interceptor || typeof interceptor.bindOperation !== 'function') return false;
+        interceptor.bindOperation(value);
+        return true;
+      },
+      args: [operationId]
+    }).then((results) => {
+      const bound = Array.isArray(results) && results.some((entry) => entry?.result === true);
+      sendResponse({ ok: bound, bound });
+    }).catch(() => {
+      sendResponse({ ok: false, bound: false });
+    });
+    return true;
+  }
+
   if (message?.type === 'pasi-controller-claim') {
     const tabId = sender?.tab?.id;
-    if (typeof tabId !== 'number') {
+    const rawControllerId = message?.controller_id;
+    const controllerId = rawControllerId == null ? `legacy:${tabId}` : String(rawControllerId).trim();
+    if (typeof tabId !== 'number' || !controllerId || controllerId.length > 200) {
       sendResponse({ ok: false, leader: false });
       return undefined;
     }
@@ -129,16 +167,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const stored = await chrome.storage.local.get(CONTROLLER_LEASE_KEY);
       const current = stored?.[CONTROLLER_LEASE_KEY];
       const now = Date.now();
-      const owned = current && current.tabId === tabId && now - Number(current.renewedAt || 0) < CONTROLLER_LEASE_MS;
-      const available = !current || now - Number(current.renewedAt || 0) >= CONTROLLER_LEASE_MS;
+      const currentFresh = Boolean(
+        current &&
+        now - Number(current.renewedAt || 0) < CONTROLLER_LEASE_MS
+      );
+      const owned = Boolean(
+        currentFresh &&
+        current.tabId === tabId &&
+        current.controllerId === controllerId
+      );
+      const available = !current || !currentFresh || current.tabId === tabId;
       if (!owned && !available) {
-        sendResponse({ ok: true, leader: false });
+        sendResponse({ ok: true, leader: false, controller_id: controllerId });
         return;
       }
       await chrome.storage.local.set({
-        [CONTROLLER_LEASE_KEY]: { tabId, renewedAt: now }
+        [CONTROLLER_LEASE_KEY]: { tabId, controllerId, renewedAt: now }
       });
-      sendResponse({ ok: true, leader: true });
+      sendResponse({ ok: true, leader: true, controller_id: controllerId });
     }).catch(() => sendResponse({ ok: false, leader: false }));
     return true;
   }
@@ -244,11 +290,21 @@ async function injectExistingChatTabs() {
     try {
       await chrome.scripting.executeScript({
         target: { tabId: tab.id },
+        world: 'MAIN',
+        files: ['src/network-interceptor.js']
+      });
+    } catch (_) {
+      // Retry the interceptor independently from the DOM controller.
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
         files: [
           'src/timeout-config.js',
           'src/detectors.js',
           'src/recovery_progress.js',
-          'src/content.js',
+          'src/legacy/dom-controller.js',
           'src/recovery.js'
         ]
       });

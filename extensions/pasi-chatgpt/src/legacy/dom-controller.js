@@ -5,6 +5,12 @@
   globalThis.__PASI_NATIVE_CONTROLLER_STARTED__ = true;
 
   const CONTROLLER_VERSION = '2.4.11';
+  const CONTROLLER_INSTANCE_ID = (() => {
+    try {
+      if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    } catch (_) {}
+    return `ctrl-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  })();
   const PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1';
   const TIMEOUT_POLICY = globalThis.PASI_TIMEOUT_POLICY?.get?.() || {};
   const POLL_MS = TIMEOUT_POLICY.pollMs || 2000;
@@ -55,6 +61,12 @@
   let immediateOperationQueued = false;
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
+  const NETWORK_SHADOW_MAX_EVENTS = 32;
+  const NETWORK_SHADOW_MAX_REQUESTS = 8;
+  const NETWORK_SHADOW_MAX_OPERATIONS = 16;
+  const networkShadowByRequestId = new Map();
+  const networkShadowByOperationId = new Map();
+  let networkLifecycleListenerInstalled = false;
 
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
@@ -138,6 +150,12 @@
       throw new Error('PASI_NATIVE: extension messaging API unavailable');
     }
     const timeoutMs = Number(options.timeout || 10000);
+    const pathValue = String(path || '');
+    const bodyValue = options.body ?? null;
+    const controllerBoundRoute = /^\/chat\/(?:claim|heartbeat|finished|failed|cancel)$/.test(pathValue);
+    const requestBody = controllerBoundRoute && bodyValue && typeof bodyValue === 'object'
+      ? { ...bodyValue, controller_id: CONTROLLER_INSTANCE_ID }
+      : bodyValue;
     return new Promise((resolve, reject) => {
       let settled = false;
       const timerId = setTimeout(() => {
@@ -150,7 +168,7 @@
           type: 'pasi-bridge-request',
           path: String(path || ''),
           method: String(options.method || 'GET').toUpperCase(),
-          body: options.body ?? null,
+          body: requestBody,
           timeout: timeoutMs
         }, (response) => {
           if (settled) return;
@@ -401,7 +419,10 @@
     }
     return new Promise((resolve) => {
       try {
-        chrome.runtime.sendMessage({ type: 'pasi-controller-claim' }, (response) => {
+        chrome.runtime.sendMessage({
+          type: 'pasi-controller-claim',
+          controller_id: CONTROLLER_INSTANCE_ID
+        }, (response) => {
           const runtimeError = chrome.runtime.lastError;
           if (runtimeError || !response || response.ok !== true) {
             controllerLeader = false;
@@ -409,7 +430,8 @@
             resolve(false);
             return;
           }
-          controllerLeader = response.leader === true;
+          controllerLeader = response.leader === true &&
+            (response.controller_id == null || response.controller_id === CONTROLLER_INSTANCE_ID);
           controllerClaimedAt = controllerLeader ? Date.now() : 0;
           resolve(controllerLeader);
         });
@@ -589,9 +611,15 @@
 
   function snapshotAssistantMessages() {
     const nodes = assistantMessages();
+    const texts = new Set();
+    for (const node of nodes) {
+      const text = extractAssistant(node);
+      if (text) texts.add(collapseWhitespace(text));
+    }
     return {
       keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
       nodes: new WeakSet(nodes),
+      texts,
       count: nodes.length
     };
   }
@@ -614,11 +642,14 @@
     return Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
   }
 
-  function assistantResponseEvidence(snapshot, prompt) {
+  function assistantResponseEvidence(snapshot, prompt, baseline = '') {
     if (!snapshot || typeof prompt !== 'string' || !prompt.trim()) return '';
     const matchedUsers = userMessages().filter((node) => userMessageMatchesPrompt(node, prompt));
     if (!matchedUsers.length) return '';
 
+    const baselineFingerprint = typeof baseline === 'string' && baseline.trim()
+      ? fingerprintFromText(baseline)
+      : '';
     const nodes = assistantMessages();
     for (let index = nodes.length - 1; index >= 0; index -= 1) {
       const node = nodes[index];
@@ -626,6 +657,9 @@
       if (!matchedUsers.some((user) => nodeFollows(user, node))) continue;
       const text = extractAssistant(node);
       if (!text) continue;
+      const normalizedText = collapseWhitespace(text);
+      if (snapshot.texts?.has(normalizedText)) continue;
+      if (baselineFingerprint && fingerprintFromText(text) === baselineFingerprint) continue;
       return text;
     }
     return '';
@@ -690,6 +724,231 @@
         } }
       });
     } catch (_) {}
+  }
+
+  async function bindNetworkOperation(operationId) {
+    const value = operationId == null || operationId === '' ? null : String(operationId);
+
+    let dispatched = false;
+    try {
+      window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
+        detail: value || ''
+      }));
+      dispatched = true;
+    } catch (_) {}
+
+    if (!globalThis.chrome?.runtime?.sendMessage) return dispatched;
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(dispatched);
+      }, 1500);
+
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'pasi-network-bind-operation', operation_id: value },
+          (response) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            void chrome.runtime.lastError;
+            resolve(response?.bound === true || dispatched);
+          }
+        );
+      } catch (_) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(dispatched);
+      }
+    });
+  }
+
+  function boundedNetworkEvent(event) {
+    if (!event || typeof event !== 'object') return null;
+    const eventType = typeof event.eventType === 'string' ? event.eventType.slice(0, 40) : '';
+    const requestId = typeof event.requestId === 'string' ? event.requestId.slice(0, 200) : '';
+    if (!eventType || !requestId) return null;
+    const operationId = typeof event.operationId === 'string' && event.operationId
+      ? event.operationId.slice(0, 200)
+      : (activeOperationId ? String(activeOperationId).slice(0, 200) : null);
+    const telemetry = event.telemetry && typeof event.telemetry === 'object'
+      ? {
+          requestUri: typeof event.telemetry.requestUri === 'string'
+            ? event.telemetry.requestUri.slice(0, 1000)
+            : undefined,
+          totalChunksProcessed: Number.isFinite(event.telemetry.totalChunksProcessed)
+            ? event.telemetry.totalChunksProcessed
+            : undefined,
+          durationSinceLastChunk: Number.isFinite(event.telemetry.durationSinceLastChunk)
+            ? event.telemetry.durationSinceLastChunk
+            : undefined,
+          httpStatus: Number.isFinite(event.telemetry.httpStatus)
+            ? event.telemetry.httpStatus
+            : undefined,
+          providerErrorCode: typeof event.telemetry.providerErrorCode === 'string'
+            ? event.telemetry.providerErrorCode.slice(0, 120)
+            : undefined
+        }
+      : {};
+    return {
+      eventType,
+      eventId: typeof event.eventId === 'string' ? event.eventId.slice(0, 200) : null,
+      operationId,
+      requestId,
+      timestamp: Number.isFinite(event.timestamp) ? event.timestamp : Date.now(),
+      reason: typeof event.reason === 'string' ? event.reason.slice(0, 200) : '',
+      classification: typeof event.classification === 'string'
+        ? event.classification.slice(0, 120)
+        : '',
+      responseText: typeof event.responseText === 'string'
+        ? event.responseText.slice(0, 120000)
+        : '',
+      telemetry
+    };
+  }
+
+  function rememberNetworkShadow(event) {
+    const bounded = boundedNetworkEvent(event);
+    if (!bounded) return null;
+
+    let request = networkShadowByRequestId.get(bounded.requestId);
+    if (!request) {
+      if (networkShadowByRequestId.size >= NETWORK_SHADOW_MAX_REQUESTS) {
+        const oldest = networkShadowByRequestId.keys().next().value;
+        if (oldest) networkShadowByRequestId.delete(oldest);
+      }
+      request = {
+        requestId: bounded.requestId,
+        operationId: bounded.operationId,
+        events: []
+      };
+      networkShadowByRequestId.set(bounded.requestId, request);
+    }
+
+    request.operationId = bounded.operationId || request.operationId || null;
+    request.events.push(bounded);
+    if (request.events.length > NETWORK_SHADOW_MAX_EVENTS) request.events.shift();
+
+    if (request.operationId) {
+      let operation = networkShadowByOperationId.get(request.operationId);
+      if (!operation) {
+        if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
+          const oldestOperation = networkShadowByOperationId.keys().next().value;
+          if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
+        }
+        operation = {
+          requestIds: [],
+          terminal: null,
+          started: null,
+          last: null,
+          domCompleted: false,
+          domCompletionAtMs: null,
+          domResponseAvailable: false,
+          domChatUrl: null,
+          responseText: ''
+        };
+        networkShadowByOperationId.set(request.operationId, operation);
+      }
+      if (!operation.requestIds.includes(request.requestId)) {
+        operation.requestIds.push(request.requestId);
+        if (operation.requestIds.length > NETWORK_SHADOW_MAX_REQUESTS) operation.requestIds.shift();
+      }
+      if (bounded.eventType === 'STARTED') operation.started = bounded;
+      if (['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)) operation.terminal = bounded;
+      if (bounded.responseText) operation.responseText = bounded.responseText;
+      operation.last = bounded;
+    }
+
+    return bounded;
+  }
+
+  function networkResponseEvidence(completionMarkers = []) {
+    if (!activeOperationId) return '';
+    const summary = networkShadowByOperationId.get(activeOperationId);
+    if (!summary || summary.terminal?.eventType !== 'COMPLETED') return '';
+    const text = typeof summary.responseText === 'string' ? summary.responseText : '';
+    return completionMarkersSatisfied(text, completionMarkers) ? text : '';
+  }
+
+  function installNetworkLifecycleShadow() {
+    if (networkLifecycleListenerInstalled || typeof window.addEventListener !== 'function') return false;
+    networkLifecycleListenerInstalled = true;
+    window.addEventListener('PASI_NETWORK_LIFECYCLE', (event) => {
+      let payload = event?.detail;
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch (_) {
+          return;
+        }
+      }
+      const bounded = rememberNetworkShadow(payload);
+      if (!bounded) return;
+
+      const kind = bounded.eventType === 'STARTED'
+        ? 'chatgpt_network_generation_started'
+        : bounded.eventType === 'STALL_DETECTED'
+          ? 'chatgpt_network_generation_stalled'
+          : ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
+            ? 'chatgpt_network_generation_terminal'
+            : 'chatgpt_network_lifecycle';
+
+      void reportObservation(kind, {
+        operation_id: bounded.operationId,
+        request_id: bounded.requestId,
+        event_id: bounded.eventId,
+        event_type: bounded.eventType,
+        reason: bounded.reason,
+        classification: bounded.classification,
+        telemetry: bounded.telemetry,
+        network_shadow: true
+      }, 5000);
+
+      if (bounded.operationId) {
+        const summary = networkShadowByOperationId.get(bounded.operationId);
+        if (summary) {
+          void reportObservation('chatgpt_network_dom_shadow', {
+            operation_id: bounded.operationId,
+            network_request_ids: summary.requestIds,
+            network_started: Boolean(summary.started),
+            network_terminal_event: summary.terminal?.eventType || null,
+            network_terminal_reason: summary.terminal?.reason || null,
+            network_last_event: summary.last?.eventType || null,
+            dom_completed: summary.domCompleted,
+            dom_completion_at_ms: summary.domCompletionAtMs,
+            dom_response_available: summary.domResponseAvailable,
+            dom_chat_url: summary.domChatUrl,
+            network_shadow: true
+          }, 5000);
+        }
+      }
+      if (
+        bounded.operationId &&
+        ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(bounded.eventType)
+      ) {
+        const summary = networkShadowByOperationId.get(bounded.operationId);
+        if (summary?.domCompleted) {
+          void reportObservation('chatgpt_network_dom_shadow', {
+            operation_id: bounded.operationId,
+            network_request_ids: summary.requestIds,
+            network_started: Boolean(summary.started),
+            network_terminal_event: summary.terminal?.eventType || null,
+            network_terminal_reason: summary.terminal?.reason || null,
+            network_last_event: summary.last?.eventType || null,
+            dom_completed: true,
+            dom_completion_at_ms: summary.domCompletionAtMs,
+            dom_response_available: summary.domResponseAvailable,
+            dom_chat_url: summary.domChatUrl,
+            network_shadow: true
+          }, 5000);
+        }
+      }
+    });
+    return true;
   }
 
   function installRuntimeErrorTelemetry() {
@@ -1472,10 +1731,15 @@
 
   async function waitForResponse(baseline, completionMarkers = [], evidenceContext = null) {
     let sawGeneration = false;
-    const responseEvidence = () => assistantResponseEvidence(
-      evidenceContext?.assistantSnapshot,
-      evidenceContext?.prompt
-    );
+    const responseEvidence = () => {
+      const networkText = networkResponseEvidence(completionMarkers);
+      if (networkText) return networkText;
+      return assistantResponseEvidence(
+        evidenceContext?.assistantSnapshot,
+        evidenceContext?.prompt,
+        baseline
+      );
+    };
     let generationEndedAt = 0;
     let failureReason = null;
 
@@ -1583,9 +1847,59 @@
     };
   }
 
-  async function finishOperation(operationId, responseText = '', requireResponseText = false, timing = null) {
+  function markNetworkDomCompletion(operationId, responseText, chatUrlValue) {
+    const id = typeof operationId === 'string' && operationId ? operationId : null;
+    if (!id) return;
+    let summary = networkShadowByOperationId.get(id);
+    if (!summary) {
+      if (networkShadowByOperationId.size >= NETWORK_SHADOW_MAX_OPERATIONS) {
+        const oldestOperation = networkShadowByOperationId.keys().next().value;
+        if (oldestOperation) networkShadowByOperationId.delete(oldestOperation);
+      }
+      summary = {
+        requestIds: [],
+        terminal: null,
+        started: null,
+        last: null,
+        domCompleted: false,
+        domCompletionAtMs: null,
+        domResponseAvailable: false,
+        domChatUrl: null
+      };
+      networkShadowByOperationId.set(id, summary);
+    }
+    summary.domCompleted = true;
+    summary.domCompletionAtMs = Date.now();
+    summary.domResponseAvailable = typeof responseText === 'string' && Boolean(responseText.trim());
+    summary.domChatUrl = typeof chatUrlValue === 'string' && chatUrlValue ? chatUrlValue : null;
+
+    void reportObservation('chatgpt_network_dom_shadow', {
+      operation_id: id,
+      network_request_ids: summary.requestIds,
+      network_started: Boolean(summary.started),
+      network_terminal_event: summary.terminal?.eventType || null,
+      network_terminal_reason: summary.terminal?.reason || null,
+      network_last_event: summary.last?.eventType || null,
+      dom_completed: true,
+      dom_completion_at_ms: summary.domCompletionAtMs,
+      dom_response_available: summary.domResponseAvailable,
+      dom_chat_url: summary.domChatUrl,
+      network_shadow: true
+    }, 5000);
+  }
+
+  async function finishOperation(
+    operationId,
+    responseText = '',
+    requireResponseText = false,
+    timing = null,
+    completionMarkers = []
+  ) {
     if (requireResponseText && (typeof responseText !== 'string' || !responseText.trim())) {
       throw new Error('PASI_NATIVE: response text unavailable; completion acknowledgement withheld');
+    }
+    if (!completionMarkersSatisfied(responseText, completionMarkers)) {
+      throw new Error('PASI_NATIVE: response text does not satisfy completion markers; completion acknowledgement withheld');
     }
     // Response detection is already authoritative for this operation.
     // Conversation signature/count telemetry is recorded independently for
@@ -1656,6 +1970,7 @@
               native_controller: true
             }).catch(() => {});
 
+            markNetworkDomCompletion(operationId, responseText, chatUrl());
             setTimeout(publishResponseTelemetry, RESPONSE_TELEMETRY_DEFER_MS);
             return payload;
           } catch (_) {
@@ -1696,6 +2011,7 @@
   async function processOperation(operation) {
     activeOperationId = operation.operation_id;
     processing = true;
+    await bindNetworkOperation(activeOperationId);
     if (leaseTimerId !== null) clearInterval(leaseTimerId);
     if (!hasFreshControllerLease()) {
       const claimed = await controllerClaim();
@@ -1835,7 +2151,10 @@
             operation.operation_id,
             response,
             true,
-            browserTiming
+            browserTiming,
+            Array.isArray(operation.completion_markers)
+              ? operation.completion_markers
+              : []
           );
           chainedOperation = completion?.next_operation || null;
           finalized = true;
@@ -1888,6 +2207,7 @@
       }
       throw error;
     } finally {
+      void bindNetworkOperation(null);
       if (leaseTimerId !== null) {
         clearInterval(leaseTimerId);
         leaseTimerId = null;
@@ -2022,7 +2342,7 @@
             method: 'POST',
             body: { operation_id: recoveryOperation }
           })
-        : await bridge('/next-operation');
+        : await bridge('/next-operation?controller_id=' + encodeURIComponent(CONTROLLER_INSTANCE_ID));
       if (!response.ok) {
         if (recoveryOperation) {
           try {
@@ -2054,6 +2374,7 @@
   }
 
   async function start() {
+    installNetworkLifecycleShadow();
     pollTimerId = setInterval(poll, POLL_MS);
     healthTimerId = setInterval(reportHealth, HEALTH_MS);
 

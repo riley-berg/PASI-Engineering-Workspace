@@ -103,3 +103,46 @@ The wrapper exposes compatible aliases including `GM_getValue`, `GM_setValue`, `
 Chrome clears dynamically registered user scripts when an extension updates, so PASI persists its registry in `chrome.storage.local` and restores enabled scripts from the service worker's install/update lifecycle.
 
 This architecture gives PASI the useful Tampermonkey-style separation—privileged core, injection wrapper, isolated script runtime—without making Tampermonkey itself part of the system.
+
+
+## Phase 1 and Phase 2 — ChatGPT network lifecycle
+
+Phase 1 provides a read-only transport observer for ChatGPT generation traffic. It wraps the page's fetch implementation in the `MAIN` world at `document_start`, survives normal page fetch replacement, observes a cloned response stream, and emits bounded lifecycle events without consuming or modifying the response delivered to ChatGPT.
+
+The observer recognizes the current `/backend-api/f/conversation` generation endpoint plus the legacy `/backend-api/conversation` endpoint, rejects unrelated endpoints, classifies HTTP/provider/context/usage-limit failures, detects transport disconnects, and reports a non-terminal `STALL_DETECTED` signal so legitimate long stream pauses do not become false interruptions. Terminal events remain exactly once per tracked request.
+
+Phase 2 adds automatic shadow integration with the existing native DOM controller:
+
+- when the controller starts an operation, it automatically binds that operation ID into the MAIN-world interceptor;
+- `PASI_NETWORK_LIFECYCLE` is consumed in the isolated controller world and persisted through the existing `/browser/observation` bridge;
+- STARTED, STALL_DETECTED, and terminal lifecycle events are recorded with bounded request/operation state;
+- DOM completion is recorded alongside the corresponding network state so disagreement is durable evidence rather than a silent assumption;
+- the network observer remains non-authoritative for submission, response extraction, recovery, and chat rollover while shadow validation proceeds.
+
+The architectural goal is to make the network path capable of replacing the fragile DOM completion/generation detection, while retaining the DOM controller as a bounded fallback until shadow evidence is consistently validated.
+
+Run the deterministic interceptor contract tests with:
+
+```
+node --test extensions/pasi-chatgpt/src/test_network_interceptor.cjs
+```
+
+The Python gate runs the same contract plus the extension packaging and Phase 2 shadow-correlation assertions.
+
+For a live manual smoke check, load the Engineering Workspace extension in the ChatGPT tab, verify:
+
+```js
+globalThis.__PASI_NETWORK_INTERCEPTOR_HEALTH__()
+```
+
+and confirm:
+
+```
+status: "HEALTHY"
+installed: true
+fetchWrapped: true
+fetchAccessorInstalled: true
+fetchFunctionName: "interceptedFetch"
+```
+
+A PASI-queued prompt should then produce a network STARTED event, followed by either COMPLETED or a genuinely terminal failure/interruption event, with the same request ID. When an operation is active, the network events should carry that operation ID automatically; no manual console binding should be required.

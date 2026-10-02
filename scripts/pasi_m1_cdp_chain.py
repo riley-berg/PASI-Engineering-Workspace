@@ -220,16 +220,6 @@ def main() -> int:
         "started_at": started_at.isoformat(),
         "status": "running",
         "execution_mode": EXECUTION_MODE,
-        "target_operations": args.operations,
-        "completed_operations": 0,
-        "chat_url": initial_chat_url,
-    })
-    write_runner_state({
-        "run_id": run_id,
-        "repo": "th3-st0v3/PASI-Engineering-Workspace",
-        "started_at": started_at.isoformat(),
-        "status": "running",
-        "execution_mode": EXECUTION_MODE,
         "runner_profile": "m1",
         "target_operations": args.operations,
         "completed_operations": 0,

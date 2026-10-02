@@ -166,6 +166,17 @@ test("popup uses connected/idle semantics without duplicate Ready labels", () =>
   assert.doesNotMatch(popupHtml, /class="status-badge">Ready<\/span>/);
 });
 
+test("runner cards do not animate theme background changes", () => {
+  const runnerCardStart = popupCss.indexOf(".runner-card {");
+  const runnerCardEnd = popupCss.indexOf("}", runnerCardStart);
+  assert.ok(runnerCardStart >= 0);
+  assert.ok(runnerCardEnd > runnerCardStart);
+
+  const runnerCardRule = popupCss.slice(runnerCardStart, runnerCardEnd);
+  assert.match(runnerCardRule, /transition:\s*border-color\s*\.15s,\s*box-shadow\s*\.15s/);
+  assert.doesNotMatch(runnerCardRule, /background-color/);
+});
+
 test("popup remains inside the compact width and hides only intentional UI regions", () => {
   assert.match(popupCss, /width:\s*360px/);
   assert.match(popupCss, /\.runner-card,\s*\.card[\s\S]*width:\s*100%/);

@@ -62,6 +62,11 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);
+  assert.match(popupCss, /--status-badge-bg:\s*rgba\(96, 72, 48/);
+  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(96, 72, 48/);
+  assert.match(popupCss, /--status-badge-text:\s*#604830/);
+  assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
+  assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
 });
 
 test("popup islands stay inside the compact popup width", () => {

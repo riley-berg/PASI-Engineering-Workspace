@@ -31,8 +31,9 @@ TARGET_OPERATIONS = 20
 DEFAULT_TIMEOUT_SECONDS = 300.0
 EXECUTION_MODE = "supervised_m1"
 STATE_DIR = Path(os.environ.get("PASI_M1_STATE_DIR", "~/.pasi/m1-cdp-chain")).expanduser()
-BRIDGE_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", "~/.pasi/overnight")).expanduser().resolve()
-LEGACY_PID_PATH = Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid"
+BRIDGE_RUNTIME_DIR = Path(
+    os.environ.get("PASI_RUNTIME_DIR", "~/.pasi/overnight/m1")
+).expanduser().resolve()
 
 
 def utcnow() -> datetime:
@@ -47,13 +48,13 @@ def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 def write_runner_pid(pid: int) -> None:
-    for path in (STATE_DIR / "runner.pid", BRIDGE_RUNTIME_DIR / "runner.pid", LEGACY_PID_PATH):
+    for path in (STATE_DIR / "runner.pid", BRIDGE_RUNTIME_DIR / "runner.pid"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"{pid}\n", encoding="utf-8")
 
 
 def clear_runner_pid() -> None:
-    for path in (STATE_DIR / "runner.pid", BRIDGE_RUNTIME_DIR / "runner.pid", LEGACY_PID_PATH):
+    for path in (STATE_DIR / "runner.pid", BRIDGE_RUNTIME_DIR / "runner.pid"):
         try:
             path.unlink()
         except FileNotFoundError:
@@ -220,9 +221,19 @@ def main() -> int:
         initial_chat_url = str(browser["data"].get("chat_url") or "").strip()
         if not initial_chat_url:
             raise RuntimeError("browser health did not provide a current ChatGPT conversation URL")
-    except Exception:
+    except Exception as exc:
         clear_runner_pid()
-        raise
+        write_runner_state(
+            base_state(
+                status="failed",
+                execution_mode="manual",
+                phase="failed",
+                failed_at=utcnow().isoformat(),
+                error=f"{type(exc).__name__}: {exc}"[:2000],
+            )
+        )
+        print(f"M1 FAILED: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        return 1
 
     write_runner_state({
         "run_id": run_id,

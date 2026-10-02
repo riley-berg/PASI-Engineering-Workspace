@@ -1358,6 +1358,7 @@
       ensureReasoningMode,
       ensureGithubRepository,
       handlePaused,
+      findComposerAXNode,
       currentBinding,
       isIdle,
       health() {
@@ -1392,8 +1393,7 @@
     classifyHttpStatus,
     classifyPayload,
     completionMarkersSatisfied,
-    requestContainsPrompt,
-    findComposerAXNode
+    requestContainsPrompt
   };
 
   globalThis.PASI_CDP_NETWORK = api;

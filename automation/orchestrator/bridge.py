@@ -2127,10 +2127,13 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.CONFLICT,
             )
-        except Exception:
+        except Exception as exc:
+            detail = type(exc).__name__ + ": " + str(exc)
+            detail = detail.strip()[:500]
+            print("[Bridge] POST " + path + " failed: " + detail, file=sys.stderr, flush=True)
             self._send_json(
                 {
-                    "error": "Internal server error."
+                    "error": "Internal server error: " + detail
                 },
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )

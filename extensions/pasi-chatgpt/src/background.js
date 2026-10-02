@@ -108,11 +108,8 @@ async function cdpNetworkObservation(event) {
     controller_id: controllerId,
     failure_source: 'network',
     error: 'PASI_CDP: ' + String(event.reason || event.classification || 'NETWORK_FAILURE'),
-    recovery_context: {
-      network_request_id: String(event.requestId || '').slice(0, 200),
-      network_classification: String(event.classification || '').slice(0, 120),
-      network_reason: String(event.reason || '').slice(0, 200)
-    }
+    // Network request/classification/reason are already persisted through
+    // /browser/observation as authoritative CDP lifecycle evidence.
   }, 10000);
   cdpOperationTimings.delete(operationId);
   await cdpNetworkController?.unbindOperation?.(

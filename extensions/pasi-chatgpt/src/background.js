@@ -198,7 +198,15 @@ async function waitForNextOperationForController(tabId, waitMs = 3000) {
       const operation = payload?.operation;
       if (operation?.operation_id) {
         const dispatched = await dispatchOperationForController(tabId, controllerId, operation);
-        if (dispatched) return true;
+        if (dispatched) {
+          // Keep this waiter alive for the complete supervised run. The bridge
+          // blocks the next claim while the current operation is claimed or
+          // generating, and releases it only after response processing is
+          // acknowledged. Keeping one waiter alive removes the first-response
+          // terminal-event rearm race that could strand M1 after operation 1.
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          continue;
+        }
         // Keep the waiter alive after a transient tab/CDP dispatch failure.
         // The bridge will redeliver a still-claimed operation after its
         // controller lease expires, so a temporary navigation/debugger race

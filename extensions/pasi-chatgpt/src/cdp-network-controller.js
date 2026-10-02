@@ -832,6 +832,47 @@
       return best;
     }
 
+    async function clickAXNode(tabId, node) {
+      const backendNodeId = Number(node?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP UI control has no backend node');
+      }
+      const model = await sendCommand(tabId, 'DOM.getBoxModel', {backendNodeId});
+      const quad = model?.model?.border;
+      if (!Array.isArray(quad) || quad.length < 8) {
+        throw new Error('CDP UI control has no usable box model');
+      }
+      const values = quad.slice(0, 8).map(Number);
+      if (!values.every(Number.isFinite)) {
+        throw new Error('CDP UI control box model is invalid');
+      }
+      const x = (values[0] + values[2] + values[4] + values[6]) / 4;
+      const y = (values[1] + values[3] + values[5] + values[7]) / 4;
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x,
+        y,
+        button: 'none'
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1
+      });
+      return {x, y};
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -853,7 +894,39 @@
       const insertedAt = now();
       if (!currentText) {
         await sendCommand(tabId, 'Input.insertText', {text: prompt});
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
+
+      const nodes = await readAXTree(tabId);
+      const sendButton = findSendButtonAXNode(nodes);
+      if (sendButton) {
+        try {
+          await clickAXNode(tabId, sendButton);
+          const acknowledgement = await waitForSubmissionAcknowledgement(
+            tabId,
+            state.binding.operationId,
+            prompt,
+            1500,
+          );
+          return {
+            submitted: true,
+            acknowledged: true,
+            acknowledgementSource: acknowledgement.source,
+            operationId: state.binding.operationId,
+            controllerId: state.binding.controllerId,
+            submissionMethod: 'cdp_accessibility_send_button_mouse',
+            targetKind: target.kind,
+            submittedAtMs: submittedAt,
+            insertedAtMs: insertedAt,
+            sendControlActivatedAtMs: now()
+          };
+        } catch (error) {
+          // The AX send control existed, but its pointer path did not produce
+          // a submission. Fall through to native keyboard submission.
+        }
+      }
+
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.backendNodeId});
       await sendCommand(tabId, 'Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Enter',
@@ -874,6 +947,7 @@
           tabId,
           state.binding.operationId,
           prompt,
+          3000,
         );
         return {
           submitted: true,
@@ -888,36 +962,12 @@
           enterDispatchedAtMs: now()
         };
       } catch (error) {
-        if (!String(error?.message || error).includes('prompt submission not acknowledged')) {
-          throw error;
-        }
-
-        // Some live ChatGPT composer variants accept text input but do not
-        // submit from a synthetic Enter event. Stay inside the CDP
-        // accessibility/network control plane and activate the exposed Send
-        // button as a bounded fallback. This remains observable through the
-        // same submission acknowledgement gate.
-        const nodes = await readAXTree(tabId);
-        const sendButton = findSendButtonAXNode(nodes);
-        if (!sendButton) throw error;
-        await activateAXNode(tabId, sendButton);
-        const acknowledgement = await waitForSubmissionAcknowledgement(
-          tabId,
-          state.binding.operationId,
-          prompt,
+        const detail = sendButton
+          ? 'accessible send control was present but did not produce an acknowledged submission'
+          : 'no accessible send control was exposed';
+        throw new Error(
+          'PASI_NATIVE: prompt submission not acknowledged after CDP input; ' + detail
         );
-        return {
-          submitted: true,
-          acknowledged: true,
-          acknowledgementSource: acknowledgement.source,
-          operationId: state.binding.operationId,
-          controllerId: state.binding.controllerId,
-          submissionMethod: 'cdp_accessibility_send_button',
-          targetKind: target.kind,
-          submittedAtMs: submittedAt,
-          insertedAtMs: insertedAt,
-          enterDispatchedAtMs: now()
-        };
       }
     }
 

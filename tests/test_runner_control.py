@@ -320,17 +320,14 @@ def test_load_runner_state_returns_profile_isolated_views(monkeypatch, tmp_path)
     long_state.parent.mkdir(parents=True)
     m1_state.write_text(
         '{"status":"running","runner_profile":"m1","execution_mode":"supervised_m1",'
-        '"completed_operations":1,"target_operations":20}
-',
+        '"completed_operations":1,"target_operations":20}\n',
         encoding="utf-8",
     )
     long_state.write_text(
         '{"status":"failed","runner_profile":"168h","execution_mode":"manual",'
-        '"error":"RuntimeError: acceptance worktree is not clean"}
-',
+        '"error":"RuntimeError: acceptance worktree is not clean"}\n',
         encoding="utf-8",
     )
-    original = bridge.runner_state_path
     monkeypatch.setattr(
         bridge,
         "runner_state_path",

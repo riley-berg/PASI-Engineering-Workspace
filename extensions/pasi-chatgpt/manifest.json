@@ -57,7 +57,7 @@
   "commands": {
     "pasi-run-next": {
       "suggested_key": {
-        "default": "Alt+Shift+P"
+        "default": "Ctrl+Space"
       },
       "description": "Run exactly one queued PASI operation"
     }

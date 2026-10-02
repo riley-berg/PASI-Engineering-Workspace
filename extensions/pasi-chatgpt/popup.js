@@ -598,6 +598,8 @@
 
   async function render() {
     try {
+      await applyTheme();
+
       const [activeResult, runnerState, selectedProfile] = await Promise.all([
         send(TYPES.active),
         getRunnerState(),
@@ -621,8 +623,6 @@
       if (idle) {
         idle.hidden = runnerSupported || userscriptsMatched;
       }
-
-      await applyTheme();
 
       setRunnerSelection(selectedProfile);
 

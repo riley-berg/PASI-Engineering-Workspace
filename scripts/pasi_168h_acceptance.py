@@ -404,7 +404,17 @@ def main() -> int:
     })
 
     while utcnow() < deadline:
-        pending = [task for task in all_tasks() if not task.checked]
+        try:
+            pending = [task for task in all_tasks() if not task.checked]
+        except Exception as exc:
+            record_initialization_failure(
+                run_id,
+                worktree,
+                args.branch,
+                "task_discovery",
+                exc,
+            )
+            return 1
         if not pending:
             write_state({
                 "run_id": run_id, "repo": REPO, "branch": args.branch,

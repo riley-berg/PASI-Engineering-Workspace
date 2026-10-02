@@ -36,6 +36,9 @@ function fakeDebugger() {
     sendCommand(_debuggee, method, params, callback) {
       commands.push({method, params});
       if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus') return callback({});
+      if (method === 'DOM.getBoxModel') {
+        return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
+      }
       if (method === 'Accessibility.getFullAXTree') {
         return callback({
           nodes: [{

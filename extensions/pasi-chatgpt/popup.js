@@ -157,6 +157,13 @@
     }
   }
 
+  function setSelectedRunnerCard(profile) {
+    const normalized = normalizeProfile(profile);
+    for (const card of document.querySelectorAll("#runnerCards .runner-card")) {
+      card.classList.toggle("selected", card.dataset.profile === normalized);
+    }
+  }
+
   function closeRunnerPicker({restoreFocus = false} = {}) {
     const trigger = $("runnerSelect");
     const menu = $("runnerSelectMenu");
@@ -186,8 +193,8 @@
     const normalized = normalizeProfile(profile);
     await setProfile(normalized);
     setRunnerSelection(normalized);
+    setSelectedRunnerCard(normalized);
     closeRunnerPicker({restoreFocus: true});
-    await render();
   }
 
   function initializeRunnerPicker() {

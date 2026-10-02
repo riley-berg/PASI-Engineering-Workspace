@@ -26,3 +26,5 @@ jobs:
           node-version: '22'
       - name: Frontend tests
         run: node --test web/app.test.js
+      - name: Extension tests
+        run: node --test extensions/pasi-chatgpt/src/test_*.cjs

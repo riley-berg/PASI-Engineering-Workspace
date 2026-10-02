@@ -123,11 +123,13 @@
     await chrome.storage.local.set({"pasi.runner.profile": profile});
   }
 
-  function runnerIsRunning(state) {
-    return state?.available === true && state?.status === "running";
+  function runnerIsActive(state) {
+    return state?.available === true && (state?.status === "starting" || state?.status === "running");
   }
 
   function activeProfileForState(state) {
+    const explicit = String(state?.runner_profile || "");
+    if (explicit === "m1" || explicit === "168h") return explicit;
     const mode = String(state?.execution_mode || "");
     if (mode === "supervised_m1") return "m1";
     if (mode === "supervised_168h") return "168h";
@@ -136,32 +138,34 @@
 
   function runnerStatusLabel(state, profileId) {
     if (!state?.available) return "Unavailable";
-    if (runnerIsRunning(state)) {
+    if (state.status === "starting") {
+      return activeProfileForState(state) === profileId ? "Starting" : "Another runner active";
+    }
+    if (state.status === "running") {
       return activeProfileForState(state) === profileId ? "Running" : "Another runner active";
     }
-    if (state.status === "paused") return "Paused";
+    if (state.status === "paused") return "Stopped";
     if (state.status === "failed") return "Failed";
-    if (state.status === "completed") return "Completed";
-    return "Ready";
+    if (state.status === "completed" || state.status === "roadmap_complete" || state.status === "deadline_reached") return "Completed";
+    return "Stopped";
   }
 
   function runnerSummary(state, profileId) {
     const status = runnerStatusLabel(state, profileId);
+    if (status === "Starting") return "Starting runner…";
     if (status === "Running") {
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
       if (Number.isFinite(completed) && Number.isFinite(target) && target > 0) {
         return String(completed) + " / " + String(target) + " operations complete";
       }
-      return "Supervised runner is active.";
+      return "Runner is active.";
     }
-    if (status === "Another runner active") {
-      return "Pause the active runner before starting this profile.";
-    }
+    if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
-    if (status === "Paused") return "Runner is paused and can be started again.";
+    if (status === "Stopped") return "Not running.";
     if (status === "Failed") return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
-    return "Ready to execute.";
+    return "";
   }
 
   async function waitForRunnerState(profileId, action, timeoutMs = 5000) {
@@ -170,7 +174,7 @@
 
     while (Date.now() < deadline) {
       const activeProfile = activeProfileForState(state);
-      const running = runnerIsRunning(state);
+      const running = runnerIsActive(state);
 
       if (action === "start") {
         if (running && activeProfile === profileId) return state;
@@ -190,7 +194,7 @@
     const action = requestedAction === "stop" ? "stop" : "start";
     const currentState = await getRunnerState();
     const activeProfile = activeProfileForState(currentState);
-    const running = runnerIsRunning(currentState);
+    const running = runnerIsActive(currentState);
 
     if (action === "start" && running) {
       if (activeProfile && activeProfile !== profileId) {
@@ -303,9 +307,9 @@
     const toggle = document.createElement("button");
     toggle.className = "btn btn-primary";
     toggle.type = "button";
-    const runningThisProfile = runnerIsRunning(state) && activeProfileForState(state) === profileId;
+    const runningThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
     toggle.textContent = runningThisProfile ? "Stop" : "Start";
-    toggle.disabled = runnerIsRunning(state) && activeProfileForState(state) !== profileId;
+    toggle.disabled = runnerIsActive(state) && activeProfileForState(state) !== profileId;
 
     toggle.onclick = async () => {
       toggle.disabled = true;

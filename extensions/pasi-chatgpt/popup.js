@@ -589,12 +589,15 @@
   async function toggleTheme() {
     const light = !document.documentElement.classList.contains("light-theme");
     const theme = light ? "light" : "dark";
-    setLocalTheme(theme);
-    document.documentElement.classList.toggle("light-theme", light);
+    document.documentElement.setAttribute("data-popup-paint-pending", "true");
 
-    await chrome.storage.local.set({"pasi.popup.theme": theme});
-
-    setThemeUi(light);
+    try {
+      setLocalTheme(theme);
+      document.documentElement.classList.toggle("light-theme", light);
+      await chrome.storage.local.set({"pasi.popup.theme": theme});
+    } finally {
+      setThemeUi(light);
+    }
   }
 
   async function render() {

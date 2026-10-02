@@ -284,7 +284,7 @@ html.light-theme body {
 
 .runner-card {
   padding: 11px;
-  transition: border-color .15s, box-shadow .15s, background-color .15s;
+  transition: border-color .15s, box-shadow .15s;
 }
 
 .runner-card.selected {

@@ -55,13 +55,13 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
   assert.match(popupCss, /--bg-main:\s*#FAF8F5/);
-  assert.match(popupCss, /--bg-card:\s*#EAE4DA/);
-  assert.match(popupCss, /--text-primary:\s*#111215/);
-  assert.match(popupCss, /--text-secondary:\s*#423731/);
-  assert.match(popupCss, /--text-muted:\s*#665953/);
-  assert.match(popupCss, /--btn-primary:\s*#1A1B20/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#2C2E35/);
-  assert.match(popupCss, /--btn-secondary:\s*#F2EEE8/);
+  assert.match(popupCss, /--bg-card:\s*#FFFFFF/);
+  assert.match(popupCss, /--text-primary:\s*#1A1B20/);
+  assert.match(popupCss, /--text-secondary:\s*#707174/);
+  assert.match(popupCss, /--text-muted:\s*#707174/);
+  assert.match(popupCss, /--btn-primary:\s*#45464A/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#333438/);
+  assert.match(popupCss, /--btn-secondary:\s*#FFFFFF/);
   assert.doesNotMatch(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
@@ -72,14 +72,17 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /#runnerSelect option:checked[\s\S]*background:\s*var\(--btn-primary\)/);
   assert.match(popupCss, /body\.light-theme #runnerSelect\s*\{[\s\S]*color-scheme:\s*light/);
   assert.match(popupCss, /body\.light-theme #runnerSelect option[\s\S]*background:\s*var\(--bg-card\)/);
-  assert.match(popupCss, /--status-badge-bg:\s*rgba\(26, 27, 32/);
-  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(26, 27, 32/);
-  assert.match(popupCss, /--status-badge-text:\s*#1A1B20/);
+  assert.match(popupCss, /--status-badge-bg:\s*rgba\(69, 70, 74/);
+  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(69, 70, 74/);
+  assert.match(popupCss, /--status-badge-text:\s*#45464A/);
   assert.match(popupCss, /--border-color:\s*#DCD4C7/);
   assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
-  assert.match(popupCss, /--idle-bg:\s*rgba\(234, 228, 218/);
+  assert.match(popupCss, /--idle-bg:\s*rgba\(255, 255, 255/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
+  assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
+  assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
+  assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#1A1B20/);
 });
 
 test("popup islands stay inside the compact popup width", () => {

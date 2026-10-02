@@ -89,6 +89,15 @@ def test_chat_only_creates_replacement_for_context_exhaustion():
     }) == "blocked"
 
 
+def test_168h_acceptance_publishes_supervised_execution_mode():
+    source = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert '"execution_mode": "supervised_168h"' in source
+    assert 'runner.pid' in source
+    assert 'pasi_168h_acceptance.py' in Path(
+        Path(acceptance.__file__).parents[1] / "automation" / "orchestrator" / "bridge.py"
+    ).read_text(encoding="utf-8")
+
+
 def test_chat_session_identity_is_persisted_for_idempotent_restart():
     from scripts import pasi_chat as chat
 

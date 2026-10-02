@@ -29,3 +29,40 @@ def test_chat_operation_still_produces_canonical_operation_state():
     assert payload["operation_id"] == "op-live"
     assert payload["operation_state"]["operation_id"] == "op-live"
     assert payload["operation_state"]["operation_type"] == "prompt"
+
+def test_state_manager_exposes_only_live_bridge_state_api():
+    from automation.orchestrator.state import StateManager
+
+    manager = StateManager(ROOT / ".tmp-legacy-cleanup-state")
+    assert hasattr(manager, "load_queue")
+    assert hasattr(manager, "save_queue")
+    assert hasattr(manager, "save_terminal_response")
+    assert hasattr(manager, "load_terminal_response")
+    assert hasattr(manager, "prune_terminal_responses")
+    for retired in (
+        "load_project_state",
+        "save_project_state",
+        "load_current_task",
+        "save_current_task",
+        "load_feature_status",
+        "save_feature_status",
+        "save_retry_state",
+        "load_retry_state",
+        "save_test_results",
+        "save_browser_results",
+        "save_browser_response",
+        "save_browser_health",
+        "load_browser_health",
+        "save_browser_state",
+        "load_browser_state",
+        "save_context_package",
+        "load_context_package",
+        "save_research_state",
+        "load_research_state",
+        "save_execution_result",
+        "load_execution_result",
+        "load_browser_results",
+        "load_browser_response",
+        "save_handoff",
+    ):
+        assert not hasattr(manager, retired), retired

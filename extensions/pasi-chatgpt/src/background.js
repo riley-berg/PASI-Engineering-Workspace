@@ -147,6 +147,7 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
     const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
     let bridgeRetryMs = 250;
     while (true) {
+      if (!(await supervisedExecutionAuthorized())) return false;
       if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),

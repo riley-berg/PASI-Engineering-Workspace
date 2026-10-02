@@ -101,7 +101,7 @@ test("native userscript runtime is the replacement for the removed page manager 
   );
   const extensionSource = fs
     .readdirSync(path.join(ROOT, "src"))
-    .filter((file) => /\\.(?:js|cjs|mjs|d\\.ts)$/.test(file))
+    .filter((file) => /\.(?:js|cjs|mjs|d\.ts)$/.test(file))
     .map((file) => fs.readFileSync(path.join(ROOT, "src", file), "utf8"))
     .join("\n");
 

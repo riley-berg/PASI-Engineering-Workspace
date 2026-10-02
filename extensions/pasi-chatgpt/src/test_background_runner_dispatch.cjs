@@ -17,7 +17,7 @@ test("background keeps the dispatcher dormant until a live supervised runner exi
   assert.match(background, /setTimeout\(resolve, 500\)/);
   assert.match(background, /waitForNextOperationForController\\(tabId, waitMs = 3000\\)/);
   assert.doesNotMatch(background, /waitForSupervisedRunnerReady\(/);
-  assert.match(background, /ensureSupervisedExecutionWaiter\(tabId, controllerIdForTab\(tabId\)\);/);
+  assert.match(background, /ensureSupervisedExecutionWaiter\\(tabId\\);/);
 });
 
 test("background accepts the long-poll query on the bridge route", () => {

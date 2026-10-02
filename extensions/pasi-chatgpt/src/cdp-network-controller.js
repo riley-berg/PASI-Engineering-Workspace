@@ -266,7 +266,17 @@
       ? markers.filter((marker) => typeof marker === 'string' && marker.trim()).map((marker) => marker.trim())
       : [];
     if (!configured.length) return true;
-    const lines = String(responseText).split(/\r?\n/).map((line) => line.trim());
+    const lines = [];
+    let inFence = false;
+    for (const rawLine of String(responseText).split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (/^(?:```|~~~)/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence || line.startsWith('>')) continue;
+      lines.push(line);
+    }
     return configured.some((marker) => lines.some((line) => line === marker || line.startsWith(marker + ':')));
   }
 

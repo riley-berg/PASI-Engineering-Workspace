@@ -30,6 +30,9 @@ body {
   --badge-m1: #604830;
   --badge-long: #604830;
   --status-ready: #B59B7D;
+  --status-badge-bg: rgba(96, 72, 48, .18);
+  --status-badge-active-bg: rgba(96, 72, 48, .26);
+  --status-badge-text: #EADBCB;
   --danger-bg: rgba(96, 72, 48, .16);
   --danger-text: #EADBCB;
   --idle-bg: rgba(26, 29, 30, .72);
@@ -38,9 +41,9 @@ body {
 
 body.light-theme {
   color-scheme: light;
-  --bg-main: #F6F1EA;
+  --bg-main: #FAF9F6;
   --bg-card: #FFFFFF;
-  --border-color: #D8CEC2;
+  --border-color: #D8D0C6;
   --text-primary: #1A1D1E;
   --text-secondary: #40372F;
   --text-muted: #6E6258;
@@ -51,6 +54,9 @@ body.light-theme {
   --badge-m1: #604830;
   --badge-long: #604830;
   --status-ready: #604830;
+  --status-badge-bg: rgba(96, 72, 48, .10);
+  --status-badge-active-bg: rgba(96, 72, 48, .16);
+  --status-badge-text: #604830;
   --danger-bg: rgba(96, 72, 48, .08);
   --danger-text: #3A3028;
   --idle-bg: rgba(216, 206, 194, .32);
@@ -87,14 +93,14 @@ select {
 .status-badge {
   padding: 2px 6px;
   border-radius: 4px;
-  background: rgba(16, 185, 129, .14);
-  color: var(--status-ready);
+  background: var(--status-badge-bg);
+  color: var(--status-badge-text);
   font-size: 10px;
   font-weight: 700;
 }
 
 .status-badge.active {
-  background: rgba(16, 185, 129, .18);
+  background: var(--status-badge-active-bg);
 }
 
 .theme-toggle {
@@ -389,7 +395,7 @@ select {
 
 .warn {
   margin-top: 7px;
-  color: #d97706;
+  color: var(--btn-primary);
   font-size: 9px;
 }
 

@@ -548,9 +548,10 @@
   }
 
   function applyThemeDom(light) {
-    document.documentElement.classList.toggle("light-theme", light);
-    document.documentElement.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
-    document.documentElement.style.colorScheme = light ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.toggle("light-theme", light);
+    root.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
+    root.style.colorScheme = light ? "light" : "dark";
 
     const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
     if (colorSchemeMeta) {
@@ -561,16 +562,6 @@
     button.textContent = light ? "☀️" : "🌙";
     button.title = light ? "Switch to dark theme" : "Switch to light theme";
     button.setAttribute("aria-label", button.title);
-  }
-
-  function releaseThemePaint() {
-    document.documentElement.removeAttribute("data-theme-pending");
-    document.documentElement.removeAttribute("data-popup-paint-pending");
-  }
-
-  function setThemeUi(light) {
-    applyThemeDom(light);
-    releaseThemePaint();
   }
 
   function getLocalTheme() {
@@ -598,36 +589,20 @@
       setLocalTheme(theme);
     }
 
-    setThemeUi(theme === "light");
+    applyThemeDom(theme === "light");
   }
 
   async function toggleTheme() {
     const light = !document.documentElement.classList.contains("light-theme");
     const theme = light ? "light" : "dark";
 
-    const updateTheme = async () => {
-      setLocalTheme(theme);
-      applyThemeDom(light);
-      await chrome.storage.local.set({"pasi.popup.theme": theme});
-    };
+    setLocalTheme(theme);
+    applyThemeDom(light);
 
-    if (typeof document.startViewTransition === "function") {
-      const transition = document.startViewTransition(updateTheme);
-      try {
-        await transition.finished;
-      } catch (_) {
-        // The theme update itself already completed; a failed animation is harmless.
-      } finally {
-        releaseThemePaint();
-      }
-      return;
-    }
-
-    document.documentElement.setAttribute("data-popup-paint-pending", "true");
     try {
-      await updateTheme();
-    } finally {
-      setThemeUi(light);
+      await chrome.storage.local.set({"pasi.popup.theme": theme});
+    } catch (_) {
+      // localStorage has already persisted the theme for the next popup paint.
     }
   }
 

@@ -8,6 +8,8 @@ const popupHtml = fs.readFileSync(path.join(ROOT, "popup.html"), "utf8");
 const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
 const popupJs = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 const themeInit = fs.readFileSync(path.join(ROOT, "theme-init.js"), "utf8");
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
+const backgroundJs = fs.readFileSync(path.join(ROOT, "src", "background.js"), "utf8");
 
 test("popup keeps the page-not-authorized warning separate from runner ready state", () => {
   assert.match(popupHtml, /id="idleState"[^>]*class="idle-state"[^>]*hidden/);
@@ -127,6 +129,37 @@ test("runner cards do not animate theme surface or border changes", () => {
   const runnerCardRule = popupCss.slice(runnerCardStart, runnerCardEnd);
   assert.match(runnerCardRule, /transition:\s*box-shadow\s*\.15s/);
   assert.doesNotMatch(runnerCardRule, /background-color|border-color/);
+});
+
+test("dashboard opens as a bounded extension window instead of a browser action popup", () => {
+  assert.equal(manifest.action.default_popup, undefined);
+  assert.ok(manifest.permissions.includes("system.display"));
+  assert.match(backgroundJs, /chrome\.action\?\.onClicked\?\.addListener/);
+  assert.match(backgroundJs, /chrome\.windows\.create\(\{[\s\S]*type: 'popup'/);
+  assert.match(backgroundJs, /chrome\.system\.display\.getInfo\(\)/);
+  assert.match(backgroundJs, /state === 'fullscreen'/);
+});
+
+test("runner readiness labels are operational states, not static ready claims", () => {
+  assert.doesNotMatch(popupJs, /return "Ready";/);
+  assert.doesNotMatch(popupJs, /Ready to execute/);
+  assert.match(popupJs, /status === "starting"/);
+  assert.match(popupJs, /return "Stopped";/);
+  assert.match(popupJs, /stateLabelText === "Starting" \? "starting"/);
+});
+
+test("active runner cards expose Stop immediately during startup", () => {
+  assert.match(popupJs, /function runnerIsActive\(state\)/);
+  assert.match(popupJs, /status === "starting" \|\| state\?\.status === "running"/);
+  assert.match(popupJs, /const activeThisProfile = runnerIsActive\(state\)/);
+  assert.match(popupJs, /toggle\.textContent = activeThisProfile \? "Stop" : "Start";/);
+});
+
+test("light and dark primary controls use distinct high-contrast palettes", () => {
+  assert.match(popupCss, /--btn-primary:\s*#E7E2DA/);
+  assert.match(popupCss, /--btn-primary-text:\s*#17191E/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#24272D/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-text:\s*#FFFFFF/);
 });
 
 test("runner controls use explicit start or stop actions", () => {

@@ -379,5 +379,3 @@ test("popup refreshes live runner state while it remains open", () => {
   assert.match(timerSource, /\}, 750\);/);
   assert.match(popupJs, /clearInterval\(runnerRefreshTimer\)/);
 });
-
-});

@@ -204,6 +204,13 @@ test("runner controls use explicit start or stop actions", () => {
   );
 });
 
+test("runner controls display Start when stopped and Stop when running", () => {
+  assert.match(
+    popupJs,
+    /toggle\\.textContent = runningThisProfile \\? "Stop" : "Start";/
+  );
+});
+
 test("runner action status survives the post-action render", () => {
   assert.match(
     popupJs,

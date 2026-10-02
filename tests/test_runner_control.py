@@ -1,3 +1,4 @@
+import json
 import subprocess
 
 from automation.orchestrator import bridge
@@ -111,3 +112,60 @@ def test_load_runner_state_preserves_failure_details(monkeypatch, tmp_path):
     assert result["status"] == "failed"
     assert result["error"] == "M1 startup failed"
     assert result["failed_at"].startswith("2026-10-02T00:00:00")
+
+
+def test_runner_python_prefers_workspace_venv(monkeypatch, tmp_path):
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python.chmod(0o755)
+    monkeypatch.setattr(bridge.CONFIG, "project_root", tmp_path)
+
+    assert bridge.runner_python() == str(venv_python)
+
+
+def test_load_runner_state_marks_dead_starting_runner_failed(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"starting","runner_profile":"m1","execution_mode":"supervised_m1"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+
+    result = bridge.load_runner_state()
+
+    assert result["status"] == "failed"
+    assert result["error"] == "runner exited before initialization completed"
+
+
+def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
+    script = tmp_path / "m1.py"
+    script.write_text("print('stub')\n", encoding="utf-8")
+    executable = tmp_path / "python"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", tmp_path / "runtime" / "state.json")
+    monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(bridge, "RUNNER_PROFILES", {"m1": (str(executable), str(script))})
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+
+    class FakeProcess:
+        pid = 4242
+
+    def fake_popen(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", fake_popen)
+
+    result = bridge._start_runner("m1")
+    state = json.loads((tmp_path / "runtime" / "state.json").read_text(encoding="utf-8"))
+    pid = (tmp_path / "runtime" / "runner.pid").read_text(encoding="utf-8").strip()
+
+    assert result["accepted"] is True
+    assert state["runner_profile"] == "m1"
+    assert state["runner_pid"] == 4242
+    assert state["status"] == "starting"
+    assert pid == "4242"

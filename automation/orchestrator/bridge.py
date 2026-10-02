@@ -349,6 +349,9 @@ def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
     profile = str(
         payload.get("runner_profile") or payload.get("active_profile") or ""
     ).strip().casefold()
+    execution_mode = str(payload.get("execution_mode") or "").strip().casefold()
+    if not profile and execution_mode.startswith("supervised_"):
+        profile = execution_mode.removeprefix("supervised_")
     if profile not in RUNNER_PROFILES:
         return False
     profile_state = (

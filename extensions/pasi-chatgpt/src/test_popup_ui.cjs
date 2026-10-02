@@ -48,8 +48,8 @@ test("popup theme architecture has one synchronous initialization path", () => {
   assert.ok(popupHtml.includes('<meta name="color-scheme" content="dark light">'));
   assert.match(themeInit, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
   assert.match(themeInit, /root\.classList\.toggle\("light-theme"/);
-  assert.match(themeInit, /document\.documentElement\.style\.colorScheme/);
-  assert.match(themeInit, /document\.documentElement\.style\.backgroundColor/);
+  assert.match(themeInit, /root\.style\.colorScheme/);
+  assert.match(themeInit, /root\.style\.backgroundColor/);
   assert.doesNotMatch(themeInit, /data-theme-pending|data-popup-paint-pending/);
   assert.doesNotMatch(popupJs, /data-theme-pending|data-popup-paint-pending|startViewTransition/);
   assert.doesNotMatch(popupCss, /data-theme-pending|data-popup-paint-pending|::view-transition/);

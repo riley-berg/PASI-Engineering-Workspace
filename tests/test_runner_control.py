@@ -78,3 +78,19 @@ def test_explicit_start_never_becomes_stop(monkeypatch):
     assert result["accepted"] is False
     assert result["action"] == "start"
     assert result["reason"] == "runner already running"
+
+
+def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"running","execution_mode":"supervised_m1","completed_operations":2}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+
+    result = bridge.load_runner_state()
+
+    assert result["available"] is True
+    assert result["status"] == "running"
+    assert result["execution_mode"] == "supervised_m1"

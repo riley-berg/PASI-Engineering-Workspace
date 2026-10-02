@@ -277,7 +277,7 @@
     if (state.status === "paused") return "Paused";
     if (state.status === "failed") return "Failed";
     if (state.status === "completed") return "Completed";
-    return "Idle";
+    return "Ready";
   }
 
   function runnerSummary(state, profileId) {
@@ -381,6 +381,7 @@
       stateLabelText === "Paused" ? "paused" :
       stateLabelText === "Failed" ? "failed" :
       stateLabelText === "Completed" ? "completed" :
+      stateLabelText === "Ready" ? "ready" :
       "idle";
     statusText.className = "status-text " + stateClass;
 
@@ -393,7 +394,7 @@
     statusText.append(dot, label);
 
     const desc = document.createElement("div");
-    desc.className = "status-desc" + (stateLabelText === "Idle" ? " idle-summary" : "");
+    desc.className = "status-desc" + (stateLabelText === "Ready" ? " idle-summary" : "");
     desc.textContent = runnerSummary(state, profileId);
     body.append(statusText, desc);
 

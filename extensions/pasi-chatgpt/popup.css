@@ -42,8 +42,8 @@ body {
 body.light-theme {
   color-scheme: light;
   --bg-main: #FAF8F5;
-  --bg-card: #F2EEE8;
-  --border-color: #D9D4CD;
+  --bg-card: #EAE4DA;
+  --border-color: #DCD4C7;
   --text-primary: #111215;
   --text-secondary: #423731;
   --text-muted: #665953;
@@ -59,8 +59,8 @@ body.light-theme {
   --status-badge-text: #1A1B20;
   --danger-bg: rgba(26, 27, 32, .08);
   --danger-text: #111215;
-  --idle-bg: rgba(237, 234, 230, .86);
-  --idle-border: #D1CCC6;
+  --idle-bg: rgba(234, 228, 218, .92);
+  --idle-border: #DCD4C7;
 }
 
 button,
@@ -148,12 +148,13 @@ select {
 }
 
 #runnerSelect:focus {
-  border-color: var(--btn-primary);
-  box-shadow: 0 0 0 2px rgba(69, 70, 74, .18);
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px rgba(244, 241, 236, .28);
 }
 
 body.light-theme #runnerSelect:focus {
-  box-shadow: 0 0 0 2px rgba(26, 27, 32, .18);
+  border-color: #45464A;
+  box-shadow: 0 0 0 2px rgba(69, 70, 74, .24);
 }
 
 .status {
@@ -338,11 +339,22 @@ body.light-theme .status-dot.completed {
 
 .btn-primary {
   background: var(--btn-primary);
-  color: #fff;
+  color: #FFFFFF;
 }
 
 body.light-theme .btn-primary {
-  color: #FAF8F5;
+  color: #FFFFFF;
+}
+
+.btn:focus-visible,
+.theme-toggle:focus-visible {
+  outline: 1px solid #F4F1EC;
+  outline-offset: 1px;
+}
+
+body.light-theme .btn:focus-visible,
+body.light-theme .theme-toggle:focus-visible {
+  outline-color: #45464A;
 }
 
 .btn-primary:hover:not(:disabled) {

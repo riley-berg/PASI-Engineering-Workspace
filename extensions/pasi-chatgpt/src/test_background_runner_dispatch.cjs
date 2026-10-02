@@ -17,6 +17,6 @@ test("background has a live operation waiter for the ChatGPT tab", () => {
 test("background accepts the long-poll query on the bridge route", () => {
   assert.match(
     background,
-    /BRIDGE_NEXT_OPERATION_RE = \/\^\/next-operation\\\?controller_id=.*wait_ms/
+    /bridgeJson\(\s*['"]\/next-operation\?controller_id=['"]\s*\+\s*encodeURIComponent\(controllerId\)\s*\+\s*['"]&wait_ms=['"]\s*\+\s*String\(Math\.round\(boundedWaitMs\)\)/
   );
 });

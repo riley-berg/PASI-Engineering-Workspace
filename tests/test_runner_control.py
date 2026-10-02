@@ -68,3 +68,13 @@ def test_github_token_accepts_projects_and_gh_names(monkeypatch):
     monkeypatch.setenv("GH_TOKEN", "gh-token")
 
     assert bridge._github_token() == "projects-token"
+
+
+def test_explicit_start_never_becomes_stop(monkeypatch):
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+
+    result = bridge.request_runner_control("start", "m1")
+
+    assert result["accepted"] is False
+    assert result["action"] == "start"
+    assert result["reason"] == "runner already running"

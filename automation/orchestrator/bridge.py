@@ -150,15 +150,22 @@ def runner_process_is_alive() -> bool:
             cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
         except OSError:
             continue
-        if "pasi_168h_acceptance.py" in cmdline:
+        if any(
+            script_name in cmdline
+            for script_name in (
+                "pasi_168h_acceptance.py",
+                "pasi_m1_cdp_chain.py",
+            )
+        ):
             return True
     return False
 
 
 def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
+    execution_mode = str(payload.get("execution_mode") or "").strip()
     return bool(
         payload.get("status") == "running"
-        and payload.get("execution_mode") == "supervised_168h"
+        and execution_mode in {"supervised_168h", "supervised_m1"}
         and runner_process_is_alive()
     )
 

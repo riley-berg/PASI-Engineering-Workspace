@@ -180,7 +180,11 @@ def request_runner_control(action: str) -> dict[str, Any]:
             cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
         except OSError:
             return {"accepted": False, "action": action, "reason": "runner process is no longer present"}
-        if "pasi_overnight_engine_v2.py" not in cmdline and "pasi_168h_supervisor.sh" not in cmdline:
+        if (
+            "pasi_overnight_engine_v2.py" not in cmdline
+            and "pasi_168h_supervisor.sh" not in cmdline
+            and "pasi_168h_acceptance.py" not in cmdline
+        ):
             return {"accepted": False, "action": action, "reason": "runner pid does not identify as PASI"}
         try:
             os.kill(pid, 15)

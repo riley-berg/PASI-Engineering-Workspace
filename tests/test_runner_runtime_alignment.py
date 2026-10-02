@@ -17,9 +17,9 @@ def test_runner_start_publishes_shared_runtime_directory(monkeypatch, tmp_path):
         {"168h": (str(executable), str(script))},
     )
     monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", runtime)
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", runtime / "state.json")
+    monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", runtime)
     monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda profile=None: False)
     monkeypatch.setattr(bridge, "_github_token", lambda: "test-token")
 
     class FakeProcess:

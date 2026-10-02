@@ -234,7 +234,7 @@ test("runner picker is absent because each runner card owns its own control", ()
 });
 
 test("runner cards no longer depend on a selected runner", () => {
-  assert.match(popupJs, /function createRunnerCard\(profileId, state\)/);
+  assert.match(popupJs, /function createRunnerCard\\(profileId, state, aggregateState = state\\)/);
   assert.match(popupJs, /function renderRunnerDashboard\(state, visible\)/);
   assert.doesNotMatch(popupJs, /selectedProfile/);
 });

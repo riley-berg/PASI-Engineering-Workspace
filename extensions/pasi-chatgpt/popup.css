@@ -1,13 +1,5 @@
 [hidden] { display: none !important; }
 
-html {
-  background: #0D0E11;
-}
-
-html.light-theme {
-  background: #FAF8F5;
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -84,12 +76,6 @@ html.light-theme body {
   --danger-text: #1A1B20;
   --idle-bg: rgba(255, 255, 255, .95);
   --idle-border: #DCD4C7;
-}
-
-button {
-  font: inherit;
-  -webkit-appearance: none;
-  appearance: none;
 }
 
 .popup-header {
@@ -236,7 +222,6 @@ button {
 .runner-select-option:focus-visible {
   background: var(--runner-option-hover);
   outline: 1px solid var(--runner-option-outline);
-  box-shadow: none;
 }
 
 .runner-select-option[aria-selected="true"] {
@@ -248,7 +233,6 @@ button {
 .runner-select-option[aria-selected="true"]:focus-visible {
   background: var(--runner-option-selected);
   outline: none;
-  box-shadow: none;
 }
 
 .runner-select-option[aria-selected="true"]::after {
@@ -400,15 +384,7 @@ html.light-theme body .runner-card.selected {
   animation: pasi-runner-pulse 1.4s infinite;
 }
 
-html.light-theme body .status-dot.running {
-  background: var(--status-running, #45464A);
-}
-
 .status-dot.paused {
-  background: var(--status-paused);
-}
-
-html.light-theme body .status-dot.paused {
   background: var(--status-paused);
 }
 
@@ -416,15 +392,7 @@ html.light-theme body .status-dot.paused {
   background: var(--status-failed);
 }
 
-html.light-theme body .status-dot.failed {
-  background: var(--status-failed);
-}
-
 .status-dot.completed {
-  background: var(--status-completed);
-}
-
-html.light-theme body .status-dot.completed {
   background: var(--status-completed);
 }
 
@@ -453,10 +421,6 @@ html.light-theme body .status-dot.completed {
 
 .btn-primary {
   background: var(--btn-primary);
-  color: #FFFFFF;
-}
-
-html.light-theme body .btn-primary {
   color: #FFFFFF;
 }
 
@@ -552,10 +516,6 @@ html.light-theme body .theme-toggle:focus-visible {
   margin-top: 7px;
   color: var(--warning-text);
   font-size: 9px;
-}
-
-html.light-theme body .warn {
-  color: var(--warning-text);
 }
 
 .idle-state {

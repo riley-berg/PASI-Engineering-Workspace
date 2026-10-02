@@ -65,7 +65,10 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--btn-secondary:\s*#FFFFFF/);
   assert.doesNotMatch(popupCss, /html\.light-theme body[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /html\.light-theme body[\s\S]*\.runner-card\.selected/);
-  assert.match(popupCss, /color-scheme:\s*light/);\n  assert.match(popupCss, /html\s*\{[\s\S]*background:\s*#0D0E11/);\n  assert.match(popupCss, /html\.light-theme\s*\{[\s\S]*background:\s*#FAF8F5/);\n  assert.match(popupCss, /transition:\s*none/);
+  assert.match(popupCss, /color-scheme:\s*light/);
+  assert.match(popupCss, /html\s*\{[\s\S]*background:\s*#0D0E11/);
+  assert.match(popupCss, /html\.light-theme\s*\{[\s\S]*background:\s*#FAF8F5/);
+  assert.match(popupCss, /transition:\s*none/);
   assert.match(popupCss, /\.runner-select[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /\.runner-select[\s\S]*color:\s*var\(--text-primary\)/);
 
@@ -91,7 +94,8 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
   assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);
-  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);\n  assert.doesNotMatch(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);
+  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
+  assert.doesNotMatch(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);
   assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);
   assert.match(popupCss, /--status-idle-summary:\s*#707174/);
   assert.match(popupCss, /\.status-dot\.idle\s*\{\s*display:\s*none/);
@@ -141,7 +145,8 @@ test("popup uses a custom themed runner picker with no native select styling", (
 
 test("popup islands stay inside the compact popup width", () => {
   assert.match(popupCss, /width:\s*360px/);
-  assert.match(popupCss, /\.runner-card,\n\.card[\s\S]*width:\s*100%/);
+  assert.match(popupCss, /\.runner-card,
+\.card[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.runners-list[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.card-actions[\s\S]*min-width:\s*0/);
   assert.match(popupCss, /\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);

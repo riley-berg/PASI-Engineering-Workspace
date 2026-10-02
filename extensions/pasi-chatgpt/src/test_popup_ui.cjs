@@ -319,6 +319,13 @@ test("popup surfaces M1 dispatch wait diagnostics", () => {
 });
 
 
+test("popup shows M1 progress from zero before the first dispatch", () => {
+  assert.match(popupJs, /const hasProgress = Number\.isFinite\(completed\) && Number\.isFinite\(target\) && target > 0;/);
+  assert.match(popupJs, /ready_for_first_operation[\s\S]*progress \+ " — Ready for the first M1 operation\."/);
+  assert.match(popupJs, /progress = String\(completed\) \+ " \/ " \+ String\(target\) \+ " operations complete"/);
+});
+
+
 test("runner authorization follows the live active ChatGPT tab", () => {
   assert.match(
     popupJs,

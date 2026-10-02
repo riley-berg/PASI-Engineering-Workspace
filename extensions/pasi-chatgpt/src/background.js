@@ -620,7 +620,7 @@ chrome.commands?.onCommand?.addListener((command) => {
       action: 'toggle',
       profile
     }, 10000);
-    if (result.ok && profile === 'm1') {
+    if (result.ok) {
       await attachExistingChatTabs();
     }
   })();

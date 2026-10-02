@@ -471,7 +471,7 @@ const BRIDGE_ROUTES = new Set([
   'GET /next-operation'
 ]);
 const BRIDGE_OPERATION_RE = /^\/operation\?operation_id=[^&]{1,200}$/;
-const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}$/;
+const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}(?:&wait_ms=\\d{1,5})?$/;
 
 async function bridgeToken(forceRefresh = false) {
   if (!forceRefresh && cachedBridgeToken) return cachedBridgeToken;

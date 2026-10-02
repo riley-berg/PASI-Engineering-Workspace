@@ -72,8 +72,8 @@ test("light theme overrides the complete popup surface palette", () => {
 
 
 
-  assert.match(popupCss, /--status-badge-bg:\s*rgba\(69, 70, 74/);
-  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(69, 70, 74/);
+  assert.match(popupCss, /--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
+  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
   assert.match(popupCss, /--status-badge-text:\s*#45464A/);
   assert.match(popupCss, /--border-color:\s*#DCD4C7/);
   assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
@@ -83,6 +83,10 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
+  assert.match(popupCss, /--status-ready:\s*#707174/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-ready:\s*#707174/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
 });
 
 test("popup uses a custom themed runner picker with no native select styling", () => {

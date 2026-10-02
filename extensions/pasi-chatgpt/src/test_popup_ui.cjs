@@ -145,8 +145,7 @@ test("popup uses a custom themed runner picker with no native select styling", (
 
 test("popup islands stay inside the compact popup width", () => {
   assert.match(popupCss, /width:\s*360px/);
-  assert.match(popupCss, /\.runner-card,
-\.card[\s\S]*width:\s*100%/);
+  assert.match(popupCss, /\.runner-card,\s*\.card[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.runners-list[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.card-actions[\s\S]*min-width:\s*0/);
   assert.match(popupCss, /\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);

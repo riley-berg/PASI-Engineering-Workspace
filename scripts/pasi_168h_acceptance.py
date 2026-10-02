@@ -98,10 +98,12 @@ def emit(event: dict) -> None:
 
 
 def runtime_state_dir() -> Path:
+    # Match the bridge's canonical default runtime location even when an older
+    # already-running bridge process did not inject PASI_RUNTIME_DIR.
     return Path(
         os.environ.get(
             "PASI_RUNTIME_DIR",
-            str(state_dir() / "runtime"),
+            str(Path.home() / ".pasi" / "overnight"),
         )
     ).expanduser().resolve()
 

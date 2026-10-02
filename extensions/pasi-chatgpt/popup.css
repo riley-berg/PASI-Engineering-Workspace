@@ -143,8 +143,30 @@ select {
   outline: none;
   background: var(--bg-card);
   color: var(--text-primary);
+  color-scheme: dark;
   font-size: 11px;
   cursor: pointer;
+}
+
+#runnerSelect option,
+#runnerSelect optgroup {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+#runnerSelect option:checked {
+  background: var(--btn-primary);
+  color: #FFFFFF;
+}
+
+body.light-theme #runnerSelect {
+  color-scheme: light;
+}
+
+body.light-theme #runnerSelect option,
+body.light-theme #runnerSelect optgroup {
+  background: var(--bg-card);
+  color: var(--text-primary);
 }
 
 #runnerSelect:focus {

@@ -810,6 +810,28 @@
       throw new Error('PASI_NATIVE: prompt submission not acknowledged');
     }
 
+    function findSendButtonAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const roles = new Set(['button']);
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!roles.has(role)) continue;
+        const disabled = axBooleanProperty(node, 'disabled');
+        if (disabled === true) continue;
+        const name = axName(node);
+        if (!/^(?:send|send message|send prompt|submit)$/i.test(name.trim())) continue;
+        const score = /^send(?: prompt| message)?$/i.test(name.trim()) ? 100 : 50;
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      return best;
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -846,23 +868,57 @@
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13
       });
-      const acknowledgement = await waitForSubmissionAcknowledgement(
-        tabId,
-        state.binding.operationId,
-        prompt,
-      );
-      return {
-        submitted: true,
-        acknowledged: true,
-        acknowledgementSource: acknowledgement.source,
-        operationId: state.binding.operationId,
-        controllerId: state.binding.controllerId,
-        submissionMethod: 'cdp_input',
-        targetKind: target.kind,
-        submittedAtMs: submittedAt,
-        insertedAtMs: insertedAt,
-        enterDispatchedAtMs: now()
-      };
+
+      try {
+        const acknowledgement = await waitForSubmissionAcknowledgement(
+          tabId,
+          state.binding.operationId,
+          prompt,
+        );
+        return {
+          submitted: true,
+          acknowledged: true,
+          acknowledgementSource: acknowledgement.source,
+          operationId: state.binding.operationId,
+          controllerId: state.binding.controllerId,
+          submissionMethod: 'cdp_input',
+          targetKind: target.kind,
+          submittedAtMs: submittedAt,
+          insertedAtMs: insertedAt,
+          enterDispatchedAtMs: now()
+        };
+      } catch (error) {
+        if (!String(error?.message || error).includes('prompt submission not acknowledged')) {
+          throw error;
+        }
+
+        // Some live ChatGPT composer variants accept text input but do not
+        // submit from a synthetic Enter event. Stay inside the CDP
+        // accessibility/network control plane and activate the exposed Send
+        // button as a bounded fallback. This remains observable through the
+        // same submission acknowledgement gate.
+        const nodes = await readAXTree(tabId);
+        const sendButton = findSendButtonAXNode(nodes);
+        if (!sendButton) throw error;
+        await activateAXNode(tabId, sendButton);
+        const acknowledgement = await waitForSubmissionAcknowledgement(
+          tabId,
+          state.binding.operationId,
+          prompt,
+        );
+        return {
+          submitted: true,
+          acknowledged: true,
+          acknowledgementSource: acknowledgement.source,
+          operationId: state.binding.operationId,
+          controllerId: state.binding.controllerId,
+          submissionMethod: 'cdp_accessibility_send_button',
+          targetKind: target.kind,
+          submittedAtMs: submittedAt,
+          insertedAtMs: insertedAt,
+          enterDispatchedAtMs: now()
+        };
+      }
     }
 
     function bindOperation({tabId, operationId, controllerId, prompt, completionMarkers, chatUrl}) {

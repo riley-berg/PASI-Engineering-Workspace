@@ -125,18 +125,25 @@ def load_runner_capabilities() -> dict[str, Any]:
     }
 
 def runner_process_is_alive() -> bool:
-    try:
-        raw_pid = (RUNNER_RUNTIME_DIR / "runner.pid").read_text(encoding="utf-8").strip()
-        pid = int(raw_pid)
-    except (OSError, ValueError):
-        return False
-    if pid <= 1:
-        return False
-    try:
-        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
-    except OSError:
-        return False
-    return "pasi_168h_acceptance.py" in cmdline
+    candidate_paths = (
+        RUNNER_RUNTIME_DIR / "runner.pid",
+        Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
+    )
+    for pid_path in candidate_paths:
+        try:
+            raw_pid = pid_path.read_text(encoding="utf-8").strip()
+            pid = int(raw_pid)
+        except (OSError, ValueError):
+            continue
+        if pid <= 1:
+            continue
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+        except OSError:
+            continue
+        if "pasi_168h_acceptance.py" in cmdline:
+            return True
+    return False
 
 
 def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:

@@ -299,3 +299,21 @@ test("popup control and text colors meet WCAG AA targets", () => {
   assert.ok(contrastRatio("#F5F7FA", "#15181D") >= 4.5);
   assert.ok(contrastRatio("#666E78", "#FFFFFF") >= 4.5);
 });
+
+
+test("popup scopes terminal runner diagnostics to the matching profile", () => {
+  assert.match(
+    popup,
+    /state\.status === "failed"[\s\S]*state\.runner_profile === profileId/
+  );
+  assert.match(
+    popup,
+    /state\.status === "completed"[\s\S]*state\.runner_profile === profileId/
+  );
+});
+
+test("popup surfaces M1 dispatch wait diagnostics", () => {
+  assert.match(popup, /waiting_for_cdp_dispatch/);
+  assert.match(popup, /Waiting for CDP dispatch/);
+  assert.match(popup, /current_operation_id/);
+});

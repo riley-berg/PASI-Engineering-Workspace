@@ -125,6 +125,7 @@ def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
 
     result = bridge.load_runner_state()
 

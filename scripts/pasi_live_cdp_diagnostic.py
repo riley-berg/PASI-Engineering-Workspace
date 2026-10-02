@@ -212,6 +212,11 @@ def make_probe_prompt(marker: str) -> str:
     )
 
 
+def diagnostic_response_matches_marker(response_text: object, marker: str) -> bool:
+    """Require the diagnostic response, after trimming outer whitespace, to equal the marker exactly."""
+    return isinstance(response_text, str) and response_text.strip() == marker
+
+
 def wait_until_status(
     transport: UrllibBridgeTransport,
     operation_id: str,
@@ -449,11 +454,17 @@ def main() -> int:
             {"operation": terminal},
         )
         require(
-            isinstance(terminal.get("response_text"), str)
-            and marker in str(terminal.get("response_text")),
+            diagnostic_response_matches_marker(terminal.get("response_text"), marker),
             "response_text",
-            "completed operation does not contain the diagnostic marker",
-            {"operation_id": operation_id, "response_text_available": terminal.get("response_text_available")},
+            "completed operation response does not exactly equal the diagnostic marker",
+            {
+                "operation_id": operation_id,
+                "response_text_available": terminal.get("response_text_available"),
+                "response_matches_marker": diagnostic_response_matches_marker(
+                    terminal.get("response_text"),
+                    marker,
+                ),
+            },
         )
         step_results.append({"ok": True, "step": "prompt_completion", "summary": "live operation completed with the expected response marker"})
 

@@ -8,6 +8,27 @@ from automation.orchestrator.bridge import BridgeState
 from automation.orchestrator.state import StateManager
 
 
+def test_supervised_execution_authorization_requires_live_acceptance_runner(monkeypatch):
+    from automation.orchestrator import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: True)
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_168h",
+    }) is True
+
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda: False)
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_168h",
+    }) is False
+
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "manual",
+    }) is False
+
+
 def test_wait_for_next_operation_wakes_when_runner_queues_after_response_processing(tmp_path: Path):
     state = StateManager(tmp_path / "state")
     bridge = BridgeState(state)

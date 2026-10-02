@@ -2621,18 +2621,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         recovery_context = payload.get("recovery_context")
         if recovery_context is not None:
-            recovery_context = self.bridge_state._normalize_recovery_context(
+            normalized_recovery_context = self.bridge_state._normalize_recovery_context(
                 recovery_context
             )
-            if recovery_context is None:
-                self._send_json(
-                    {
-                        "error":
-                            "recovery_context is invalid."
-                    },
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
+            if normalized_recovery_context is None:
+                # Network lifecycle observations already persist the request,
+                # classification, and reason as first-class CDP evidence.
+                # Older extension builds may also send those network fields in
+                # recovery_context; ignore that unsupported auxiliary payload
+                # rather than orphaning a terminal network failure in generating.
+                if failure_source == "network":
+                    recovery_context = None
+                else:
+                    self._send_json(
+                        {
+                            "error":
+                                "recovery_context is invalid."
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+            else:
+                recovery_context = normalized_recovery_context
 
         operation = (
             self.bridge_state.fail_operation(

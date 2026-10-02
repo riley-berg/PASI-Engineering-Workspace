@@ -256,46 +256,50 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
-test('CDP submit falls back to the accessible Send button when Enter is not accepted', async () => {
+test('CDP submit uses the accessible Send control before Enter fallback', async () => {
   const debuggerApi = fakeDebugger();
-  let sendActivated = false;
-  let composerReads = 0;
-  const prompt = '[PASI_OPERATION op-send-fallback]';
+  let sendClicked = false;
+  let axReads = 0;
+  const prompt = '[PASI_OPERATION op-send-button]';
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
 
   debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
     if (method === 'Accessibility.getFullAXTree') {
       this.commands.push({method, params});
-      composerReads += 1;
-      const currentValue = sendActivated ? '' : (composerReads === 1 ? '' : prompt);
-      const nodes = [{
-        nodeId: 'ax-composer',
-        backendDOMNodeId: 101,
-        role: {type: 'role', value: 'textbox'},
-        name: {type: 'computedString', value: 'Message'},
-        value: {type: 'string', value: currentValue},
-        ignored: false,
-        properties: [
-          {name: 'editable', value: {type: 'boolean', value: true}},
-          {name: 'multiline', value: {type: 'boolean', value: true}},
-          {name: 'focused', value: {type: 'boolean', value: composerReads > 0}}
+      axReads += 1;
+      return callback({
+        nodes: [
+          {
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 101,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: axReads === 1 ? '' : prompt},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}},
+              {name: 'focused', value: {type: 'boolean', value: axReads > 0}}
+            ]
+          },
+          {
+            nodeId: 'ax-send',
+            backendDOMNodeId: 202,
+            role: {type: 'role', value: 'button'},
+            name: {type: 'computedString', value: 'Send'},
+            ignored: false,
+            properties: [
+              {name: 'disabled', value: {type: 'boolean', value: false}}
+            ]
+          }
         ]
-      }];
-      if (!sendActivated && composerReads >= 2) {
-        nodes.push({
-          nodeId: 'ax-send',
-          backendDOMNodeId: 202,
-          role: {type: 'role', value: 'button'},
-          name: {type: 'computedString', value: 'Send'},
-          ignored: false,
-          properties: [{name: 'disabled', value: {type: 'boolean', value: false}}]
-        });
-      }
-      return callback({nodes});
+      });
     }
-
-    if (method === 'DOM.focus' && params?.backendNodeId === 202) {
-      sendActivated = true;
+    if (method === 'DOM.getBoxModel') {
+      return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
+    }
+    if (method === 'Input.dispatchMouseEvent' && params?.type === 'mouseReleased') {
+      sendClicked = true;
     }
     return originalSendCommand(_debuggee, method, params, callback);
   };
@@ -304,23 +308,24 @@ test('CDP submit falls back to the accessible Send button when Enter is not acce
   controller.install();
   await controller.bindOperation({
     tabId: 21,
-    operationId: 'op-send-fallback',
+    operationId: 'op-send-button',
     controllerId: 'controller-21',
     prompt,
-    completionMarkers: ['SEND_FALLBACK_OK']
+    completionMarkers: ['SEND_BUTTON_OK']
   });
 
-  const result = await controller.submitOperation(21, 'op-send-fallback', 'controller-21');
+  const result = await controller.submitOperation(21, 'op-send-button', 'controller-21');
   assert.equal(result.submitted, true);
-  assert.equal(result.submissionMethod, 'cdp_accessibility_send_button');
-  assert.ok(debuggerApi.commands.some(
-    (command) => command.method === 'DOM.focus' && command.params.backendNodeId === 202
-  ));
-  assert.equal(sendActivated, true);
-  const enterEvents = debuggerApi.commands.filter(
-    (command) => command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+  assert.equal(result.submissionMethod, 'cdp_accessibility_send_button_mouse');
+  assert.equal(sendClicked, true);
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'DOM.getBoxModel'));
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'Input.dispatchMouseEvent'));
+  assert.equal(
+    debuggerApi.commands.some(
+      (command) => command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+    ),
+    false,
   );
-  assert.equal(enterEvents.length, 4);
 });
 
 test('CDP submit rejects an unacknowledged send instead of treating a red-box submission as accepted', async () => {

@@ -299,6 +299,7 @@ test('CDP submit uses the accessible Send control before Enter fallback', async 
       });
     }
     if (method === 'DOM.getBoxModel') {
+      this.commands.push({method, params});
       return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
     }
     if (method === 'Input.dispatchMouseEvent' && params?.type === 'mouseReleased') {

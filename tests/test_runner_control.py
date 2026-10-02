@@ -72,7 +72,11 @@ def test_github_token_accepts_projects_and_gh_names(monkeypatch):
 
 
 def test_explicit_start_never_becomes_stop(monkeypatch):
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+    )
 
     result = bridge.request_runner_control("start", "m1")
 
@@ -90,7 +94,11 @@ def test_load_runner_state_promotes_live_process_over_stale_terminal_state(monke
         encoding="utf-8",
     )
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+    )
 
     result = bridge.load_runner_state()
 
@@ -109,12 +117,67 @@ def test_load_runner_state_marks_dead_running_runner_failed(monkeypatch, tmp_pat
         encoding="utf-8",
     )
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda: None)
 
     result = bridge.load_runner_state()
 
     assert result["status"] == "failed"
     assert result["error"] == "runner process is no longer alive"
+
+
+def test_load_runner_state_exposes_live_process_without_claiming_ready(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"completed","runner_profile":"m1","execution_mode":"manual",'
+        '"completed_operations":1,"completed_at":"2026-10-02T00:00:00+00:00"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+    )
+
+    result = bridge.load_runner_state()
+
+    assert result["process_alive"] is True
+    assert result["process_pid"] == 4242
+    assert result["process_profile"] == "m1"
+    assert result["ready"] is False
+    assert result["status"] == "completed"
+
+
+def test_stop_targets_live_runner_process_even_when_state_is_terminal(monkeypatch, tmp_path):
+    runtime = tmp_path / "runtime"
+    state_path = runtime / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"completed","runner_profile":"m1","execution_mode":"manual",'
+        '"completed_operations":1}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", runtime)
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+    )
+    terminated = []
+    monkeypatch.setattr(bridge, "_terminate_runner_process", lambda pid: terminated.append(pid))
+
+    result = bridge.request_runner_control("stop", "m1")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+
+    assert result["accepted"] is True
+    assert result["action"] == "stop"
+    assert result["pid"] == 4242
+    assert terminated == [4242]
+    assert state["status"] == "paused"
+    assert state["process_alive"] is False
+    assert state["ready"] is False
 
 
 def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
@@ -187,7 +250,7 @@ def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", tmp_path / "runtime" / "state.json")
     monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(bridge, "RUNNER_PROFILES", {"m1": (str(executable), str(script))})
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda: None)
 
     class FakeProcess:
         pid = 4242

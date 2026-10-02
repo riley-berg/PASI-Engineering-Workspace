@@ -39,7 +39,16 @@ def completion_markers_satisfied(response_text: object, markers: object) -> bool
     ]
     if not configured:
         return True
-    lines = [line.strip() for line in response_text.splitlines()]
+    lines: list[str] = []
+    in_fence = False
+    for raw_line in response_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or line.startswith("> ") or line == ">":
+            continue
+        lines.append(line)
     return any(
         any(line == marker or line.startswith(marker + ":") for line in lines)
         for marker in configured

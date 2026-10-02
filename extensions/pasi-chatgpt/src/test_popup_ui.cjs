@@ -62,6 +62,8 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /--btn-primary-hover:\s*#4A3728/);
   assert.match(popupCss, /--btn-secondary:\s*#EAE0D2/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);

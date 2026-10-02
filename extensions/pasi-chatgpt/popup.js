@@ -29,6 +29,22 @@
 
   const $ = (id) => document.getElementById(id);
 
+  function isRunnerTargetUrl(url) {
+    try {
+      const parsed = new URL(String(url || ""));
+      return (
+        parsed.protocol === "https:" &&
+        (parsed.hostname === "chatgpt.com" || parsed.hostname === "www.chatgpt.com")
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function hasMatchedUserscripts(activeResult) {
+    return Array.isArray(activeResult?.scripts) && activeResult.scripts.length > 0;
+  }
+
   function send(type, payload = {}) {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({type, ...payload}, (response) => {
@@ -176,8 +192,8 @@
     );
   }
 
-  async function runNext(profileId) {
-    setStatus("Dispatching one queued operation from " + (profileId === "168h" ? "168h" : "M1") + "…");
+  async function runNext() {
+    setStatus("Dispatching one queued operation…");
     const response = await new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({type: "pasi.execution.run-next"}, (result) => {
         const runtimeError = chrome.runtime.lastError;
@@ -245,9 +261,11 @@
       stateLabelText === "Completed" ? "completed" :
       "ready";
     statusText.className = "status-text " + stateClass;
+
     const dot = document.createElement("span");
     dot.className = "status-dot " + stateClass;
     dot.setAttribute("aria-hidden", "true");
+
     const label = document.createElement("span");
     label.textContent = stateLabelText;
     statusText.append(dot, label);
@@ -266,6 +284,7 @@
     const runningThisProfile = runnerIsRunning(state) && activeProfileForState(state) === profileId;
     toggle.textContent = runningThisProfile ? "Pause runner" : "Start runner";
     toggle.disabled = runnerIsRunning(state) && activeProfileForState(state) !== profileId;
+
     toggle.onclick = async () => {
       toggle.disabled = true;
       try {
@@ -281,29 +300,22 @@
       }
     };
 
-    const runNextButton = document.createElement("button");
-    runNextButton.className = "btn btn-secondary";
-    runNextButton.type = "button";
-    runNextButton.textContent = "Run next queued op";
-    runNextButton.onclick = async () => {
-      runNextButton.disabled = true;
-      try {
-        await runNext(profileId);
-      } catch (error) {
-        setStatus(String(error?.message || error), true);
-      } finally {
-        runNextButton.disabled = false;
-      }
-    };
-
-    actions.append(toggle, runNextButton);
+    actions.append(toggle);
     card.append(header, title, body, actions);
     return card;
   }
 
-  function renderRunnerDashboard(state, selectedProfile) {
+  function renderRunnerDashboard(state, selectedProfile, visible) {
     const root = $("runnerCards");
+    const controls = $("runnerControls");
     root.replaceChildren();
+    controls.hidden = !visible;
+
+    if (!visible) {
+      $("connectionBadge").textContent = "Ready";
+      $("connectionBadge").classList.remove("active");
+      return;
+    }
 
     for (const profileId of Object.keys(RUNNER_PROFILES)) {
       root.append(createRunnerCard(profileId, state, selectedProfile));
@@ -318,38 +330,40 @@
     const root = $("scripts");
     root.replaceChildren();
 
+    const scripts = Array.isArray(activeResult?.scripts) ? activeResult.scripts : [];
     const menu = await send(TYPES.menu);
-    if (menu.commands?.length) {
+    const commands = Array.isArray(menu.commands) ? menu.commands : [];
+
+    if (!scripts.length && !commands.length) {
+      return;
+    }
+
+    const title = document.createElement("div");
+    title.className = "userscript-section-title";
+    title.textContent = "PASI userscripts";
+    root.append(title);
+
+    if (commands.length) {
       const section = document.createElement("section");
       section.className = "card userscript-card";
-      const title = document.createElement("div");
-      title.className = "section-title";
-      title.textContent = "Userscript commands";
-      section.append(title);
 
-      for (const command of menu.commands) {
+      for (const command of commands) {
         const button = document.createElement("button");
         button.className = "btn btn-secondary";
         button.type = "button";
         button.textContent = command.title;
+        button.style.width = "100%";
         button.onclick = async () => {
           await send(TYPES.menuInvoke, {command_id: command.id});
           window.close();
         };
         section.append(button);
       }
+
       root.append(section);
     }
 
-    if (!activeResult.scripts?.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "No PASI userscripts match this page.";
-      root.append(empty);
-      return;
-    }
-
-    for (const script of activeResult.scripts) {
+    for (const script of scripts) {
       const card = document.createElement("section");
       card.className = "card userscript-card";
 
@@ -435,6 +449,7 @@
     const stored = await chrome.storage.local.get("pasi.popup.theme");
     const light = stored?.["pasi.popup.theme"] === "light";
     document.body.classList.toggle("light-theme", light);
+
     const button = $("themeToggle");
     button.textContent = light ? "☀️" : "🌙";
     button.title = light ? "Switch to dark theme" : "Switch to light theme";
@@ -445,6 +460,7 @@
     const light = !document.body.classList.contains("light-theme");
     document.body.classList.toggle("light-theme", light);
     await chrome.storage.local.set({"pasi.popup.theme": light ? "light" : "dark"});
+
     const button = $("themeToggle");
     button.textContent = light ? "☀️" : "🌙";
     button.title = light ? "Switch to dark theme" : "Switch to light theme";
@@ -459,22 +475,29 @@
         getProfile(),
       ]);
 
-      const activeUrl = activeResult.url || "https://chatgpt.com/";
+      const activeUrl = String(activeResult.url || "");
+      const runnerSupported = isRunnerTargetUrl(activeUrl);
+      const userscriptsMatched = hasMatchedUserscripts(activeResult);
+
       const currentUrl = $("currentUrl") || document.createElement("div");
       currentUrl.id = "currentUrl";
-      currentUrl.textContent = activeUrl;
+      currentUrl.textContent = activeUrl || "https://chatgpt.com/";
       currentUrl.hidden = true;
       if (!currentUrl.parentElement) document.body.append(currentUrl);
 
-      renderRunnerDashboard(runnerState, selectedProfile);
+      renderRunnerDashboard(runnerState, selectedProfile, runnerSupported);
       await renderUserscripts(activeResult);
-      const warning = $("systemWarning");
-      if (warning) {
-        warning.hidden = Boolean(activeResult.scripts?.length);
+
+      const idle = $("idleState");
+      if (idle) {
+        idle.hidden = runnerSupported || userscriptsMatched;
       }
+
       await applyTheme();
+
       const selector = $("runnerSelect");
       if (selector) selector.value = selectedProfile;
+
       if (!$("status").classList.contains("error")) {
         setStatus("");
       }
@@ -494,6 +517,16 @@
     } catch (error) {
       setStatus(String(error?.message || error), true);
     }
+  });
+
+  $("runNextButton").addEventListener("click", () => {
+    const button = $("runNextButton");
+    button.disabled = true;
+    void runNext()
+      .catch((error) => setStatus(String(error?.message || error), true))
+      .finally(() => {
+        button.disabled = false;
+      });
   });
 
   void render();

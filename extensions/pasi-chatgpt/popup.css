@@ -15,7 +15,7 @@ body {
   padding: 12px;
   background: var(--bg-main);
   color: var(--text-primary);
-  color-scheme: dark;
+  --runner-pulse-animation: pasi-runner-pulse;
   --bg-main: #0D0E11;
   --bg-card: #17191E;
   --border-color: #292A2E;
@@ -47,7 +47,7 @@ body {
 }
 
 html.light-theme body {
-  color-scheme: light;
+  --runner-pulse-animation: pasi-runner-pulse-light;
   --bg-main: #FAF8F5;
   --bg-card: #FFFFFF;
   --border-color: #DCD4C7;
@@ -381,7 +381,7 @@ html.light-theme body .runner-card.selected {
 
 .status-dot.running {
   background: var(--status-running, #45464A);
-  animation: pasi-runner-pulse 1.4s infinite;
+  animation: var(--runner-pulse-animation) 1.4s infinite;
 }
 
 .status-dot.paused {
@@ -552,10 +552,6 @@ html.light-theme body .theme-toggle:focus-visible {
   0% { box-shadow: 0 0 0 0 rgba(69, 70, 74, .34); }
   70% { box-shadow: 0 0 0 5px rgba(69, 70, 74, 0); }
   100% { box-shadow: 0 0 0 0 rgba(69, 70, 74, 0); }
-}
-
-html.light-theme body .status-dot.running {
-  animation-name: pasi-runner-pulse-light;
 }
 
 @keyframes pasi-runner-pulse-light {

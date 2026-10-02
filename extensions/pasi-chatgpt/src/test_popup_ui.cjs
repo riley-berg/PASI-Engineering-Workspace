@@ -116,6 +116,8 @@ test("popup uses connected and operational runner semantics", () => {
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
   assert.match(popupJs, /state\.status === "starting"/);
   assert.match(popupJs, /state\.status === "stopping"/);
+  assert.match(popupJs, /typeof state\.process_alive === "boolean"/);
+  assert.match(popupJs, /state\?\.ready === true/);
   assert.match(popupJs, /activeProfileForState\(state\) === profileId/);
   assert.doesNotMatch(popupJs, /Ready to execute|return "Ready";/);
   assert.doesNotMatch(popupJs, /return "Stopped"|Not running/);
@@ -149,11 +151,13 @@ test("runner state labels never claim inactive work is running", () => {
   assert.doesNotMatch(popupJs, /return "Stopped";|Not running/);
 });
 
-test("active runner cards expose Stop during startup and running states", () => {
-  assert.match(popupJs, /function runnerIsActive\(state\)/);
+test("active runner cards expose Stop whenever the live process is active", () => {
+  assert.match(popupJs, /function runnerProcessIsActive\(state\)/);
   assert.match(popupJs, /status === "starting"/);
   assert.match(popupJs, /status === "running"/);
   assert.match(popupJs, /status === "stopping"/);
+  assert.match(popupJs, /return "Launching"/);
+  assert.match(popupJs, /return "Active process"/);
   assert.match(popupJs, /const activeThisProfile = runnerIsActive\(state\)/);
   assert.match(popupJs, /toggle\.textContent = stoppingThisProfile \? "Stopping" : activeThisProfile \? "Stop" : "Start";/);
 });
@@ -235,9 +239,12 @@ test("runner cards no longer depend on a selected runner", () => {
   assert.doesNotMatch(popupJs, /selectedProfile/);
 });
 
-test("runner start waits for a real state transition", () => {
-  assert.match(popupJs, /async function waitForRunnerState\(profileId, action, timeoutMs = 5000\)/);
-  assert.match(popupJs, /const settledState = await waitForRunnerState\(profileId, action\);/);
+test("runner start requires ready state before claiming the runner is ready", () => {
+  assert.match(popupJs, /function runnerIsReady\(state, profileId\)/);
+  assert.match(popupJs, /state\?\.ready === true/);
+  assert.match(popupJs, /if \(runnerIsReady\(state, profileId\)\) return state;/);
+  assert.match(popupJs, /runner ready\./);
+  assert.doesNotMatch(popupJs, /runner started\./);
 });
 
 test("failed runner state exposes its diagnostic error", () => {

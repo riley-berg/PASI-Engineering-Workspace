@@ -123,6 +123,141 @@
     await chrome.storage.local.set({"pasi.runner.profile": profile});
   }
 
+  const RUNNER_OPTIONS = Object.freeze([
+    {id: "m1", label: "M1 · 20-operation acceptance"},
+    {id: "168h", label: "168h · long-run acceptance"},
+  ]);
+
+  function normalizeProfile(profile) {
+    return profile === "168h" ? "168h" : "m1";
+  }
+
+  function runnerOptionElements() {
+    return [...document.querySelectorAll("#runnerSelectMenu [role=\"option\"]")];
+  }
+
+  function setRunnerSelection(profile) {
+    const normalized = normalizeProfile(profile);
+    const trigger = $("runnerSelect");
+    const label = $("runnerSelectLabel");
+    const options = runnerOptionElements();
+
+    if (!trigger) return;
+
+    const selected = RUNNER_OPTIONS.find((option) => option.id === normalized) || RUNNER_OPTIONS[0];
+    trigger.dataset.value = selected.id;
+    trigger.setAttribute("aria-activedescendant", "runnerOption-" + selected.id);
+
+    if (label) label.textContent = selected.label;
+
+    for (const option of options) {
+      const isSelected = option.dataset.value === selected.id;
+      option.setAttribute("aria-selected", isSelected ? "true" : "false");
+      option.tabIndex = isSelected ? 0 : -1;
+    }
+  }
+
+  function closeRunnerPicker({restoreFocus = false} = {}) {
+    const trigger = $("runnerSelect");
+    const menu = $("runnerSelectMenu");
+    if (!trigger || !menu) return;
+
+    menu.hidden = true;
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.classList.remove("open");
+    if (restoreFocus) trigger.focus();
+  }
+
+  function openRunnerPicker() {
+    const trigger = $("runnerSelect");
+    const menu = $("runnerSelectMenu");
+    if (!trigger || !menu) return;
+
+    setRunnerSelection(trigger.dataset.value || "m1");
+    menu.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.classList.add("open");
+
+    const selected = menu.querySelector('[role="option"][aria-selected="true"]');
+    if (selected) selected.focus();
+  }
+
+  async function selectRunnerProfile(profile) {
+    const normalized = normalizeProfile(profile);
+    await setProfile(normalized);
+    setRunnerSelection(normalized);
+    closeRunnerPicker({restoreFocus: true});
+    await render();
+  }
+
+  function initializeRunnerPicker() {
+    const trigger = $("runnerSelect");
+    const menu = $("runnerSelectMenu");
+    if (!trigger || !menu) return;
+
+    setRunnerSelection("m1");
+
+    trigger.addEventListener("click", () => {
+      if (menu.hidden) openRunnerPicker();
+      else closeRunnerPicker({restoreFocus: true});
+    });
+
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        openRunnerPicker();
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        if (menu.hidden) openRunnerPicker();
+        else closeRunnerPicker({restoreFocus: true});
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        closeRunnerPicker({restoreFocus: false});
+      }
+    });
+
+    for (const option of runnerOptionElements()) {
+      option.addEventListener("click", () => {
+        void selectRunnerProfile(option.dataset.value).catch((error) => {
+          closeRunnerPicker({restoreFocus: true});
+          setStatus(String(error?.message || error), true);
+        });
+      });
+
+      option.addEventListener("keydown", (event) => {
+        const options = runnerOptionElements();
+        const index = options.indexOf(option);
+
+        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+          event.preventDefault();
+          options[(index + 1) % options.length].focus();
+        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+          event.preventDefault();
+          options[(index - 1 + options.length) % options.length].focus();
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          options[0].focus();
+        } else if (event.key === "End") {
+          event.preventDefault();
+          options[options.length - 1].focus();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          void selectRunnerProfile(option.dataset.value).catch((error) => {
+            closeRunnerPicker({restoreFocus: true});
+            setStatus(String(error?.message || error), true);
+          });
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeRunnerPicker({restoreFocus: true});
+        }
+      });
+    }
+
+    document.addEventListener("pointerdown", (event) => {
+      if (!menu.hidden && !event.target.closest(".runner-picker")) closeRunnerPicker();
+    });
+  }
+
   function runnerIsRunning(state) {
     return state?.available === true && state?.status === "running";
   }
@@ -258,8 +393,7 @@
       toggle.disabled = true;
       try {
         await setProfile(profileId);
-        const selector = $("runnerSelect");
-        if (selector) selector.value = profileId;
+        setRunnerSelection(profileId);
         await toggleRunner(profileId, state);
         await render();
       } catch (error) {
@@ -464,8 +598,7 @@
 
       await applyTheme();
 
-      const selector = $("runnerSelect");
-      if (selector) selector.value = selectedProfile;
+      setRunnerSelection(selectedProfile);
 
       if (!$("status").classList.contains("error")) {
         setStatus("");
@@ -479,15 +612,7 @@
     void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));
   });
 
-  $("runnerSelect").addEventListener("change", async (event) => {
-    try {
-      await setProfile(event.target.value === "168h" ? "168h" : "m1");
-      await render();
-    } catch (error) {
-      setStatus(String(error?.message || error), true);
-    }
-  });
-
+  initializeRunnerPicker();
 
   void render();
 })();

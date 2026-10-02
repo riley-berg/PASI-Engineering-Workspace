@@ -34,6 +34,7 @@ body {
   --btn-secondary: #181C21;
   --btn-secondary-hover: #222830;
   --badge-runner: #343B44;
+  --badge-runner-text: #FFFFFF;
   --status-badge-bg: rgba(221, 230, 240, .10);
   --status-badge-text: #E6EBF0;
   --danger-bg: rgba(243, 176, 176, .10);
@@ -56,12 +57,13 @@ html.light-theme body {
   --status-failed: #A23D3D;
   --status-completed: #56606C;
   --warning-text: #4F5661;
-  --btn-primary: #20252B;
-  --btn-primary-hover: #2F353D;
+  --btn-primary: #4A5563;
+  --btn-primary-hover: #5B6877;
   --btn-primary-text: #FFFFFF;
   --btn-secondary: #EEF1F4;
   --btn-secondary-hover: #E4E8ED;
-  --badge-runner: #38414B;
+  --badge-runner: #D8DEE6;
+  --badge-runner-text: #27313D;
   --status-badge-bg: rgba(32, 37, 43, .08);
   --status-badge-active-bg: rgba(32, 37, 43, .13);
   --status-badge-text: #343A42;
@@ -183,7 +185,7 @@ html.light-theme body {
 .badge {
   padding: 2px 6px;
   border-radius: 4px;
-  color: #fff;
+  color: var(--badge-runner-text, #fff);
   font-size: 9px;
   font-weight: 700;
   white-space: nowrap;

@@ -29,7 +29,7 @@ def test_supervised_168h_resolves_gh_token_and_injects_runner_environment(monkey
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     monkeypatch.setattr(bridge.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
 
     result = bridge._start_runner("168h")
 
@@ -93,7 +93,7 @@ def test_load_runner_state_keeps_terminal_state_but_exposes_live_process(monkeyp
         '"completed_operations":20,"completed_at":"2026-10-02T00:00:00+00:00"}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
@@ -118,8 +118,8 @@ def test_load_runner_state_marks_dead_running_runner_failed(monkeypatch, tmp_pat
         '{"status":"running","runner_profile":"m1","execution_mode":"supervised_m1"}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
-    monkeypatch.setattr(bridge, "runner_process_info", lambda: None)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
 
     result = bridge.load_runner_state()
 
@@ -135,7 +135,7 @@ def test_load_runner_state_exposes_live_process_without_claiming_ready(monkeypat
         '"completed_operations":1,"completed_at":"2026-10-02T00:00:00+00:00"}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
@@ -161,7 +161,7 @@ def test_stop_targets_live_runner_process_even_when_state_is_terminal(monkeypatc
         encoding="utf-8",
     )
     monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", runtime)
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
@@ -189,7 +189,7 @@ def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
         '{"status":"running","execution_mode":"supervised_m1","completed_operations":2}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
     monkeypatch.setattr(
         bridge,
         "runner_process_info",
@@ -213,7 +213,7 @@ def test_load_runner_state_preserves_failure_details(monkeypatch, tmp_path):
         '"execution_mode":"manual"}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
 
     result = bridge.load_runner_state()
 
@@ -239,8 +239,8 @@ def test_load_runner_state_marks_dead_starting_runner_failed(monkeypatch, tmp_pa
         '{"status":"starting","runner_profile":"m1","execution_mode":"supervised_m1"}\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
 
     result = bridge.load_runner_state()
 
@@ -258,7 +258,7 @@ def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", tmp_path / "runtime" / "state.json")
     monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(bridge, "RUNNER_PROFILES", {"m1": (str(executable), str(script))})
-    monkeypatch.setattr(bridge, "runner_process_info", lambda: None)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
 
     class FakeProcess:
         pid = 4242
@@ -311,3 +311,46 @@ def test_stop_falls_back_to_pid_for_legacy_runner(monkeypatch):
     bridge._terminate_runner_process(4242, grace_seconds=0.1)
 
     assert signals == [(4242, bridge.signal.SIGTERM)]
+
+
+def test_load_runner_state_returns_profile_isolated_views(monkeypatch, tmp_path):
+    m1_state = tmp_path / "runtime" / "m1" / "state.json"
+    long_state = tmp_path / "runtime" / "168h" / "state.json"
+    m1_state.parent.mkdir(parents=True)
+    long_state.parent.mkdir(parents=True)
+    m1_state.write_text(
+        '{"status":"running","runner_profile":"m1","execution_mode":"supervised_m1",'
+        '"completed_operations":1,"target_operations":20}
+',
+        encoding="utf-8",
+    )
+    long_state.write_text(
+        '{"status":"failed","runner_profile":"168h","execution_mode":"manual",'
+        '"error":"RuntimeError: acceptance worktree is not clean"}
+',
+        encoding="utf-8",
+    )
+    original = bridge.runner_state_path
+    monkeypatch.setattr(
+        bridge,
+        "runner_state_path",
+        lambda profile: m1_state if profile == "m1" else long_state,
+    )
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda profile=None: (
+            {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py", "workspace": True, "recognized": True}
+            if profile in {None, "m1"} else None
+        ),
+    )
+
+    m1 = bridge.load_runner_state("m1")
+    long_run = bridge.load_runner_state("168h")
+
+    assert m1["runner_profile"] == "m1"
+    assert m1["completed_operations"] == 1
+    assert "worktree is not clean" not in str(m1.get("error", ""))
+    assert long_run["runner_profile"] == "168h"
+    assert long_run["status"] == "failed"
+    assert long_run["error"] == "RuntimeError: acceptance worktree is not clean"

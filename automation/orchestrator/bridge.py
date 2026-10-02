@@ -639,10 +639,12 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
         paused["process_alive"] = False
         paused["ready"] = False
         atomic_write_json(state_path, paused)
-        for candidate in (
-            pid_path,
-            Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
-        ):
+        pid_candidates = [pid_path]
+        if actual_profile == "168h":
+            pid_candidates.append(
+                Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid"
+            )
+        for candidate in pid_candidates:
             try:
                 candidate.unlink()
             except FileNotFoundError:

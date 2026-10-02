@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -93,10 +94,28 @@ def emit(event: dict) -> None:
 
 
 def write_state(payload: dict) -> None:
+    payload = dict(payload)
+    if payload.get("status") == "running":
+        payload.setdefault("execution_mode", "supervised_168h")
+    else:
+        payload.setdefault("execution_mode", "manual")
     path = state_dir() / "state.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def write_runner_pid() -> Path:
+    path = state_dir() / "runner.pid"
+    path.write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    return path
+
+
+def clear_runner_pid() -> None:
+    try:
+        (state_dir() / "runner.pid").unlink()
+    except FileNotFoundError:
+        pass
 
 
 def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str:
@@ -250,6 +269,8 @@ def main() -> int:
 
     root = Path.cwd().resolve()
     run_id = f"ew-168h-{uuid.uuid4().hex}"
+    runner_pid_path = write_runner_pid()
+    atexit.register(clear_runner_pid)
     worktree = args.worktree.expanduser().resolve()
     ensure_worktree(root, worktree, args.branch)
     head = git(worktree, "rev-parse", "HEAD")
@@ -268,6 +289,7 @@ def main() -> int:
     })
 
     if args.smoke:
+        clear_runner_pid()
         discovered = all_tasks()
         pending = [task for task in discovered if not task.checked]
         print(f"READY: {len(phases)} phases, {len(discovered)} tasks discovered, {len(pending)} unchecked")
@@ -283,6 +305,7 @@ def main() -> int:
         "started_at": utcnow().isoformat(),
         "deadline_at": deadline.isoformat(),
         "status": "running",
+        "execution_mode": "supervised_168h",
     })
 
     while utcnow() < deadline:

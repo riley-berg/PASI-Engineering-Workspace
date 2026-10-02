@@ -547,17 +547,30 @@
     }
   }
 
-  function setThemeUi(light) {
+  function applyThemeDom(light) {
     document.documentElement.classList.toggle("light-theme", light);
     document.documentElement.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
     document.documentElement.style.colorScheme = light ? "light" : "dark";
-    document.documentElement.removeAttribute("data-theme-pending");
-    document.documentElement.removeAttribute("data-popup-paint-pending");
+
+    const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+    if (colorSchemeMeta) {
+      colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");
+    }
 
     const button = $("themeToggle");
     button.textContent = light ? "☀️" : "🌙";
     button.title = light ? "Switch to dark theme" : "Switch to light theme";
     button.setAttribute("aria-label", button.title);
+  }
+
+  function releaseThemePaint() {
+    document.documentElement.removeAttribute("data-theme-pending");
+    document.documentElement.removeAttribute("data-popup-paint-pending");
+  }
+
+  function setThemeUi(light) {
+    applyThemeDom(light);
+    releaseThemePaint();
   }
 
   function getLocalTheme() {
@@ -591,12 +604,28 @@
   async function toggleTheme() {
     const light = !document.documentElement.classList.contains("light-theme");
     const theme = light ? "light" : "dark";
-    document.documentElement.setAttribute("data-popup-paint-pending", "true");
 
-    try {
+    const updateTheme = async () => {
       setLocalTheme(theme);
-      document.documentElement.classList.toggle("light-theme", light);
+      applyThemeDom(light);
       await chrome.storage.local.set({"pasi.popup.theme": theme});
+    };
+
+    if (typeof document.startViewTransition === "function") {
+      const transition = document.startViewTransition(updateTheme);
+      try {
+        await transition.finished;
+      } catch (_) {
+        // The theme update itself already completed; a failed animation is harmless.
+      } finally {
+        releaseThemePaint();
+      }
+      return;
+    }
+
+    document.documentElement.setAttribute("data-popup-paint-pending", "true");
+    try {
+      await updateTheme();
     } finally {
       setThemeUi(light);
     }

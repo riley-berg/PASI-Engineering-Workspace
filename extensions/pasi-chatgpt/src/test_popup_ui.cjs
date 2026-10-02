@@ -125,7 +125,7 @@ test("popup paints theme surfaces before the external stylesheet", () => {
   );
   assert.ok(
     popupHtml.includes(
-      "html[data-theme-pending] body {\n      visibility: hidden;"
+      "html[data-theme-pending] body,\n    html[data-popup-paint-pending] body {\n      visibility: hidden;"
     )
   );
   assert.ok(
@@ -152,6 +152,7 @@ test("popup bootstraps the saved theme before first paint", () => {
   assert.match(themeInit, /data-theme-pending/);
   assert.match(themeInit, /data-popup-paint-pending/);
   assert.match(popupJs, /data-popup-paint-pending/);
+  assert.match(popupJs, /function toggleTheme\(\)[\s\S]*setAttribute\("data-popup-paint-pending", "true"\)/);
   assert.match(popupCss, /html\[data-theme-pending\] body,[\s\S]*html\[data-popup-paint-pending\] body\s*\{\s*visibility:\s*hidden/);
   assert.match(popupJs, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
   assert.match(popupJs, /document\.documentElement\.classList\.toggle\("light-theme"/);

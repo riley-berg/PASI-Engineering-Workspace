@@ -528,14 +528,15 @@ async function bridgeJson(path, timeoutMs = 10000) {
 chrome.commands?.onCommand?.addListener((command) => {
   if (command !== 'pasi-toggle-runner') return;
   void (async () => {
-    let profile = 'm1';
-    try {
-      const stored = await chrome.storage.local.get('pasi.runner.profile');
-      if (stored?.['pasi.runner.profile'] === '168h') profile = '168h';
-    } catch (_) {}
+    const state = await bridgeJson('/runner/state');
+    const active = state?.status === 'starting' || state?.status === 'running' || state?.status === 'stopping';
+    const profile = state?.runner_profile === '168h' || state?.execution_mode === 'supervised_168h'
+      ? '168h'
+      : 'm1';
+    const action = active ? 'stop' : 'start';
 
     const result = await bridgeFetch('/runner/control', 'POST', {
-      action: 'toggle',
+      action,
       profile
     }, 10000);
 
@@ -557,10 +558,10 @@ chrome.commands?.onCommand?.addListener((command) => {
     try {
       await chrome.action.setBadgeText({text: 'ERR'});
       await chrome.action.setBadgeBackgroundColor({color: '#b91c1c'});
-      await chrome.action.setTitle({title: detail || (result.status ? 'PASI runner control failed (HTTP ' + result.status + ')' : 'PASI bridge unreachable')});
+      await chrome.action.setTitle({title: detail || (result.status ? 'PASI runner control failed (HTTP ' + String(result.status) + ')' : 'PASI bridge unreachable')});
     } catch (_) {}
   })();
-});
+});;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'pasi-control-center-bridge-request') {

@@ -22,7 +22,7 @@ def test_cdp_network_authority_contract():
     assert not (extension / "src" / "recovery_progress.js").exists()
 
     assert "debugger" in manifest["permissions"]
-    assert manifest["commands"]["pasi-run-next"]["suggested_key"]["default"] == "Alt+Shift+P"
+    assert manifest["commands"]["pasi-run-next"]["suggested_key"]["default"] == "Ctrl+Space"
     manifest_scripts = [
         script
         for entry in manifest["content_scripts"]

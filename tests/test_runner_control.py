@@ -85,7 +85,7 @@ def test_explicit_start_never_becomes_stop(monkeypatch):
     assert result["reason"] == "runner already running"
 
 
-def test_load_runner_state_promotes_live_process_over_stale_terminal_state(monkeypatch, tmp_path):
+def test_load_runner_state_keeps_terminal_state_but_exposes_live_process(monkeypatch, tmp_path):
     state_path = tmp_path / "runner" / "state.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
@@ -102,11 +102,13 @@ def test_load_runner_state_promotes_live_process_over_stale_terminal_state(monke
 
     result = bridge.load_runner_state()
 
-    assert result["status"] == "running"
+    assert result["status"] == "completed"
     assert result["runner_profile"] == "m1"
-    assert result["execution_mode"] == "supervised_m1"
-    assert "error" not in result
-    assert "completed_at" not in result
+    assert result["process_alive"] is True
+    assert result["process_pid"] == 4242
+    assert result["process_profile"] == "m1"
+    assert result["ready"] is False
+    assert result["completed_at"].startswith("2026-10-02T00:00:00")
 
 
 def test_load_runner_state_marks_dead_running_runner_failed(monkeypatch, tmp_path):
@@ -188,12 +190,18 @@ def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
         encoding="utf-8",
     )
     monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda: {"pid": 4242, "profile": "m1", "cmdline": "pasi_m1_cdp_chain.py"},
+    )
 
     result = bridge.load_runner_state()
 
     assert result["available"] is True
     assert result["status"] == "running"
+    assert result["process_alive"] is True
+    assert result["ready"] is True
     assert result["execution_mode"] == "supervised_m1"
 
 

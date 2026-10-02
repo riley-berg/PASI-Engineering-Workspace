@@ -410,6 +410,10 @@ def _start_runner(profile: str) -> dict[str, Any]:
         "log_path": str(log_path),
     })
     atomic_write_json(RUNNER_STATE_PATH, current)
+    try:
+        (RUNNER_STATE_PATH.parent / "runner.pid").write_text(str(process.pid) + "\n", encoding="utf-8")
+    except OSError:
+        pass
 
     return {
         "accepted": True,

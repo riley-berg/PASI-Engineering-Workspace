@@ -105,3 +105,12 @@ def test_168h_runtime_default_matches_bridge_runtime(monkeypatch) -> None:
 
     assert acceptance.runtime_state_dir() == (Path.home() / ".pasi" / "overnight").resolve()
 
+
+
+def test_168h_runtime_isolated_from_m1(monkeypatch):
+    from pathlib import Path
+    from scripts import pasi_168h_acceptance as acceptance
+
+    monkeypatch.delenv("PASI_RUNTIME_DIR", raising=False)
+    monkeypatch.delenv("PASI_RUNNER_PROFILE", raising=False)
+    assert acceptance.runtime_state_dir() == (Path.home() / ".pasi" / "overnight" / "168h").resolve()

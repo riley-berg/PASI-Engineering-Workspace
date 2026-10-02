@@ -165,6 +165,29 @@ test("light and dark primary controls use distinct high-contrast palettes", () =
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-text:\s*#FFFFFF/);
 });
 
+test("runner controls keep Stop disabled until bridge state confirms termination", () => {
+  assert.match(
+    popupJs,
+    /const stopping = activeThisProfile;/
+  );
+  assert.match(
+    popupJs,
+    /toggle\.disabled = true;/
+  );
+  assert.match(
+    popupJs,
+    /if \(stopping\) \{[\s\S]*toggle\.textContent = "Stopping…";/
+  );
+  assert.match(
+    popupJs,
+    /await controlRunner\(profileId, stopping \? "stop" : "start"\);[\s\S]*await render\(\);/
+  );
+  assert.doesNotMatch(
+    popupJs,
+    /finally \{[\s\S]*toggle\.disabled = false;/
+  );
+});
+
 test("runner controls use explicit start or stop actions", () => {
   assert.match(popupJs, /async function controlRunner\(profileId, requestedAction\)/);
   assert.match(popupJs, /const action = requestedAction === "stop" \? "stop" : "start";/);
@@ -175,7 +198,15 @@ test("runner controls use explicit start or stop actions", () => {
   );
   assert.match(
     popupJs,
-    /await controlRunner\(profileId, activeThisProfile \? "stop" : "start"\);/
+    /await controlRunner\(profileId, stopping \? "stop" : "start"\);/
+  );
+  assert.match(
+    popupJs,
+    /toggle\.disabled = true;[\s\S]*toggle\.textContent = "Stopping…";/
+  );
+  assert.match(
+    popupJs,
+    /catch \(error\) \{[\s\S]*setStatus\(String\(error\?\.message \|\| error\), true\);[\s\S]*await render\(\);/
   );
 });
 

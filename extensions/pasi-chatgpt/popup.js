@@ -475,7 +475,7 @@
     void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));
   });
 
-  $("profileHint").addEventListener("click", async () => {
+  $("profileSummary").addEventListener("click", async () => {
     try {
       const next = (await getProfile()) === "m1" ? "168h" : "m1";
       await setProfile(next);

@@ -3,6 +3,7 @@ import pytest
 from automation.orchestrator.bridge import (
     BridgeRequestHandler,
     BridgeState,
+    InvalidOperationTransition,
     completion_markers_satisfied,
 )
 from automation.orchestrator.state import StateManager
@@ -335,6 +336,25 @@ def test_late_dom_response_cannot_replace_authoritative_cdp_response(tmp_path):
     assert stored is not None
     assert stored["response_text"] == "NETWORK_PATCH_OK_2026"
     assert stored["response_source"] == "cdp_fetch_stream"
+
+
+def test_transient_failure_from_queued_operation_rejects_queued_to_queued(tmp_path):
+    """Transient browser failures require an operation already in claimed/generating status."""
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+    )
+
+    with pytest.raises(InvalidOperationTransition, match="queued -> queued"):
+        bridge.fail_operation(
+            operation.operation_id,
+            "PASI_CDP: network failure",
+        )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["status"] == "queued"
 
 
 def test_generic_cdp_network_failure_is_transient_and_late_authoritative_response_completes(tmp_path):

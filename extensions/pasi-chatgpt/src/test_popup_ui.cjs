@@ -84,7 +84,7 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
   assert.match(popupCss, /html\.light-theme body \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /html\.light-theme body \.status-dot\.running[\s\S]*background:\s*#45464A/);
-  assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Ready" \? " idle-summary" : ""\)/);
+  assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Idle" \? " idle-summary" : ""\)/);
   assert.match(popupCss, /\.status-desc\.idle-summary[\s\S]*color:\s*var\(--status-idle-summary\)/);
   assert.match(popupCss, /--status-idle:\s*#1A1B20/);
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-idle:\s*#1A1B20/);
@@ -94,7 +94,7 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);
   assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);
   assert.match(popupCss, /--status-idle-summary:\s*#707174/);
-  assert.match(popupCss, /\.status-dot\.ready\s*\{\s*display:\s*none/);
+  assert.match(popupCss, /\.status-dot\.idle\s*\{\s*display:\s*none/);
 });
 
 test("popup bootstraps the saved theme before first paint", () => {

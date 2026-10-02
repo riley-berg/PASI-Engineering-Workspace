@@ -54,22 +54,22 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
-  assert.match(popupCss, /--bg-main:\s*#F4ECE1/);
-  assert.match(popupCss, /--bg-card:\s*#EAE0D2/);
-  assert.match(popupCss, /--text-primary:\s*#121415/);
-  assert.match(popupCss, /--text-secondary:\s*#4A3728/);
-  assert.match(popupCss, /--text-muted:\s*#6B5847/);
-  assert.match(popupCss, /--btn-primary:\s*#2F261D/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#4A3728/);
-  assert.match(popupCss, /--btn-secondary:\s*#EAE0D2/);
+  assert.match(popupCss, /--bg-main:\s*#F7F4F0/);
+  assert.match(popupCss, /--bg-card:\s*#EDEAE6/);
+  assert.match(popupCss, /--text-primary:\s*#111215/);
+  assert.match(popupCss, /--text-secondary:\s*#423731/);
+  assert.match(popupCss, /--text-muted:\s*#665953/);
+  assert.match(popupCss, /--btn-primary:\s*#1A1B20/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#2C2E35/);
+  assert.match(popupCss, /--btn-secondary:\s*#EDEAE6/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);
-  assert.match(popupCss, /--status-badge-bg:\s*rgba\(96, 72, 48/);
-  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(96, 72, 48/);
-  assert.match(popupCss, /--status-badge-text:\s*#2F261D/);
+  assert.match(popupCss, /--status-badge-bg:\s*rgba\(26, 27, 32/);
+  assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(26, 27, 32/);
+  assert.match(popupCss, /--status-badge-text:\s*#1A1B20/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
 });
@@ -83,14 +83,14 @@ test("popup islands stay inside the compact popup width", () => {
 });
 
 test("popup uses the requested sepia/obsidian dark palette and no blue primary buttons", () => {
-  assert.match(popupCss, /--bg-main:\s*#0B0C0C/);
-  assert.match(popupCss, /--bg-card:\s*#1A1D1E/);
-  assert.match(popupCss, /--btn-primary:\s*#604830/);
-  assert.match(popupCss, /--btn-primary-hover:\s*#765A3D/);
-  assert.match(popupCss, /--badge-m1:\s*#604830/);
-  assert.match(popupCss, /--badge-long:\s*#604830/);
-  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#8A6A49/);
+  assert.match(popupCss, /--bg-main:\s*#0D0E11/);
+  assert.match(popupCss, /--bg-card:\s*#17191E/);
+  assert.match(popupCss, /--btn-primary:\s*#54433A/);
+  assert.match(popupCss, /--btn-primary-hover:\s*#69564B/);
+  assert.match(popupCss, /--badge-m1:\s*#54433A/);
+  assert.match(popupCss, /--badge-long:\s*#54433A/);
+  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#54433A/);
   assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#fff/);
-  assert.match(popupCss, /--text-primary:\s*#EADBCB/);
+  assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
 });

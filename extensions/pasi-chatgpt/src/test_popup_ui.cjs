@@ -141,7 +141,8 @@ test("popup uses a custom themed runner picker with no native select styling", (
 
 test("popup islands stay inside the compact popup width", () => {
   assert.match(popupCss, /width:\s*360px/);
-  assert.match(popupCss, /\.runner-card,\n\.card[\s\S]*width:\s*100%/);
+  assert.match(popupCss, /\.runner-card,
+\.card[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.runners-list[\s\S]*width:\s*100%/);
   assert.match(popupCss, /\.card-actions[\s\S]*min-width:\s*0/);
   assert.match(popupCss, /\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/);
@@ -187,6 +188,7 @@ test("popup critical text and control colors meet WCAG AA contrast targets", () 
   assert.ok(contrastRatio("#707174", "#FAF8F5") >= 4.5);
   assert.ok(contrastRatio("#55565A", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
-  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);\n  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
+  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
+  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
 });

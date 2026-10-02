@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 
-from scripts.pasi_live_cdp_diagnostic import DiagnosticFailure, diagnostic_response_matches_marker, make_probe_prompt
+from scripts.pasi_live_cdp_diagnostic import (
+    DiagnosticFailure,
+    diagnostic_response_matches_marker,
+    make_probe_prompt,
+    run_local_tests,
+)
 
 
 def test_diagnostic_failure_preserves_first_failure_boundary() -> None:
@@ -47,3 +52,39 @@ def test_failure_payload_is_machine_readable() -> None:
     decoded = json.loads(encoded)
     assert decoded["step"] == "bridge_health"
     assert decoded["evidence"]["service"] == "wrong"
+
+def test_local_tests_run_all_suites_before_reporting_failure(tmp_path, monkeypatch) -> None:
+    extension_test = tmp_path / "extensions" / "pasi-chatgpt" / "src" / "test_popup_ui.cjs"
+    extension_test.parent.mkdir(parents=True)
+    extension_test.write_text("test()", encoding="utf-8")
+
+    calls = []
+
+    class Completed:
+        def __init__(self, returncode: int) -> None:
+            self.returncode = returncode
+            self.stdout = "diagnostic output"
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "node" and command[2] == "web/app.test.js":
+            return Completed(0)
+        if command[0] == "node":
+            return Completed(1)
+        return Completed(1)
+
+    monkeypatch.setattr("scripts.pasi_live_cdp_diagnostic.subprocess.run", fake_run)
+
+    try:
+        run_local_tests(tmp_path)
+    except DiagnosticFailure as failure:
+        assert failure.step == "local_tests"
+        results = failure.evidence["results"]
+        assert set(results) == {"pytest", "frontend", "extension"}
+        assert results["pytest"]["returncode"] == 1
+        assert results["frontend"]["returncode"] == 0
+        assert results["extension"]["returncode"] == 1
+        assert len(calls) == 3
+        return
+
+    raise AssertionError("run_local_tests should report the aggregate failure")

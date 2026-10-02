@@ -93,6 +93,8 @@ def test_168h_acceptance_publishes_supervised_execution_mode():
     source = Path(acceptance.__file__).read_text(encoding="utf-8")
     assert '"execution_mode": "supervised_168h"' in source
     assert 'runner.pid' in source
+    assert 'PASI_RUNTIME_DIR' in source
+    assert 'supervised_168h' in source
     assert 'pasi_168h_acceptance.py' in Path(
         Path(acceptance.__file__).parents[1] / "automation" / "orchestrator" / "bridge.py"
     ).read_text(encoding="utf-8")

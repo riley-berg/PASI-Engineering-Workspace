@@ -5,6 +5,54 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>PASI Dashboard</title>
   <script src="theme-init.js"></script>
+  <style id="pasi-theme-critical">
+    html {
+      background: #0D0E11;
+      color-scheme: dark;
+    }
+
+    html.light-theme {
+      background: #FAF8F5;
+      color-scheme: light;
+    }
+
+    html[data-theme-pending] body {
+      visibility: hidden;
+    }
+
+    body {
+      margin: 0;
+      background: #0D0E11;
+      color: #F4F1EC;
+    }
+
+    html.light-theme body {
+      background: #FAF8F5;
+      color: #1A1B20;
+    }
+
+    .runner-card,
+    .card,
+    .runner-select,
+    .runner-select-menu {
+      background: #17191E;
+    }
+
+    html.light-theme .runner-card,
+    html.light-theme .card,
+    html.light-theme .runner-select,
+    html.light-theme .runner-select-menu {
+      background: #FFFFFF;
+    }
+
+    .idle-state {
+      background: rgba(23, 25, 30, .78);
+    }
+
+    html.light-theme .idle-state {
+      background: rgba(255, 255, 255, .95);
+    }
+  </style>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>

@@ -93,29 +93,54 @@ def emit(event: dict) -> None:
         handle.flush()
 
 
+def runtime_state_dir() -> Path:
+    return Path(
+        os.environ.get(
+            "PASI_RUNTIME_DIR",
+            str(state_dir() / "runtime"),
+        )
+    ).expanduser().resolve()
+
+
+def atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
 def write_state(payload: dict) -> None:
     payload = dict(payload)
     if payload.get("status") == "running":
         payload.setdefault("execution_mode", "supervised_168h")
     else:
         payload.setdefault("execution_mode", "manual")
-    path = state_dir() / "state.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    tmp.replace(path)
+
+    atomic_write_json(state_dir() / "state.json", payload)
+
+    # The bridge reads the live runner state from PASI_RUNTIME_DIR. Keep that
+    # view synchronized while retaining the historical acceptance state path.
+    runtime_path = runtime_state_dir() / "state.json"
+    if runtime_path != (state_dir() / "state.json").resolve():
+        atomic_write_json(runtime_path, payload)
 
 
 def write_runner_pid() -> Path:
     path = state_dir() / "runner.pid"
     path.write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    runtime_path = runtime_state_dir() / "runner.pid"
+    if runtime_path != path.resolve():
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text(str(os.getpid()) + "\n", encoding="utf-8")
     return path
 
 
 def clear_runner_pid() -> None:
-    try:
-        (state_dir() / "runner.pid").unlink()
-    except FileNotFoundError:
-        pass
+    for path in (state_dir() / "runner.pid", runtime_state_dir() / "runner.pid"):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str:

@@ -1,5 +1,13 @@
 [hidden] { display: none !important; }
 
+html {
+  background: #0D0E11;
+}
+
+html.light-theme {
+  background: #FAF8F5;
+}
+
 html[data-theme-pending] body { visibility: hidden; }
 
 * {
@@ -18,7 +26,7 @@ body {
   background: var(--bg-main);
   color: var(--text-primary);
   color-scheme: dark;
-  transition: background-color .18s ease, color .18s ease;
+  transition: none;
   --bg-main: #0D0E11;
   --bg-card: #17191E;
   --border-color: #292A2E;
@@ -214,6 +222,7 @@ button {
   border-radius: 5px;
   color: var(--text-primary);
   font-size: 11px;
+  font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
   outline: none;
@@ -222,7 +231,6 @@ button {
 .runner-select-option:hover,
 .runner-select-option:focus-visible {
   background: var(--runner-option-hover);
-  font-weight: 700;
   box-shadow: inset 0 0 0 1px var(--border-color);
 }
 

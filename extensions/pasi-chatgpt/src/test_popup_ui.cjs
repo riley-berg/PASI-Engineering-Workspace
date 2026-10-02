@@ -11,7 +11,7 @@ const themeInit = fs.readFileSync(path.join(ROOT, "theme-init.js"), "utf8");
 
 test("popup has one neutral idle state and no legacy duplicate warning", () => {
   assert.match(popupHtml, /id="idleState"[^>]*class="idle-state"[^>]*hidden/);
-  assert.match(popupHtml, /Extension idle/);
+  assert.match(popupHtml, /Ready/);
   assert.match(popupHtml, /Navigate to a supported page to activate userscripts\./);
   assert.doesNotMatch(popupHtml, /No PASI userscripts match this page\./);
   assert.doesNotMatch(popupHtml, /systemWarning/);

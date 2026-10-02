@@ -411,12 +411,13 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 let manualDispatchInFlight = null;
 const supervisedWaiters = new Map();
 
-async function supervised168hAuthorized() {
+async function supervisedExecutionAuthorized() {
   const payload = await bridgeJson('/runner/state', 5000);
+  const executionMode = String(payload?.execution_mode || '');
   return Boolean(
     payload?.available === true &&
     payload?.status === 'running' &&
-    payload?.execution_mode === 'supervised_168h' &&
+    executionMode.startsWith('supervised_') &&
     payload?.execution_authorized === true
   );
 }
@@ -425,7 +426,7 @@ function ensureSupervisedExecutionWaiter(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId || supervisedWaiters.has(controllerId)) return false;
   const promise = (async () => {
     try {
-      if (!(await supervised168hAuthorized())) return false;
+      if (!(await supervisedExecutionAuthorized())) return false;
       return await waitForNextOperationForController(tabId, controllerId);
     } finally {
       supervisedWaiters.delete(controllerId);

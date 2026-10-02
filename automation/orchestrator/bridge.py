@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from .config import CONFIG, ensure_runtime_directories
+from .config import CONFIG
 from .models import ChatOperation
 from .operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
@@ -3024,8 +3024,6 @@ class ChatGPTBridge:
         host: str = HOST,
         port: int = PORT,
     ):
-        ensure_runtime_directories()
-
         self.host = host
         self.port = port
 

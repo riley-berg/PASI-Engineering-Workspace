@@ -111,16 +111,30 @@ test("popup paints theme surfaces before the external stylesheet", () => {
   assert.ok(criticalStyleIndex >= 0);
   assert.ok(stylesheetIndex >= 0);
   assert.ok(criticalStyleIndex < stylesheetIndex);
-  assert.match(popupHtml, /html\s*\\{[\s\\S]*background:\s*#0D0E11[\s\\S]*color-scheme:\s*dark/);
-  assert.match(popupHtml, /html\\.light-theme\s*\\{[\s\\S]*background:\s*#FAF8F5[\s\\S]*color-scheme:\s*light/);
-  assert.match(popupHtml, /html\\[data-theme-pending\\] body\s*\\{[\s\\S]*visibility:\s*hidden/);
-  assert.match(
-    popupHtml,
-    /\\.runner-card,[\s\\S]*\\.card,[\s\\S]*\\.runner-select,[\s\\S]*\\.runner-select-menu[\s\\S]*background:\s*#17191E/
+  assert.ok(
+    popupHtml.includes(
+      "html {\n      background: #0D0E11;\n      color-scheme: dark;"
+    )
   );
-  assert.match(
-    popupHtml,
-    /html\\.light-theme \\.runner-card,[\s\\S]*html\\.light-theme \\.card,[\s\\S]*html\\.light-theme \\.runner-select,[\s\\S]*html\\.light-theme \\.runner-select-menu[\s\\S]*background:\s*#FFFFFF/
+  assert.ok(
+    popupHtml.includes(
+      "html.light-theme {\n      background: #FAF8F5;\n      color-scheme: light;"
+    )
+  );
+  assert.ok(
+    popupHtml.includes(
+      "html[data-theme-pending] body {\n      visibility: hidden;"
+    )
+  );
+  assert.ok(
+    popupHtml.includes(
+      ".runner-card,\n    .card,\n    .runner-select,\n    .runner-select-menu {\n      background: #17191E;"
+    )
+  );
+  assert.ok(
+    popupHtml.includes(
+      "html.light-theme .runner-card,\n    html.light-theme .card,\n    html.light-theme .runner-select,\n    html.light-theme .runner-select-menu {\n      background: #FFFFFF;"
+    )
   );
 });
 

@@ -4,6 +4,12 @@ html {
   background: #0D0E11;
 }
 
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 1ms;
+}
+
 html.light-theme {
   background: #FAF8F5;
 }

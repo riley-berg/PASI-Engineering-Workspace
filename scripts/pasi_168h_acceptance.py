@@ -174,7 +174,7 @@ def record_initialization_failure(
             "worktree": str(worktree),
             "status": "failed",
             "execution_mode": "supervised_168h",
-            "phase": "initialization_failed",
+            "phase": f"{phase}_failed",
             "error": error,
             "failed_at": utcnow().isoformat(),
             "runner_pid": os.getpid(),

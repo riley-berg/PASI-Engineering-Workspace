@@ -547,6 +547,13 @@
     }
   }
 
+  function updateThemeToggleButton(light) {
+    const button = $("themeToggle");
+    button.textContent = light ? "☀️" : "🌙";
+    button.title = light ? "Switch to dark theme" : "Switch to light theme";
+    button.setAttribute("aria-label", button.title);
+  }
+
   function applyThemeDom(light) {
     const root = document.documentElement;
     root.classList.toggle("light-theme", light);
@@ -558,10 +565,7 @@
       colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");
     }
 
-    const button = $("themeToggle");
-    button.textContent = light ? "☀️" : "🌙";
-    button.title = light ? "Switch to dark theme" : "Switch to light theme";
-    button.setAttribute("aria-label", button.title);
+    updateThemeToggleButton(light);
   }
 
   function getLocalTheme() {
@@ -581,8 +585,9 @@
   }
 
   function applyTheme() {
-    const theme = getLocalTheme() === "light" ? "light" : "dark";
-    applyThemeDom(theme === "light");
+    updateThemeToggleButton(
+      document.documentElement.classList.contains("light-theme")
+    );
   }
 
   async function toggleTheme() {

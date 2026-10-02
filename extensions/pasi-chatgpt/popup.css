@@ -23,13 +23,19 @@ body {
   --text-primary: #F4F1EC;
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
+  --runner-option-hover: #24262C;
+  --status-ready: #F4F1EC;
+  --status-ready-summary: #A39892;
+  --status-paused: #6E7074;
+  --status-failed: #F4F1EC;
+  --status-completed: #6E7074;
+  --warning-text: #D6CEC8;
   --btn-primary: #45464A;
   --btn-primary-hover: #5B5C61;
   --btn-secondary: #24262C;
   --btn-secondary-hover: #3A3538;
   --badge-m1: #45464A;
   --badge-long: #45464A;
-  --status-ready: #707174;
   --status-badge-bg: rgba(112, 113, 116, .12);
   --status-badge-active-bg: rgba(112, 113, 116, .18);
   --status-badge-text: #F4F1EC;
@@ -45,15 +51,21 @@ body.light-theme {
   --bg-card: #FFFFFF;
   --border-color: #DCD4C7;
   --text-primary: #1A1B20;
-  --text-secondary: #707174;
-  --text-muted: #929396;
+  --text-secondary: #55565A;
+  --text-muted: #707174;
+  --runner-option-hover: #F0ECE6;
+  --status-ready: #1A1B20;
+  --status-ready-summary: #707174;
+  --status-paused: #707174;
+  --status-failed: #333438;
+  --status-completed: #707174;
+  --warning-text: #45464A;
   --btn-primary: #45464A;
   --btn-primary-hover: #333438;
   --btn-secondary: #FFFFFF;
   --btn-secondary-hover: #F0ECE6;
   --badge-m1: #45464A;
   --badge-long: #45464A;
-  --status-ready: #707174;
   --status-badge-bg: rgba(112, 113, 116, .12);
   --status-badge-active-bg: rgba(112, 113, 116, .18);
   --status-badge-text: #45464A;
@@ -207,7 +219,9 @@ button {
 
 .runner-select-option:hover,
 .runner-select-option:focus-visible {
-  background: var(--btn-secondary-hover);
+  background: var(--runner-option-hover);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1px var(--border-color);
 }
 
 .runner-select-option[aria-selected="true"] {
@@ -352,7 +366,11 @@ body.light-theme .runner-card.selected {
 }
 
 .status-desc.ready-summary {
-  color: var(--status-ready);
+  color: var(--status-ready-summary);
+}
+
+.status-dot.ready {
+  display: none;
 }
 
 .status-dot {
@@ -364,36 +382,36 @@ body.light-theme .runner-card.selected {
 }
 
 .status-dot.running {
-  background: #45464A;
+  background: var(--status-running, #45464A);
   animation: pasi-runner-pulse 1.4s infinite;
 }
 
 body.light-theme .status-dot.running {
-  background: #45464A;
+  background: var(--status-running, #45464A);
 }
 
 .status-dot.paused {
-  background: #8D7768;
+  background: var(--status-paused);
 }
 
 body.light-theme .status-dot.paused {
-  background: #707174;
+  background: var(--status-paused);
 }
 
 .status-dot.failed {
-  background: #8A6258;
+  background: var(--status-failed);
 }
 
 body.light-theme .status-dot.failed {
-  background: #5F6064;
+  background: var(--status-failed);
 }
 
 .status-dot.completed {
-  background: #6E7074;
+  background: var(--status-completed);
 }
 
 body.light-theme .status-dot.completed {
-  background: #707174;
+  background: var(--status-completed);
 }
 
 .card-actions {
@@ -518,12 +536,12 @@ body.light-theme .theme-toggle:focus-visible {
 
 .warn {
   margin-top: 7px;
-  color: #7C6B5F;
+  color: var(--warning-text);
   font-size: 9px;
 }
 
 body.light-theme .warn {
-  color: #45464A;
+  color: var(--warning-text);
 }
 
 .idle-state {

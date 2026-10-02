@@ -16,13 +16,28 @@
   </header>
 
   <section id="runnerControls" class="runner-controls" aria-label="Runner controls">
-    <label class="profile-summary" for="runnerSelect">
-      <span>Selected runner</span>
-      <select id="runnerSelect" aria-label="Selected runner">
-        <option value="m1">M1 · 20-operation acceptance</option>
-        <option value="168h">168h · long-run acceptance</option>
-      </select>
-    </label>
+    <div class="profile-summary">
+      <span class="profile-label">Selected runner</span>
+      <div class="runner-picker">
+        <button
+          id="runnerSelect"
+          class="runner-select"
+          type="button"
+          role="combobox"
+          aria-label="Selected runner"
+          aria-haspopup="listbox"
+          aria-expanded="false"
+          aria-controls="runnerSelectMenu"
+        >
+          <span id="runnerSelectLabel">M1 · 20-operation acceptance</span>
+          <span class="runner-select-chevron" aria-hidden="true">▾</span>
+        </button>
+        <div id="runnerSelectMenu" class="runner-select-menu" role="listbox" hidden>
+          <div id="runnerOption-m1" class="runner-select-option" role="option" aria-selected="true" data-value="m1" tabindex="-1">M1 · 20-operation acceptance</div>
+          <div id="runnerOption-168h" class="runner-select-option" role="option" aria-selected="false" data-value="168h" tabindex="-1">168h · long-run acceptance</div>
+        </div>
+      </div>
+    </div>
   </section>
 
   <div id="status" class="status" role="status" aria-live="polite"></div>

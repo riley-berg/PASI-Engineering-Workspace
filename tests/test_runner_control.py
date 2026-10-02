@@ -169,3 +169,37 @@ def test_runner_start_publishes_pid_and_starting_state(monkeypatch, tmp_path):
     assert state["runner_pid"] == 4242
     assert state["status"] == "starting"
     assert pid == "4242"
+
+
+def test_stop_terminates_the_isolated_runner_process_group(monkeypatch):
+    signals = []
+    states = iter([True, False])
+
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: next(states))
+    monkeypatch.setattr(bridge.os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(
+        bridge.os,
+        "killpg",
+        lambda pgid, sig: signals.append((pgid, sig)),
+    )
+
+    bridge._terminate_runner_process(4242, grace_seconds=0.1)
+
+    assert signals == [(4242, bridge.signal.SIGTERM)]
+
+
+def test_stop_falls_back_to_pid_for_legacy_runner(monkeypatch):
+    signals = []
+    states = iter([True, False])
+
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: next(states))
+    monkeypatch.setattr(bridge.os, "getpgid", lambda pid: pid - 1)
+    monkeypatch.setattr(
+        bridge.os,
+        "kill",
+        lambda pid, sig: signals.append((pid, sig)),
+    )
+
+    bridge._terminate_runner_process(4242, grace_seconds=0.1)
+
+    assert signals == [(4242, bridge.signal.SIGTERM)]

@@ -274,7 +274,7 @@ test('CDP submit uses the accessible Send control before Enter fallback', async 
             backendDOMNodeId: 101,
             role: {type: 'role', value: 'textbox'},
             name: {type: 'computedString', value: 'Message'},
-            value: {type: 'string', value: axReads === 1 ? '' : prompt},
+            value: {type: 'string', value: sendClicked ? '' : (axReads === 1 ? '' : prompt)},
             ignored: false,
             properties: [
               {name: 'editable', value: {type: 'boolean', value: true}},

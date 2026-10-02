@@ -34,9 +34,9 @@ body {
   --text-primary: #F4F1EC;
   --text-secondary: #D6CEC8;
   --text-muted: #A39892;
-  --runner-option-hover: #2C2927;
+  --runner-option-hover: #24262C;
   --runner-option-selected: #45464A;
-  --runner-option-selected-hover: #5B5C61;
+  --runner-option-selected-hover: #45464A;
   --status-idle: #F4F1EC;
   --status-idle-summary: #A39892;
   --status-paused: #6E7074;

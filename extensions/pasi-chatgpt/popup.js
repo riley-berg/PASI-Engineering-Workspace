@@ -550,6 +550,7 @@
   function setThemeUi(light) {
     document.documentElement.classList.toggle("light-theme", light);
     document.documentElement.removeAttribute("data-theme-pending");
+    document.documentElement.removeAttribute("data-popup-paint-pending");
 
     const button = $("themeToggle");
     button.textContent = light ? "☀️" : "🌙";

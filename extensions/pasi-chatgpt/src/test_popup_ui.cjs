@@ -12,7 +12,7 @@ const themeInit = fs.readFileSync(path.join(ROOT, "theme-init.js"), "utf8");
 test("popup has one neutral idle state and no legacy duplicate warning", () => {
   assert.match(popupHtml, /id="idleState"[^>]*class="idle-state"[^>]*hidden/);
   assert.match(popupHtml, /Ready/);
-  assert.match(popupHtml, /Navigate to a supported page to activate userscripts\./);
+  assert.match(popupHtml, /Ready to execute on this ChatGPT page\./);
   assert.doesNotMatch(popupHtml, /No PASI userscripts match this page\./);
   assert.doesNotMatch(popupHtml, /systemWarning/);
   assert.doesNotMatch(popupJs, /No PASI userscripts match this page\./);
@@ -159,8 +159,7 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
 
 test("popup uses connected/idle semantics without duplicate Ready labels", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
-  assert.match(popupJs, /return "Idle";/);
-  assert.match(popupJs, /return "Awaiting start\.";/);
+  assert.match(popupJs, /return "Ready to execute\.";/);
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
   assert.doesNotMatch(popupJs, /"Ready"/);
   assert.doesNotMatch(popupHtml, /class="status-badge">Ready<\/span>/);
@@ -178,14 +177,17 @@ test("runner cards do not animate theme surface or border changes", () => {
 });
 
 test("runner controls use explicit start or stop actions", () => {
-  assert.match(popupJs, /async function controlRunner\(profileId\)/);
-  assert.match(popupJs, /const action = running && isActiveProfile \? "stop" : "start";/);
+  assert.match(popupJs, /async function controlRunner\(profileId, requestedAction\)/);
+  assert.match(popupJs, /const action = requestedAction === "stop" \? "stop" : "start";/);
   assert.match(popupJs, /action,\s*profile: profileId/);
   assert.doesNotMatch(
     popupJs,
     /bridgeRequest\("POST", "\/runner\/control", \{\s*action:\s*"toggle"/
   );
-  assert.match(popupJs, /await controlRunner\(profileId\);/);
+  assert.match(
+    popupJs,
+    /await controlRunner\(profileId, runningThisProfile \? "stop" : "start"\);/
+  );
 });
 
 test("runner action status survives the post-action render", () => {

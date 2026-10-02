@@ -433,6 +433,11 @@ def _start_runner(profile: str) -> dict[str, Any]:
     environment = os.environ.copy()
     environment.setdefault("PYTHONUNBUFFERED", "1")
     environment["PASI_RUNNER_PROFILE"] = profile
+    # Every supervised profile must publish to the exact runtime directory
+    # consumed by this bridge. The 168h runner historically defaulted to a
+    # separate acceptance directory, which left the bridge stuck in "starting"
+    # or reporting a dead runner even while the child process was valid.
+    environment["PASI_RUNTIME_DIR"] = str(RUNNER_RUNTIME_DIR)
     if profile == "168h":
         environment["PASI_GITHUB_TOKEN"] = github_token
         environment["PASI_PUSH"] = "1"

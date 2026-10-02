@@ -98,6 +98,10 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /html {\n  background: #0D0E11/);
   assert.match(popupCss, /--runner-option-selected:\s*#45464A/);
   assert.match(popupCss, /--runner-option-selected-hover:\s*#333438/);
+  assert.match(
+    popupCss,
+    /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):hover,[\s\S]*background-color:\s*#F0ECE6\s*!important/
+  );
   assert.doesNotMatch(popupCss, /--runner-option-hover:\s*#2C2927/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
   const pickerHoverRule = popupCss.match(/\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[^}]*\}/)?.[0];

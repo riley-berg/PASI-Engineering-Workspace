@@ -73,7 +73,7 @@ def test_cdp_network_authority_contract():
     assert "network_classification: String(event.classification" not in background
     assert "network_reason: String(event.reason" not in background
 
-    for source in (cdp, extension / "src" / "background.js", extension / "src" / "popup.js"):
+    for source in (cdp, extension / "src" / "background.js", extension / "popup.js"):
         result = subprocess.run(
             ["node", "--check", str(source)],
             capture_output=True,

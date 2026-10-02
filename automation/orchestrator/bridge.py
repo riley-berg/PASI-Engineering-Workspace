@@ -2299,8 +2299,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             if wait_ms < 0 or wait_ms > 60_000:
                 self._send_json({"error": "wait_ms must be between 0 and 60000."}, HTTPStatus.BAD_REQUEST)
                 return
+
+            runner_state = load_runner_state()
+            if not runner_execution_authorized(runner_state):
+                self._send_json({"operation": None, "runner_ready": False})
+                return
+
             operation = self.bridge_state.wait_for_next_operation(controller_id, wait_ms)
-            self._send_json({"operation": operation})
+            self._send_json({"operation": operation, "runner_ready": True})
             return
 
         self._send_json(

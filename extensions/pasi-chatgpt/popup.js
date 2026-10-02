@@ -31,6 +31,10 @@
   async function render() {
     try {
       const result = await send(TYPES.active);
+      $("site").textContent = result.url || "No inspectable page";
+      const root = $("scripts");
+      root.replaceChildren();
+
       const executionCard = document.createElement("section");
       executionCard.className = "card";
       const executionTitle = document.createElement("div");
@@ -55,10 +59,7 @@
         }
       };
       executionCard.append(executionTitle, runNext);
-      $("scripts").replaceChildren(executionCard);
-      $("site").textContent = result.url || "No inspectable page";
-      const root = $("scripts");
-      root.replaceChildren();
+      root.append(executionCard);
       const menu = await send(TYPES.menu);
       if (menu.commands?.length) {
         const section = document.createElement("section");

@@ -159,32 +159,65 @@ def load_runner_capabilities() -> dict[str, Any]:
         "execution_authorized": runner_execution_authorized(payload),
     }
 
-def runner_process_is_alive() -> bool:
-    candidate_paths = (
+def runner_process_info() -> dict[str, Any] | None:
+    """Return the live PASI runner process and its profile, if one exists."""
+    candidate_pids: list[int] = []
+
+    def add_pid(value: object) -> None:
+        try:
+            pid = int(value)
+        except (TypeError, ValueError):
+            return
+        if pid > 1 and pid not in candidate_pids:
+            candidate_pids.append(pid)
+
+    for pid_path in (
         RUNNER_RUNTIME_DIR / "runner.pid",
         Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
-    )
-    for pid_path in candidate_paths:
+    ):
         try:
-            raw_pid = pid_path.read_text(encoding="utf-8").strip()
-            pid = int(raw_pid)
-        except (OSError, ValueError):
-            continue
-        if pid <= 1:
-            continue
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+            add_pid(pid_path.read_text(encoding="utf-8").strip())
         except OSError:
             continue
-        if any(
-            script_name in cmdline
-            for script_name in (
-                "pasi_168h_acceptance.py",
-                "pasi_m1_cdp_chain.py",
+
+    try:
+        payload = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    if isinstance(payload, dict):
+        add_pid(payload.get("runner_pid"))
+
+    profile_by_script = (
+        ("pasi_m1_cdp_chain.py", "m1"),
+        ("pasi_168h_acceptance.py", "168h"),
+        ("pasi_168h_supervisor.sh", "168h"),
+        ("pasi_overnight_engine_v2.py", None),
+    )
+
+    for pid in candidate_pids:
+        try:
+            cmdline = (
+                Path(f"/proc/{pid}/cmdline")
+                .read_bytes()
+                .replace(b"\x00", b" ")
+                .decode("utf-8", "ignore")
             )
-        ):
-            return True
-    return False
+        except OSError:
+            continue
+
+        for script_name, profile in profile_by_script:
+            if script_name in cmdline:
+                return {
+                    "pid": pid,
+                    "profile": profile,
+                    "cmdline": cmdline,
+                }
+
+    return None
+
+
+def runner_process_is_alive() -> bool:
+    return runner_process_info() is not None
 
 
 def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
@@ -205,6 +238,7 @@ def load_runner_state() -> dict[str, Any]:
         return {"available": False, "reason": "runner state unreadable"}
     if not isinstance(payload, dict):
         return {"available": False, "reason": "runner state invalid"}
+
     allowed = {
         "schema_version", "run_id", "started_at", "deadline_at", "worktree", "branch",
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
@@ -215,37 +249,35 @@ def load_runner_state() -> dict[str, Any]:
     }
     result = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
 
-    # The persisted state is a durable snapshot, not the authority for
-    # liveness. A runner can still be alive briefly while its script is
-    # publishing a terminal state, or a stale state file can outlive an
-    # unexpectedly terminated process. The popup and control endpoints must
-    # agree on the actual process reality.
-    process_alive = runner_process_is_alive()
-    status = str(result.get("status") or "")
-    active_statuses = {"starting", "running", "stopping"}
+    process = runner_process_info()
+    process_alive = process is not None
+    result["process_alive"] = process_alive
+    result["ready"] = process_alive and result.get("status") == "running"
+    if process is not None:
+        result["process_pid"] = process["pid"]
+        result["process_profile"] = process.get("profile")
+        if process.get("profile") in RUNNER_PROFILES:
+            result["runner_profile"] = process["profile"]
+            result["execution_mode"] = "supervised_" + process["profile"]
 
-    if process_alive and status not in active_statuses:
-        result["status"] = "running"
-        profile = str(result.get("runner_profile") or "")
-        if profile in RUNNER_PROFILES:
-            result["execution_mode"] = "supervised_" + profile
-        result.pop("error", None)
-        result.pop("failed_at", None)
-        result.pop("completed_at", None)
-    elif not process_alive and status == "starting":
+    status = str(result.get("status") or "")
+    if not process_alive and status == "starting":
         result["status"] = "failed"
+        result["ready"] = False
         result.setdefault(
             "error",
             "runner exited before initialization completed",
         )
     elif not process_alive and status == "running":
         result["status"] = "failed"
+        result["ready"] = False
         result.setdefault(
             "error",
             "runner process is no longer alive",
         )
 
     return result
+
 
 def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
     """Stop a supervised runner and its children without stopping the bridge."""
@@ -498,43 +530,57 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
     if normalized not in {"start", "toggle", "stop", "retry_current"}:
         raise ValueError("unsupported runner control action")
 
-    if normalized in {"start", "toggle"} and not runner_process_is_alive():
-        selected_profile = _runner_profile(profile)
-        return _start_runner(selected_profile)
+    selected_profile = _runner_profile(profile) if profile is not None else None
+    live_process = runner_process_info()
+
+    if normalized in {"start", "toggle"} and live_process is None:
+        return _start_runner(selected_profile or "m1")
 
     if normalized == "start":
+        actual_profile = live_process.get("profile") if live_process else None
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "start",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is already running",
+            }
         return {
             "accepted": False,
-            "action": normalized,
-            "profile": _runner_profile(profile),
+            "action": "start",
+            "profile": selected_profile or actual_profile,
             "reason": "runner already running",
         }
 
-    if normalized == "toggle" and runner_process_is_alive():
+    if normalized == "toggle" and live_process is not None:
         normalized = "stop"
 
     if normalized == "stop":
-        pid = _runner_pid()
-        if pid is None:
-            return {"accepted": False, "action": "stop", "reason": "runner pid unavailable"}
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\\x00", b" ").decode("utf-8", "ignore")
-        except OSError:
-            return {"accepted": False, "action": "stop", "reason": "runner process is no longer present"}
-        allowed = (
-            "pasi_overnight_engine_v2.py",
-            "pasi_168h_supervisor.sh",
-            "pasi_168h_acceptance.py",
-            "pasi_m1_cdp_chain.py",
-        )
-        if not any(script_name in cmdline for script_name in allowed):
-            return {"accepted": False, "action": "stop", "reason": "runner pid does not identify as PASI"}
+        if live_process is None:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": "runner is not running",
+            }
+
+        pid = int(live_process["pid"])
+        actual_profile = live_process.get("profile")
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is the active runner",
+            }
 
         state = load_runner_state()
         stopping = dict(state) if state.get("available") else {}
         stopping.update({
             "status": "stopping",
             "execution_mode": "manual",
+            "runner_pid": pid,
+            "runner_profile": actual_profile or stopping.get("runner_profile"),
             "paused_at": datetime.now(timezone.utc).isoformat(),
         })
         try:
@@ -561,12 +607,24 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
         paused = dict(stopping)
         paused["status"] = "paused"
         paused["paused_at"] = datetime.now(timezone.utc).isoformat()
+        paused["process_alive"] = False
+        paused["ready"] = False
         atomic_write_json(RUNNER_STATE_PATH, paused)
-        try:
-            (RUNNER_STATE_PATH.parent / "runner.pid").unlink()
-        except FileNotFoundError:
-            pass
-        return {"accepted": True, "action": "stop", "pid": pid, "status": "paused"}
+        for pid_path in (
+            RUNNER_STATE_PATH.parent / "runner.pid",
+            Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
+        ):
+            try:
+                pid_path.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "accepted": True,
+            "action": "stop",
+            "pid": pid,
+            "profile": actual_profile,
+            "status": "paused",
+        }
 
     current_state = load_runner_state()
     current_task = str(current_state.get("current_task", "")).strip()
@@ -583,6 +641,7 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
     temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(RUNNER_CONTROL_PATH)
     return {"accepted": True, "action": normalized, "task": current_task}
+
 
 class BridgeState:
     """

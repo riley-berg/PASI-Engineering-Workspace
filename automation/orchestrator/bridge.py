@@ -3,6 +3,8 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -79,7 +81,12 @@ RUNNER_CAPABILITIES_PATH = Path.home() / ".pasi" / "runner" / "capabilities.json
 RUNNER_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))).expanduser().resolve()
 RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
 RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
+RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+RUNNER_PROFILES = {
+    "m1": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
+    "168h": (sys.executable, str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
+}
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: CONTEXT_EXHAUSTED",
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
@@ -188,51 +195,119 @@ def load_runner_state() -> dict[str, Any]:
     }
     return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
 
-def request_runner_control(action: str) -> dict[str, Any]:
-    if action not in {"stop", "retry_current"}:
+def _runner_pid() -> int | None:
+    try:
+        raw_pid = (RUNNER_STATE_PATH.parent / "runner.pid").read_text(encoding="utf-8").strip()
+        pid = int(raw_pid)
+    except (OSError, ValueError):
+        return None
+    return pid if pid > 1 else None
+
+
+def _runner_profile(profile: object) -> str:
+    value = str(profile or "m1").strip().casefold()
+    if value not in RUNNER_PROFILES:
+        raise ValueError("unsupported runner profile")
+    return value
+
+
+def _start_runner(profile: str) -> dict[str, Any]:
+    if runner_process_is_alive():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner already running"}
+
+    if profile == "168h":
+        if not os.environ.get("PASI_GITHUB_TOKEN", "").strip() and not os.environ.get("GITHUB_TOKEN", "").strip():
+            return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
+        if os.environ.get("PASI_PUSH", "").strip() != "1":
+            return {"accepted": False, "action": "start", "profile": profile, "reason": "PASI_PUSH=1 is required for a real 168-hour run"}
+
+    RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = RUNNER_LOG_DIR / f"runner-{profile}.log"
+    command = list(RUNNER_PROFILES[profile])
+    environment = os.environ.copy()
+    log_handle = log_path.open("a", encoding="utf-8")
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=CONFIG.project_root,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except Exception:
+        log_handle.close()
+        raise
+    log_handle.close()
+    return {
+        "accepted": True,
+        "action": "start",
+        "profile": profile,
+        "pid": process.pid,
+        "log_path": str(log_path),
+    }
+
+
+def request_runner_control(action: str, profile: object = None) -> dict[str, Any]:
+    normalized = str(action or "").strip().casefold()
+    if normalized not in {"start", "toggle", "stop", "retry_current"}:
         raise ValueError("unsupported runner control action")
-    if action == "stop":
+
+    if normalized in {"start", "toggle"} and not runner_process_is_alive():
+        selected_profile = _runner_profile(profile)
+        return _start_runner(selected_profile)
+
+    if normalized == "start":
+        return {
+            "accepted": False,
+            "action": normalized,
+            "profile": _runner_profile(profile),
+            "reason": "runner already running",
+        }
+
+    if normalized == "toggle" and runner_process_is_alive():
+        normalized = "stop"
+
+    if normalized == "stop":
+        pid = _runner_pid()
+        if pid is None:
+            return {"accepted": False, "action": "stop", "reason": "runner pid unavailable"}
         try:
-            raw_pid = (RUNNER_STATE_PATH.parent / "runner.pid").read_text(encoding="utf-8").strip()
-            pid = int(raw_pid)
-        except (OSError, ValueError):
-            return {"accepted": False, "action": action, "reason": "runner pid unavailable"}
-        if pid <= 1:
-            return {"accepted": False, "action": action, "reason": "runner pid invalid"}
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\\x00", b" ").decode("utf-8", "ignore")
         except OSError:
-            return {"accepted": False, "action": action, "reason": "runner process is no longer present"}
-        if (
-            "pasi_overnight_engine_v2.py" not in cmdline
-            and "pasi_168h_supervisor.sh" not in cmdline
-            and "pasi_168h_acceptance.py" not in cmdline
-            and "pasi_m1_cdp_chain.py" not in cmdline
-        ):
-            return {"accepted": False, "action": action, "reason": "runner pid does not identify as PASI"}
+            return {"accepted": False, "action": "stop", "reason": "runner process is no longer present"}
+        allowed = (
+            "pasi_overnight_engine_v2.py",
+            "pasi_168h_supervisor.sh",
+            "pasi_168h_acceptance.py",
+            "pasi_m1_cdp_chain.py",
+        )
+        if not any(script_name in cmdline for script_name in allowed):
+            return {"accepted": False, "action": "stop", "reason": "runner pid does not identify as PASI"}
         try:
             os.kill(pid, 15)
         except ProcessLookupError:
-            return {"accepted": False, "action": action, "reason": "runner process already stopped"}
+            return {"accepted": False, "action": "stop", "reason": "runner process already stopped"}
         except PermissionError:
-            return {"accepted": False, "action": action, "reason": "runner process signal denied"}
-        return {"accepted": True, "action": action, "pid": pid}
+            return {"accepted": False, "action": "stop", "reason": "runner process signal denied"}
+        return {"accepted": True, "action": "stop", "pid": pid}
 
     current_state = load_runner_state()
     current_task = str(current_state.get("current_task", "")).strip()
     if not current_state.get("available") or not current_task:
-        return {"accepted": False, "action": action, "reason": "no current runner task"}
+        return {"accepted": False, "action": normalized, "reason": "no current runner task"}
     RUNNER_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
-        "action": action,
+        "action": normalized,
         "task_id": current_state.get("current_task_id", ""),
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
     temporary = RUNNER_CONTROL_PATH.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(RUNNER_CONTROL_PATH)
-    return {"accepted": True, "action": action, "task": current_task}
+    return {"accepted": True, "action": normalized, "task": current_task}
 
 class BridgeState:
     """
@@ -1942,7 +2017,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 if not isinstance(action, str):
                     self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(request_runner_control(action.strip().casefold()))
+                self._send_json(
+                    request_runner_control(
+                        action.strip().casefold(),
+                        payload.get("profile"),
+                    )
+                )
                 return
 
             if path == "/queue":

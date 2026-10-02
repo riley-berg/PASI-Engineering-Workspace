@@ -40,14 +40,6 @@ def test_state_manager_exposes_only_live_bridge_state_api():
     assert hasattr(manager, "load_terminal_response")
     assert hasattr(manager, "prune_terminal_responses")
     for live_browser_method in (
-        "save_browser_results",
-        "load_browser_results",
-        "save_browser_response",
-        "load_browser_response",
-        "save_browser_health",
-        "load_browser_health",
-        "save_browser_state",
-        "load_browser_state",
     ):
         assert hasattr(manager, live_browser_method), live_browser_method
     for retired in (

@@ -54,11 +54,11 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
-  assert.match(popupCss, /--bg-main:\s*#f4f1ec/);
-  assert.match(popupCss, /--bg-card:\s*#ffffff/);
-  assert.match(popupCss, /--text-primary:\s*#1c1818/);
-  assert.match(popupCss, /--text-secondary:\s*#544b43/);
-  assert.match(popupCss, /--text-muted:\s*#756b62/);
+  assert.match(popupCss, /--bg-main:\s*#F6F1EA/);
+  assert.match(popupCss, /--bg-card:\s*#FFFFFF/);
+  assert.match(popupCss, /--text-primary:\s*#1A1D1E/);
+  assert.match(popupCss, /--text-secondary:\s*#40372F/);
+  assert.match(popupCss, /--text-muted:\s*#6E6258/);
   assert.match(popupCss, /color-scheme:\s*light/);
   assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
   assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);

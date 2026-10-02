@@ -83,6 +83,8 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
+  assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Ready" \? " ready-summary" : ""\)/);
+  assert.match(popupCss, /\.status-desc\.ready-summary[\s\S]*color:\s*var\(--status-ready\)/);
   assert.match(popupCss, /--status-ready:\s*#707174/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--status-ready:\s*#707174/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);

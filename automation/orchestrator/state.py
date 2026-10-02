@@ -21,6 +21,10 @@ class StateManager:
     def __init__(self, ai_dir: Path):
         self.ai_dir = ai_dir
         self.queue_path = ai_dir / "queue.json"
+        self.browser_results_path = ai_dir / "browser-results.json"
+        self.browser_health_path = ai_dir / "browser-health.json"
+        self.browser_state_path = ai_dir / "browser-state.json"
+        self.browser_response_path = ai_dir / "browser-response.json"
         self.terminal_responses_dir = ai_dir / "terminal-responses"
         self._terminal_response_prune_signature: frozenset[str] | None = None
 
@@ -59,12 +63,56 @@ class StateManager:
             raise StateCorruptionError(f"Corrupt state file: {path}") from exc
 
     @staticmethod
+    def require_dict(path: Path, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise StateCorruptionError(
+                f"Invalid state shape for {path}: expected object"
+            )
+        return value
+
+    @staticmethod
     def require_list(path: Path, value: Any) -> list[dict[str, Any]]:
         if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
             raise StateCorruptionError(
                 f"Invalid state shape for {path}: expected list of objects"
             )
         return value
+
+    def save_browser_results(self, results: dict[str, Any]) -> None:
+        self.write_json(self.browser_results_path, results)
+
+    def load_browser_results(self) -> dict[str, Any]:
+        return self.require_dict(
+            self.browser_results_path,
+            self.read_json(self.browser_results_path, {}),
+        )
+
+    def save_browser_response(self, response: dict[str, Any]) -> None:
+        self.write_json(self.browser_response_path, response)
+
+    def load_browser_response(self) -> dict[str, Any]:
+        return self.require_dict(
+            self.browser_response_path,
+            self.read_json(self.browser_response_path, {}),
+        )
+
+    def save_browser_health(self, health: dict[str, Any]) -> None:
+        self.write_json(self.browser_health_path, health)
+
+    def load_browser_health(self) -> dict[str, Any]:
+        return self.require_dict(
+            self.browser_health_path,
+            self.read_json(self.browser_health_path, {}),
+        )
+
+    def save_browser_state(self, state: dict[str, Any]) -> None:
+        self.write_json(self.browser_state_path, state)
+
+    def load_browser_state(self) -> dict[str, Any]:
+        return self.require_dict(
+            self.browser_state_path,
+            self.read_json(self.browser_state_path, {}),
+        )
 
     def save_queue(self, queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
         terminal_indexes = [

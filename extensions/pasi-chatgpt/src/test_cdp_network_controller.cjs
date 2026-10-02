@@ -258,81 +258,49 @@ test('CDP submit operation uses native input and never clicks a DOM send control
 
 test('CDP submit falls back to the accessible Send button when Enter is not accepted', async () => {
   const debuggerApi = fakeDebugger();
-  let treeCalls = 0;
+  let sendActivated = false;
+  let composerReads = 0;
   const prompt = '[PASI_OPERATION op-send-fallback]';
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
 
   debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
     if (method === 'Accessibility.getFullAXTree') {
       this.commands.push({method, params});
-      treeCalls += 1;
-      if (treeCalls === 1) {
-        return callback({
-          nodes: [{
-            nodeId: 'ax-composer',
-            backendDOMNodeId: 101,
-            role: {type: 'role', value: 'textbox'},
-            name: {type: 'computedString', value: 'Message'},
-            value: {type: 'string', value: ''},
-            ignored: false,
-            properties: [
-              {name: 'editable', value: {type: 'boolean', value: true}},
-              {name: 'multiline', value: {type: 'boolean', value: true}},
-              {name: 'focused', value: {type: 'boolean', value: false}}
-            ]
-          }]
-        });
-      }
-      if (treeCalls === 2 || treeCalls === 3) {
-        return callback({
-          nodes: [
-            {
-              nodeId: 'ax-composer',
-              backendDOMNodeId: 101,
-              role: {type: 'role', value: 'textbox'},
-              name: {type: 'computedString', value: 'Message'},
-              value: {type: 'string', value: prompt},
-              ignored: false,
-              properties: [
-                {name: 'editable', value: {type: 'boolean', value: true}},
-                {name: 'multiline', value: {type: 'boolean', value: true}},
-                {name: 'focused', value: {type: 'boolean', value: true}}
-              ]
-            },
-            {
-              nodeId: 'ax-send',
-              backendDOMNodeId: 202,
-              role: {type: 'role', value: 'button'},
-              name: {type: 'computedString', value: 'Send'},
-              ignored: false,
-              properties: [
-                {name: 'disabled', value: {type: 'boolean', value: false}}
-              ]
-            }
-          ]
-        });
-      }
-      return callback({
-        nodes: [{
-          nodeId: 'ax-composer',
-          backendDOMNodeId: 101,
-          role: {type: 'role', value: 'textbox'},
-          name: {type: 'computedString', value: 'Message'},
-          value: {type: 'string', value: ''},
+      composerReads += 1;
+      const currentValue = sendActivated ? '' : (composerReads === 1 ? '' : prompt);
+      const nodes = [{
+        nodeId: 'ax-composer',
+        backendDOMNodeId: 101,
+        role: {type: 'role', value: 'textbox'},
+        name: {type: 'computedString', value: 'Message'},
+        value: {type: 'string', value: currentValue},
+        ignored: false,
+        properties: [
+          {name: 'editable', value: {type: 'boolean', value: true}},
+          {name: 'multiline', value: {type: 'boolean', value: true}},
+          {name: 'focused', value: {type: 'boolean', value: composerReads > 0}}
+        ]
+      }];
+      if (!sendActivated && composerReads >= 2) {
+        nodes.push({
+          nodeId: 'ax-send',
+          backendDOMNodeId: 202,
+          role: {type: 'role', value: 'button'},
+          name: {type: 'computedString', value: 'Send'},
           ignored: false,
-          properties: [
-            {name: 'editable', value: {type: 'boolean', value: true}},
-            {name: 'multiline', value: {type: 'boolean', value: true}},
-            {name: 'focused', value: {type: 'boolean', value: true}}
-          ]
-        }]
-      });
+          properties: [{name: 'disabled', value: {type: 'boolean', value: false}}]
+        });
+      }
+      return callback({nodes});
     }
 
+    if (method === 'DOM.focus' && params?.backendNodeId === 202) {
+      sendActivated = true;
+    }
     return originalSendCommand(_debuggee, method, params, callback);
   };
 
-  const controller = source.createController({debuggerApi});
+  const controller = source.createController({debuggerApi, now: () => Date.now()});
   controller.install();
   await controller.bindOperation({
     tabId: 21,
@@ -348,6 +316,7 @@ test('CDP submit falls back to the accessible Send button when Enter is not acce
   assert.ok(debuggerApi.commands.some(
     (command) => command.method === 'DOM.focus' && command.params.backendNodeId === 202
   ));
+  assert.equal(sendActivated, true);
   const enterEvents = debuggerApi.commands.filter(
     (command) => command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
   );

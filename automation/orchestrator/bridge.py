@@ -245,6 +245,8 @@ def load_runner_state() -> dict[str, Any]:
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
         "execution_mode", "runner_profile", "runner_pid", "log_path", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
+        "current_operation_id", "current_operation_index", "current_operation_status",
+        "phase",
         "last_operation_id", "last_request_id", "updated_at", "completed_at",
     }
     result = {"available": True, **{key: payload[key] for key in allowed if key in payload}}

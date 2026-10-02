@@ -57,8 +57,8 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--bg-main:\s*#FAF8F5/);
   assert.match(popupCss, /--bg-card:\s*#FFFFFF/);
   assert.match(popupCss, /--text-primary:\s*#1A1B20/);
-  assert.match(popupCss, /--text-secondary:\s*#707174/);
-  assert.match(popupCss, /--text-muted:\s*#929396/);
+  assert.match(popupCss, /--text-secondary:\s*#55565A/);
+  assert.match(popupCss, /--text-muted:\s*#707174/);
   assert.match(popupCss, /--btn-primary:\s*#45464A/);
   assert.match(popupCss, /--btn-primary-hover:\s*#333438/);
   assert.match(popupCss, /--btn-secondary:\s*#FFFFFF/);
@@ -80,15 +80,15 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--idle-bg:\s*rgba\(255, 255, 255/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
-  assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
+  assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
   assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Ready" \? " ready-summary" : ""\)/);
   assert.match(popupCss, /\.status-desc\.ready-summary[\s\S]*color:\s*var\(--status-ready\)/);
-  assert.match(popupCss, /--status-ready:\s*#707174/);
-  assert.match(popupCss, /body\.light-theme[\s\S]*--status-ready:\s*#707174/);
+  assert.match(popupCss, /--status-ready:\s*#1A1B20/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-ready:\s*#1A1B20/);
   assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
-  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
+  assert.match(popupCss, /body\.light-theme[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);\n  assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);\n  assert.match(popupCss, /\.runner-select-option:hover[\s\S]*font-weight:\s*700/);\n  assert.match(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--border-color\)/);\n  assert.match(popupCss, /--status-ready-summary:\s*#707174/);\n  assert.match(popupCss, /\.status-dot\.ready\s*\{\s*display:\s*none/);
 });
 
 test("popup uses a custom themed runner picker with no native select styling", () => {
@@ -153,8 +153,8 @@ test("popup critical text and control colors meet WCAG AA contrast targets", () 
 
   assert.ok(contrastRatio("#1A1B20", "#FAF8F5") >= 4.5);
   assert.ok(contrastRatio("#707174", "#FAF8F5") >= 4.5);
-  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
+  assert.ok(contrastRatio("#55565A", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
-  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
+  assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);\n  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
 });

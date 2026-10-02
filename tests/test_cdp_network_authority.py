@@ -62,7 +62,7 @@ def test_cdp_network_authority_contract():
     assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background
     assert "BRIDGE_NEXT_OPERATION_RE" in background
-    assert "&wait_ms=" in background
+    assert "&wait_ms=[0-9]{1,5}" in background
 
     for source in (cdp, extension / "src" / "background.js"):
         result = subprocess.run(

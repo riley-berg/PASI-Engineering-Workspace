@@ -157,12 +157,11 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*transition:\s*none/);
 });
 
-test("popup uses connected/idle semantics without duplicate Ready labels", () => {
+test("popup uses connected and ready runner semantics", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
   assert.match(popupJs, /return "Ready";/);
   assert.match(popupJs, /return "Ready to execute\.";/);
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
-  assert.doesNotMatch(popupJs, /"Ready"/);
   assert.doesNotMatch(popupHtml, /class="status-badge">Ready<\/span>/);
 });
 

@@ -1,0 +1,18 @@
+{
+  "schema_version": "pasi-native-chromium-v2",
+  "captured_at": "2026-09-28T22:44:46.449Z",
+  "data": {
+    "kind": "chatgpt_state",
+    "controller_version": "2.4.11",
+    "chat_url": "https://chatgpt.com/c/6aba04ac-7350-83e9-a523-772d12bb2613",
+    "conversation_context_exhausted": false,
+    "chat_exhausted": false,
+    "provider_usage_limited": false,
+    "github_attached": false,
+    "reasoning_mode": null,
+    "reasoning_capability": "available",
+    "conversation_signature": "2:3:Finished the integration and verification pass. The new signed new-chat audit is now part of the real 168-hour path: The 168h supervisor replays the durable new-chat hash/signature chain before dispatch and throughout the run. A corrupted or unverifiable audit chain fails closed and records a terminal audit_invalid state instead of silently continuing. P0.4 evidence now records the audit log, public-key path, record count, and chain head. The launcher binds ChatGPT runtime state and audit keys to the same acceptance runtime directory. The launcher has an explicit production smoke mode. The launcher now handles both repository Python paths and PATH-resolved Python commands. CI now exercises both the direct 168h supervisor smoke and the actual run_p0_4_168h.sh production entrypoint. The final branch head is 92ce4439c49f4671a8470418352127c00937094f. Verified on GitHub: 212 tests passed 168h clean-environment smoke passed 168h production launcher smoke passed Frontend tests passed PASI security analysis passed PR #142 remains open and mergeable. The production launcher is therefore test-verified end-to-end up to the point where an actual live seven-day run would require the real ChatGPT/browser environment and GitHub credentials. The 168-hour supervisor itself is now wired to enforce and preserve the new-chat audit during that run. Update your checkout to the final head with: Bash git pull --ff-only origin pasi/p0-4-latency-cleanup-20260928 Then the real run entrypoint is: Bash PASI_GITHUB_TOKEN=\"$GITHUB_TOKEN\" ./scripts/run_p0_4_168h.sh Your existing replay command remains valid, and a fresh runtime with no new-chat events correctly reports VALID: 0 new-chat decision record(s) checked. Verify the 168-hour run locally Run the production smoke test",
+    "active_operation_id": null,
+    "native_controller": true
+  }
+}

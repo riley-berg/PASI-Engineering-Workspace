@@ -156,7 +156,12 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 3
     const boundedWaitMs = Math.max(1000, Math.min(5000, Number(waitMs) || 3000));
     let bridgeRetryMs = 250;
     while (true) {
-      if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
+      if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) {
+        // A stale/transient CDP request must not terminate the dispatcher.
+        // Wait until the controller is idle, then re-check runner authorization.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
 
       const runnerState = await bridgeJson('/runner/state', 5000);
       if (runnerState === null) {
@@ -186,7 +191,14 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 3
       bridgeRetryMs = 250;
       const operation = payload?.operation;
       if (operation?.operation_id) {
-        return dispatchOperationForController(tabId, controllerId, operation);
+        const dispatched = await dispatchOperationForController(tabId, controllerId, operation);
+        if (dispatched) return true;
+        // Keep the waiter alive after a transient tab/CDP dispatch failure.
+        // The bridge will redeliver a still-claimed operation after its
+        // controller lease expires, so a temporary navigation/debugger race
+        // cannot strand M1 at 0/20.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }

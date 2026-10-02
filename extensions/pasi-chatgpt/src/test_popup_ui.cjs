@@ -135,6 +135,9 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
 
   assert.doesNotMatch(popupCss, /html\.light-theme body \.runner-select-option/);
   assert.doesNotMatch(popupCss, /--runner-option-selected-hover:/);
+  assert.doesNotMatch(popupCss, /html\.light-theme body \.status-dot\.(running|paused|failed|completed)/);
+  assert.doesNotMatch(popupCss, /html\.light-theme body \.btn-primary/);
+  assert.doesNotMatch(popupCss, /html\.light-theme body \.warn/);
   assert.doesNotMatch(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*transition:\s*none/);

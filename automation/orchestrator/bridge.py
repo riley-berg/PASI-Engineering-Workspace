@@ -225,9 +225,18 @@ def _runner_profile(profile: object) -> str:
 
 def _github_token() -> str:
     """Resolve a GitHub credential for supervised runners without storing it."""
-    configured = (
-        os.environ.get("PASI_GITHUB_TOKEN", "").strip()
-        or os.environ.get("GITHUB_TOKEN", "").strip()
+    configured = next(
+        (
+            os.environ.get(name, "").strip()
+            for name in (
+                "PASI_PROJECTS_TOKEN",
+                "PASI_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            )
+            if os.environ.get(name, "").strip()
+        ),
+        "",
     )
     if configured:
         return configured

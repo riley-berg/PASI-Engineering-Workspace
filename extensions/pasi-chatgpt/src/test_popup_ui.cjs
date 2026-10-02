@@ -154,8 +154,8 @@ test("popup bootstraps the saved theme before first paint", () => {
   assert.ok(stylesheetIndex >= 0);
   assert.ok(themeScriptIndex < stylesheetIndex);
   assert.match(popupHtml, /<html lang="en" style="background:#0D0E11;color-scheme:dark">/);
-  assert.match(themeInit, /style\.backgroundColor = "#FAF8F5"/);
-  assert.match(themeInit, /style\.backgroundColor = "#0D0E11"/);
+  assert.match(themeInit, /setInitialColorScheme\(true\)/);
+  assert.match(themeInit, /setInitialColorScheme\(false\)/);
   assert.match(popupJs, /style\.backgroundColor = light \? "#FAF8F5" : "#0D0E11"/);
   assert.match(themeInit, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
   assert.match(themeInit, /document\.documentElement\.classList\.add\("light-theme"\)/);

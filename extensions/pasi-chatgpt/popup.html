@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" style="background:#0D0E11;color-scheme:dark">
+<html lang="en" style="background:#0B0D10;color-scheme:dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -8,36 +8,28 @@
   <script src="theme-init.js"></script>
   <style id="pasi-theme-critical">
     html {
-      background: #0D0E11;
+      background: #0B0D10;
       color-scheme: dark;
     }
 
     html.light-theme {
-      background: #FAF8F5;
+      background: #F5F7FA;
       color-scheme: light;
     }
 
     body {
-      background: #0D0E11;
-      color: #F4F1EC;
+      background: #0B0D10;
+      color: #F5F7FA;
     }
 
     html.light-theme body {
-      background: #FAF8F5;
-      color: #1A1B20;
+      background: #F5F7FA;
+      color: #171A20;
     }
 
     button {
       -webkit-appearance: none;
       appearance: none;
-    }
-
-    .idle-state {
-      background: rgba(23, 25, 30, .78);
-    }
-
-    html.light-theme .idle-state {
-      background: rgba(255, 255, 255, .95);
     }
   </style>
   <link rel="stylesheet" href="popup.css">
@@ -50,8 +42,6 @@
     </div>
     <button id="themeToggle" class="theme-toggle" type="button" title="Switch to light theme" aria-label="Switch to light theme">🌙</button>
   </header>
-
-  <section id="runnerControls" class="runner-controls" aria-label="Runner controls"></section>
 
   <div id="status" class="status" role="status" aria-live="polite"></div>
 

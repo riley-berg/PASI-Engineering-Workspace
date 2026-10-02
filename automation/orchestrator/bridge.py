@@ -191,7 +191,8 @@ def load_runner_state() -> dict[str, Any]:
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
-        "execution_mode",
+        "execution_mode", "target_operations", "completed_operations", "chat_url",
+        "last_operation_id", "last_request_id", "updated_at", "completed_at",
     }
     return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
 

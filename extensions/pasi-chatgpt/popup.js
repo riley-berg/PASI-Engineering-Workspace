@@ -706,4 +706,12 @@
   });
 
   void render();
+
+  // Keep the dashboard synchronized while the popup is open. Runner state is
+  // durable on the bridge, but without polling the popup can display an old
+  // "Running" or 0/20 snapshot after the process has already advanced/failed.
+  const runnerRefreshTimer = setInterval(() => {
+    void render();
+  }, 750);
+  window.addEventListener("unload", () => clearInterval(runnerRefreshTimer), {once: true});
 })();

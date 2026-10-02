@@ -441,15 +441,13 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 
 async function dispatchNextOperationForController(tabId, controllerId) {
   if (typeof tabId !== 'number' || !controllerId) return false;
-  return serializeOperationDispatch(async () => {
-    if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
-    const payload = await bridgeJson(
-      '/next-operation?controller_id=' + encodeURIComponent(controllerId)
-    );
-    const operation = payload?.operation;
-    if (!operation || !operation.operation_id) return false;
-    return dispatchOperationForController(tabId, controllerId, operation);
-  });
+  // Queue dispatch must remain live while the response-processing barrier is
+  // pending. A non-blocking /next-operation probe can observe the barrier,
+  // return no operation, and then leave the controller with no waiter to wake
+  // when /chat/processed releases the next task. Reuse the durable long-poll
+  // waiter so both startup and barrier-release paths converge on the same
+  // handoff behavior.
+  return waitForNextOperationForController(tabId, controllerId);
 }
 
 const BRIDGE_ROUTES = new Set([

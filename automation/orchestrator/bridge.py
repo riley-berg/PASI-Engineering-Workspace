@@ -286,13 +286,28 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
         )
         if not any(script_name in cmdline for script_name in allowed):
             return {"accepted": False, "action": "stop", "reason": "runner pid does not identify as PASI"}
+
+        state = load_runner_state()
+        if state.get("available"):
+            paused = dict(state)
+            paused["status"] = "paused"
+            paused["execution_mode"] = "manual"
+            paused["paused_at"] = datetime.now(timezone.utc).isoformat()
+            try:
+                atomic_write_json(RUNNER_STATE_PATH, paused)
+            except OSError:
+                return {"accepted": False, "action": "stop", "reason": "runner state could not be persisted"}
         try:
             os.kill(pid, 15)
         except ProcessLookupError:
-            return {"accepted": False, "action": "stop", "reason": "runner process already stopped"}
+            pass
         except PermissionError:
             return {"accepted": False, "action": "stop", "reason": "runner process signal denied"}
-        return {"accepted": True, "action": "stop", "pid": pid}
+        try:
+            (RUNNER_STATE_PATH.parent / "runner.pid").unlink()
+        except FileNotFoundError:
+            pass
+        return {"accepted": True, "action": "stop", "pid": pid, "status": "paused"}
 
     current_state = load_runner_state()
     current_task = str(current_state.get("current_task", "")).strip()

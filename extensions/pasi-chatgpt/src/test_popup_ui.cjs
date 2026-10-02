@@ -317,3 +317,26 @@ test("popup surfaces M1 dispatch wait diagnostics", () => {
   assert.match(popupJs, /Waiting for CDP dispatch/);
   assert.match(popupJs, /current_operation_id/);
 });
+
+
+test("runner authorization follows the live active ChatGPT tab", () => {
+  assert.match(
+    popupJs,
+    /chrome\.tabs\.query\(\{active: true, lastFocusedWindow: true\}\)/
+  );
+  assert.match(
+    popupJs,
+    /const tabUrl = String\(tabs\?\.\[0\]\?\.url \|\| ""\);/
+  );
+  assert.match(
+    popupJs,
+    /if \(tabUrl\) activeUrl = tabUrl;/
+  );
+});
+
+test("M1 startup phases are surfaced instead of appearing silently stuck", () => {
+  assert.match(popupJs, /startup: "Starting M1 runner\."/);
+  assert.match(popupJs, /health_check: "Checking bridge and browser health\."/);
+  assert.match(popupJs, /browser_diagnostics: "Reading the active ChatGPT browser state\."/);
+  assert.match(popupJs, /ready_for_first_operation: "Ready for the first M1 operation\."/);
+});

@@ -631,6 +631,7 @@
         setStatus("");
       }
     } catch (error) {
+      document.documentElement.removeAttribute("data-popup-paint-pending");
       setStatus(String(error?.message || error), true);
     }
   }

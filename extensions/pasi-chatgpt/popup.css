@@ -73,7 +73,6 @@ html.light-theme body {
   --idle-bg: rgba(255, 255, 255, .98);
   --idle-border: #D7DDE5;
 }
-}
 
 .popup-header {
   display: flex;
@@ -230,12 +229,25 @@ html.light-theme body {
   color: var(--danger-text);
 }
 
-.status-text.starting {
+.status-text.starting,
+.status-text.stopping {
   color: var(--status-starting);
 }
 
-.status-text.stopped {
-  color: var(--status-stopped);
+.status-text.running {
+  color: var(--status-running);
+}
+
+.status-text.failed {
+  color: var(--status-failed);
+}
+
+.status-text.completed {
+  color: var(--status-completed);
+}
+
+.status-text.unavailable {
+  color: var(--status-unavailable);
 }
 
 .status-desc {

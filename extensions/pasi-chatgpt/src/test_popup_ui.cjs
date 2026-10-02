@@ -107,6 +107,17 @@ test("light and dark surface palettes are explicit and stable", () => {
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6|6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
 });
 
+test("runner dropdown control gets a stable hover outline without touching options", () => {
+  assert.match(
+    popupCss,
+    /\.runner-select:hover,\s*\.runner-select\.open\s*\{[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);[\s\S]*outline-offset:\s*0;/
+  );
+  assert.doesNotMatch(
+    popupCss,
+    /\.runner-select:hover,\s*\.runner-select\.open\s*\{[\s\S]*border-color:\s*var\(--btn-primary\)/
+  );
+});
+
 test("custom runner picker has a single, stable hover/focus rule", () => {
   assert.match(popupHtml, /id="runnerSelect"[^>]*role="combobox"/);
   assert.match(popupHtml, /id="runnerSelectMenu"[^>]*role="listbox"[^>]*hidden/);

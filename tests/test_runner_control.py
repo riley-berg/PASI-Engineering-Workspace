@@ -81,6 +81,42 @@ def test_explicit_start_never_becomes_stop(monkeypatch):
     assert result["reason"] == "runner already running"
 
 
+def test_load_runner_state_promotes_live_process_over_stale_terminal_state(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"completed","runner_profile":"m1","execution_mode":"manual",'
+        '"completed_operations":20,"completed_at":"2026-10-02T00:00:00+00:00"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+
+    result = bridge.load_runner_state()
+
+    assert result["status"] == "running"
+    assert result["runner_profile"] == "m1"
+    assert result["execution_mode"] == "supervised_m1"
+    assert "error" not in result
+    assert "completed_at" not in result
+
+
+def test_load_runner_state_marks_dead_running_runner_failed(monkeypatch, tmp_path):
+    state_path = tmp_path / "runner" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"status":"running","runner_profile":"m1","execution_mode":"supervised_m1"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "RUNNER_STATE_PATH", state_path)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+
+    result = bridge.load_runner_state()
+
+    assert result["status"] == "failed"
+    assert result["error"] == "runner process is no longer alive"
+
+
 def test_load_runner_state_preserves_status(monkeypatch, tmp_path):
     state_path = tmp_path / "runner" / "state.json"
     state_path.parent.mkdir(parents=True)

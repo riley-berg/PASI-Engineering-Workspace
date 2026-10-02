@@ -1,6 +1,10 @@
 import pytest
 
-from automation.orchestrator.bridge import BridgeState, completion_markers_satisfied
+from automation.orchestrator.bridge import (
+    BridgeRequestHandler,
+    BridgeState,
+    completion_markers_satisfied,
+)
 from automation.orchestrator.state import StateManager
 
 def test_completion_markers_accept_exact_line():
@@ -467,3 +471,43 @@ def test_incomplete_cdp_response_never_becomes_authoritative(tmp_path):
     assert failed is not None
     assert failed["status"] == "queued"
     assert failed["retry_class"] == "response"
+
+
+def test_network_failure_with_legacy_network_recovery_context_is_retried(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    captured = {}
+
+    handler = BridgeRequestHandler.__new__(BridgeRequestHandler)
+    handler.bridge_state = bridge
+    handler._send_json = lambda payload, status=200: captured.update(
+        {"payload": payload, "status": status}
+    )
+
+    handler._failed(
+        {
+            "operation_id": operation.operation_id,
+            "controller_id": "controller-cdp",
+            "failure_source": "network",
+            "error": "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+            "recovery_context": {
+                "network_request_id": "req-legacy",
+                "network_classification": "response_correlation_failure",
+                "network_reason": "RESPONSE_MARKER_NOT_FOUND",
+            },
+        }
+    )
+
+    assert captured["status"] == 200
+    retried = captured["payload"]["operation"]
+    assert retried["status"] == "queued"
+    assert retried["retry_class"] == "response"
+    assert retried["retry_count"] == 1
+    assert retried["retry_counts"]["response"] == 1

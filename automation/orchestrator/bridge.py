@@ -222,11 +222,45 @@ def _start_runner(profile: str) -> dict[str, Any]:
         if os.environ.get("PASI_PUSH", "").strip() != "1":
             return {"accepted": False, "action": "start", "profile": profile, "reason": "PASI_PUSH=1 is required for a real 168-hour run"}
 
-    RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_path = RUNNER_LOG_DIR / f"runner-{profile}.log"
     command = list(RUNNER_PROFILES[profile])
+    executable = Path(command[0])
+    script = Path(command[1])
+    if not executable.is_file():
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner Python executable is unavailable",
+        }
+    if not script.is_file():
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner script is missing from the active PASI workspace",
+        }
+    if not os.access(script, os.R_OK):
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner script is not readable",
+        }
+
+    try:
+        RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = RUNNER_LOG_DIR / ("runner-" + profile + ".log")
+        log_handle = log_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner log is not writable: " + str(exc),
+        }
+
     environment = os.environ.copy()
-    log_handle = log_path.open("a", encoding="utf-8")
+    environment.setdefault("PYTHONUNBUFFERED", "1")
     try:
         process = subprocess.Popen(
             command,
@@ -237,9 +271,23 @@ def _start_runner(profile: str) -> dict[str, Any]:
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
-    except Exception:
+    except OSError as exc:
         log_handle.close()
-        raise
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner launch failed: " + str(exc),
+        }
+    except Exception as exc:
+        log_handle.close()
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": profile,
+            "reason": "runner launch failed: " + type(exc).__name__ + ": " + str(exc),
+        }
+
     log_handle.close()
     return {
         "accepted": True,

@@ -85,8 +85,9 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
-  assert.match(popupCss, /html\.light-theme body \.status-dot\.completed[\s\S]*background:\s*#707174/);
-  assert.match(popupCss, /html\.light-theme body \.status-dot\.running[\s\S]*background:\s*#45464A/);
+  assert.match(popupCss, /html\.light-theme body[\s\S]*--status-completed:\s*#707174/);
+  assert.match(popupCss, /html\.light-theme body[\s\S]*--status-paused:\s*#707174/);
+  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*var\(--status-running, #45464A\)/);
   assert.match(popupJs, /status-desc" \+ \(stateLabelText === "Idle" \? " idle-summary" : ""\)/);
   assert.match(popupCss, /\.status-desc\.idle-summary[\s\S]*color:\s*var\(--status-idle-summary\)/);
   assert.match(popupCss, /--status-idle:\s*#1A1B20/);
@@ -158,7 +159,7 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.match(popupCss, /--btn-primary-hover:\s*#5B5C61/);
   assert.match(popupCss, /--badge-m1:\s*#45464A/);
   assert.match(popupCss, /--badge-long:\s*#45464A/);
-  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#45464A/);
+  assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*var\(--status-running, #45464A\)/);
   assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#FFFFFF/);
   assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
   assert.match(popupCss, /\.btn-primary[\s\S]*color:\s*#FFFFFF/);

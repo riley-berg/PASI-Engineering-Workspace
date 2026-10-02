@@ -66,3 +66,13 @@ test("CDP controller identity is scoped to the supervised runner run", () => {
     /const controllerId = controllerIdForTab\(tabId, runId\)/
   );
 });
+
+test("supervised dispatcher continues waiting after a successful operation dispatch", () => {
+  const dispatchBlock = background.match(
+    /if \(operation\?\.operation_id\) \{[\s\S]*?await new Promise\(\(resolve\) => setTimeout\(resolve, 50\)\);\n    \}/
+  )?.[0] || "";
+  assert.match(dispatchBlock, /if \(dispatched\) \{/);
+  assert.match(dispatchBlock, /continue;/);
+  assert.doesNotMatch(dispatchBlock, /if \(dispatched\) return true;/);
+});
+

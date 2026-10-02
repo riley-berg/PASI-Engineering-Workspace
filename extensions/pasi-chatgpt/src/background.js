@@ -405,109 +405,6 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 }
 
 
-// Queueing is intentionally inert during normal interactive use. Only an
-// explicit keyboard/UI command may call runNextQueuedOperation(). During a
-// real 168-hour acceptance run, the bridge exposes a live supervised execution
-// authorization; that mode may drain queued operations automatically.
-let manualDispatchInFlight = null;
-const supervisedWaiters = new Map();
-
-async function supervisedExecutionAuthorized() {
-  const payload = await bridgeJson('/runner/state', 5000);
-  const executionMode = String(payload?.execution_mode || '');
-  return Boolean(
-    payload?.available === true &&
-    payload?.status === 'running' &&
-    executionMode.startsWith('supervised_') &&
-    payload?.execution_authorized === true
-  );
-}
-
-function ensureSupervisedExecutionWaiter(tabId, controllerId) {
-  if (typeof tabId !== 'number' || !controllerId || supervisedWaiters.has(controllerId)) return false;
-  const promise = (async () => {
-    try {
-      if (!(await supervisedExecutionAuthorized())) return false;
-      return await waitForNextOperationForController(tabId, controllerId);
-    } finally {
-      supervisedWaiters.delete(controllerId);
-    }
-  })();
-  supervisedWaiters.set(controllerId, promise);
-  return true;
-}
-
-async function findActiveChatTab() {
-  const tabs = await chrome.tabs.query({
-    active: true,
-    lastFocusedWindow: true,
-    url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
-  });
-  if (tabs[0]?.id != null) return tabs[0];
-  const candidates = await chrome.tabs.query({
-    url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
-  });
-  return candidates.find((tab) => typeof tab.id === 'number') || null;
-}
-
-async function runNextQueuedOperation(trigger = 'explicit') {
-  if (manualDispatchInFlight) {
-    return {ok: false, reason: 'execution_already_in_flight', trigger};
-  }
-
-  manualDispatchInFlight = (async () => {
-    const tab = await findActiveChatTab();
-    const tabId = tab?.id;
-    if (typeof tabId !== 'number') {
-      return {ok: false, reason: 'no_active_chatgpt_tab', trigger};
-    }
-    const controllerId = controllerIdForTab(tabId);
-    await cdpNetworkController?.attachTab?.(tabId);
-    await reportWorkerHealth(tab);
-    const payload = await bridgeJson(
-      '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=0',
-      10000
-    );
-    if (!payload) {
-      return {
-        ok: false,
-        dispatched: false,
-        reason: 'bridge_unreachable',
-        controller_id: controllerId,
-        tab_id: tabId,
-        trigger
-      };
-    }
-    const operation = payload.operation;
-    if (!operation?.operation_id) {
-      return {
-        ok: false,
-        dispatched: false,
-        reason: 'no_queued_operation',
-        controller_id: controllerId,
-        tab_id: tabId,
-        trigger
-      };
-    }
-    const dispatched = await dispatchOperationForController(tabId, controllerId, operation);
-    return {
-      ok: Boolean(dispatched),
-      dispatched: Boolean(dispatched),
-      operation_id: operation.operation_id,
-      controller_id: controllerId,
-      tab_id: tabId,
-      trigger
-    };
-  })();
-
-  try {
-    return await manualDispatchInFlight;
-  } finally {
-    manualDispatchInFlight = null;
-  }
-}
-
-
 const BRIDGE_ROUTES = new Set([
   'GET /health',
   'GET /status',
@@ -646,24 +543,6 @@ chrome.commands?.onCommand?.addListener((command) => {
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === 'pasi.execution.run-next') {
-    const senderUrl = String(sender?.url || '');
-    const extensionPrefix = `chrome-extension://${chrome.runtime.id}/`;
-    const trustedExtension = senderUrl.startsWith(extensionPrefix);
-    const trustedChatTab = isChatGPTUrl(senderUrl) && Number.isInteger(sender?.tab?.id);
-    if (!trustedExtension && !trustedChatTab) {
-      sendResponse({ok: false, reason: 'untrusted_execution_request'});
-      return undefined;
-    }
-    runNextQueuedOperation(trustedChatTab ? 'webpage' : 'extension-ui')
-      .then(sendResponse)
-      .catch((error) => sendResponse({
-        ok: false,
-        reason: String(error?.message || error).slice(0, 500)
-      }));
-    return true;
-  }
-
   if (message?.type === 'pasi-control-center-bridge-request') {
     const senderUrl = String(sender?.url || '');
     const extensionPrefix = `chrome-extension://${chrome.runtime.id}/`;

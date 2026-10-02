@@ -580,15 +580,8 @@
     }
   }
 
-  async function applyTheme() {
-    let theme = getLocalTheme();
-
-    if (theme !== "light" && theme !== "dark") {
-      const stored = await chrome.storage.local.get("pasi.popup.theme");
-      theme = stored?.["pasi.popup.theme"] === "light" ? "light" : "dark";
-      setLocalTheme(theme);
-    }
-
+  function applyTheme() {
+    const theme = getLocalTheme() === "light" ? "light" : "dark";
     applyThemeDom(theme === "light");
   }
 
@@ -608,7 +601,7 @@
 
   async function render() {
     try {
-      await applyTheme();
+      applyTheme();
 
       const [activeResult, runnerState, selectedProfile] = await Promise.all([
         send(TYPES.active),

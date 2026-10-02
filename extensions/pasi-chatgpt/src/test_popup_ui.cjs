@@ -103,72 +103,10 @@ test("light and dark surface palettes are explicit and stable", () => {
   assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--text-muted:\s*#707174/);
   assert.match(popupCss, /--btn-primary:\s*#45464A/);
   assert.match(popupCss, /--btn-primary-hover:\s*#5B5C61/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#333438/);
+  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary:\s*#45464A/);\n  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--btn-primary-hover:\s*#5B5C61/);
   assert.match(popupCss, /--status-badge-text:\s*#45464A/);
   assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6|6F766F|6E756F|8B7B70|8D7768|8A6258|7C6B5F)/i);
-});
-
-test("runner dropdown control gets a stable hover outline without touching options", () => {
-  assert.match(
-    popupCss,
-    /\.runner-select:hover,\s*\.runner-select\.open\s*\{[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);[\s\S]*outline-offset:\s*0;/
-  );
-  assert.doesNotMatch(
-    popupCss,
-    /\.runner-select:hover,\s*\.runner-select\.open\s*\{[\s\S]*border-color:\s*var\(--btn-primary\)/
-  );
-});
-
-test("custom runner picker has a single, stable hover/focus rule", () => {
-  assert.match(popupHtml, /id="runnerSelect"[^>]*role="combobox"/);
-  assert.match(popupHtml, /id="runnerSelectMenu"[^>]*role="listbox"[^>]*hidden/);
-  assert.match(popupHtml, /id="runnerOption-m1"[^>]*role="option"/);
-  assert.match(popupHtml, /id="runnerOption-168h"[^>]*role="option"/);
-  assert.match(popupJs, /function initializeRunnerPicker\(\)/);
-  assert.match(popupJs, /function selectRunnerProfile\(profile\)/);
-  assert.match(popupJs, /ArrowDown/);
-  assert.match(popupJs, /Escape/);
-  assert.doesNotMatch(popupHtml, /<select[^>]*id="runnerSelect"/);
-  assert.doesNotMatch(popupCss, /#runnerSelect option/);
-
-  const hoverRuleMatches = popupCss.match(/\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{/g) || [];
-  assert.equal(hoverRuleMatches.length, 1);
-
-  assert.match(
-    popupCss,
-    /\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-hover\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/
-  );
-  assert.match(popupCss, /--runner-option-hover:\s*#24262C/);
-  assert.match(popupCss, /--runner-option-outline:\s*#45464A/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-hover:\s*#F2F2F2/);
-  assert.match(popupCss, /html\.light-theme body\s*\{[\s\S]*--runner-option-outline:\s*#45464A/);
-  assert.match(
-    popupCss,
-    /\.runner-select-option\[aria-selected="true"\]:hover,\s*\.runner-select-option\[aria-selected="true"\]:focus-visible\s*\{[\s\S]*background:\s*var\(--runner-option-selected\);[\s\S]*outline:\s*1px solid var\(--runner-option-outline\);/
-  );
-
-  assert.doesNotMatch(popupCss, /html\.light-theme body \.runner-select-option/);
-  assert.doesNotMatch(popupCss, /--runner-option-selected-hover:/);
-  assert.doesNotMatch(popupCss, /html\.light-theme body \.status-dot\.(running|paused|failed|completed)/);
-  assert.doesNotMatch(popupCss, /html\.light-theme body \.btn-primary/);
-  assert.doesNotMatch(popupCss, /html\.light-theme body \.warn/);
-  assert.doesNotMatch(popupCss, /box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/);
-  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*outline-offset:\s*0/);
-  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
-  assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*transition:\s*none/);
-});
-
-test("runner selection does not rerender the dashboard", () => {
-  const selectStart = popupJs.indexOf("async function selectRunnerProfile(profile)");
-  const selectEnd = popupJs.indexOf("\n  function initializeRunnerPicker()", selectStart);
-  assert.ok(selectStart >= 0);
-  assert.ok(selectEnd > selectStart);
-  const selectBlock = popupJs.slice(selectStart, selectEnd);
-  assert.match(selectBlock, /await setProfile\(normalized\);/);
-  assert.match(selectBlock, /setRunnerSelection\(normalized\);/);
-  assert.match(selectBlock, /setSelectedRunnerCard\(normalized\);/);
-  assert.doesNotMatch(selectBlock, /await render\(\);/);
 });
 
 test("popup uses connected and ready runner semantics", () => {
@@ -209,6 +147,27 @@ test("runner controls display Start when stopped and Stop when running", () => {
     popupJs,
     /toggle\\.textContent = runningThisProfile \\? "Stop" : "Start";/
   );
+});
+
+test("runner picker is absent because each runner card owns its own control", () => {
+  assert.doesNotMatch(popupHtml, /runnerSelect|runnerSelectMenu|Selected runner/);
+  assert.doesNotMatch(popupJs, /initializeRunnerPicker|selectRunnerProfile|runnerOptionElements|setRunnerSelection/);
+  assert.doesNotMatch(popupCss, /runner-select|runner-select-option|profile-summary/);
+});
+
+test("runner cards no longer depend on a selected runner", () => {
+  assert.match(popupJs, /function createRunnerCard\\(profileId, state\\)/);
+  assert.match(popupJs, /function renderRunnerDashboard\\(state, visible\\)/);
+  assert.doesNotMatch(popupJs, /selectedProfile/);
+});
+
+test("runner start waits for a real state transition", () => {
+  assert.match(popupJs, /async function waitForRunnerState\\(profileId, action, timeoutMs = 5000\\)/);
+  assert.match(popupJs, /const settledState = await waitForRunnerState\\(profileId, action\\);/);
+});
+
+test("failed runner state exposes its diagnostic error", () => {
+  assert.match(popupJs, /state\\?\\.error \\|\\| state\\?\\.stop_reason/);
 });
 
 test("runner action status survives the post-action render", () => {

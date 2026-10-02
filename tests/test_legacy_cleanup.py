@@ -66,3 +66,16 @@ def test_state_manager_exposes_only_live_bridge_state_api():
         "save_handoff",
     ):
         assert not hasattr(manager, retired), retired
+
+def test_orchestrator_config_contains_only_live_paths():
+    from automation.orchestrator import config
+
+    assert hasattr(config, "CONFIG")
+    assert hasattr(config.CONFIG, "project_root")
+    assert hasattr(config.CONFIG, "ai_dir")
+    assert not hasattr(config, "RetryLimits")
+    assert not hasattr(config, "FAILURES_DIR")
+    assert not hasattr(config, "SCREENSHOTS_DIR")
+    assert not hasattr(config, "TRACES_DIR")
+    assert not hasattr(config, "LOGS_DIR")
+    assert not hasattr(config, "ensure_runtime_directories")

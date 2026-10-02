@@ -46,11 +46,24 @@
         runNext.disabled = true;
         status("Starting exactly one queued operation…");
         try {
-          const response = await send("pasi.execution.run-next");
-          if (response.dispatched) {
+          const response = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage({type: "pasi.execution.run-next"}, (result) => {
+              const runtimeError = chrome.runtime.lastError;
+              if (runtimeError) {
+                reject(new Error(runtimeError.message));
+                return;
+              }
+              resolve(result || null);
+            });
+          });
+          if (response?.dispatched) {
             status("Dispatched " + response.operation_id + ".");
           } else {
-            status("No operation dispatched: " + (response.reason || "unknown result"), true);
+            status(
+              "Run-next did not dispatch: " +
+              String(response?.reason || response?.error || "unknown result"),
+              true
+            );
           }
         } catch (error) {
           status(String(error.message || error), true);

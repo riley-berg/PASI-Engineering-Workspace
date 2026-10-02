@@ -313,7 +313,40 @@
 
     return action;
   }
-  function createRunnerCard(profileId, state) {
+  function diagnosticText(state, aggregateState, profileId) {
+    const process = state?.process;
+    const processes = Array.isArray(aggregateState?.processes) ? aggregateState.processes : [];
+    const lines = [
+      "Profile: " + profileId,
+      "State: " + String(state?.status || "unavailable"),
+      "Phase: " + String(state?.phase || "n/a"),
+      "Execution: " + String(state?.execution_mode || "n/a"),
+      "Ready: " + (state?.ready === true ? "yes" : "no"),
+      "Process alive: " + (state?.process_alive === true ? "yes" : "no"),
+      "Runner PID: " + String(state?.runner_pid ?? "n/a"),
+      "Detected PID: " + String(process?.pid ?? state?.process_pid ?? "none"),
+      "Detected command: " + String(process?.cmdline ?? state?.process_cmdline ?? "none"),
+      "Runtime state: " + String(state?.runtime_state_path || "n/a"),
+      "Bridge PID: " + String(aggregateState?.bridge_process?.pid ?? "n/a"),
+      "Error: " + String(state?.error || "none"),
+      "All detected PASI processes:",
+    ];
+    if (processes.length) {
+      for (const item of processes) {
+        lines.push(
+          "  " + String(item.profile || "unknown") +
+          " pid=" + String(item.pid || "n/a") +
+          " workspace=" + (item.workspace ? "yes" : "no") +
+          " command=" + String(item.cmdline || "n/a")
+        );
+      }
+    } else {
+      lines.push("  none");
+    }
+    return lines.join("\n");
+  }
+
+  function createRunnerCard(profileId, state, aggregateState = state) {
     const profile = RUNNER_PROFILES[profileId];
     const card = document.createElement("section");
     card.className = "runner-card";
@@ -382,9 +415,10 @@
     toggle.className = "btn btn-primary";
     toggle.type = "button";
     const activeThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
+    const anotherRunnerActive = aggregateState?._anotherRunnerActive === true;
     const stoppingThisProfile = activeThisProfile && state?.status === "stopping";
     toggle.textContent = stoppingThisProfile ? "Stopping" : activeThisProfile ? "Stop" : "Start";
-    toggle.disabled = stoppingThisProfile || (runnerIsActive(state) && activeProfileForState(state) !== profileId);
+    toggle.disabled = stoppingThisProfile || anotherRunnerActive;
 
     toggle.onclick = async () => {
       const stopping = activeThisProfile;
@@ -402,6 +436,15 @@
       }
     };
 
+    const diagnostic = document.createElement("details");
+    diagnostic.className = "runner-diagnostics";
+    const diagnosticSummary = document.createElement("summary");
+    diagnosticSummary.textContent = "Diagnostics";
+    const diagnosticPre = document.createElement("pre");
+    diagnosticPre.textContent = diagnosticText(state, aggregateState, profileId);
+    diagnostic.append(diagnosticSummary, diagnosticPre);
+    body.append(diagnostic);
+
     actions.append(toggle);
     card.append(header, title, body, actions);
     return card;
@@ -417,8 +460,20 @@
       return;
     }
 
+    const profiles = state?.profiles && typeof state.profiles === "object"
+      ? state.profiles
+      : {};
+
     for (const profileId of Object.keys(RUNNER_PROFILES)) {
-      root.append(createRunnerCard(profileId, state));
+      const profileState = profiles[profileId] || state;
+      const globalActiveProfile = String(state?.active_profile || "");
+      const anotherRunnerActive =
+        Boolean(globalActiveProfile) && globalActiveProfile !== profileId;
+      root.append(createRunnerCard(
+        profileId,
+        profileState,
+        {...state, _anotherRunnerActive: anotherRunnerActive}
+      ));
     }
 
     $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";

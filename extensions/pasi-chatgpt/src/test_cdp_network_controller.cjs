@@ -256,6 +256,104 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
 });
 
+test('CDP submit falls back to the accessible Send button when Enter is not accepted', async () => {
+  const debuggerApi = fakeDebugger();
+  let treeCalls = 0;
+  const prompt = '[PASI_OPERATION op-send-fallback]';
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      treeCalls += 1;
+      if (treeCalls === 1) {
+        return callback({
+          nodes: [{
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 101,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: ''},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}},
+              {name: 'focused', value: {type: 'boolean', value: false}}
+            ]
+          }]
+        });
+      }
+      if (treeCalls === 2 || treeCalls === 3) {
+        return callback({
+          nodes: [
+            {
+              nodeId: 'ax-composer',
+              backendDOMNodeId: 101,
+              role: {type: 'role', value: 'textbox'},
+              name: {type: 'computedString', value: 'Message'},
+              value: {type: 'string', value: prompt},
+              ignored: false,
+              properties: [
+                {name: 'editable', value: {type: 'boolean', value: true}},
+                {name: 'multiline', value: {type: 'boolean', value: true}},
+                {name: 'focused', value: {type: 'boolean', value: true}}
+              ]
+            },
+            {
+              nodeId: 'ax-send',
+              backendDOMNodeId: 202,
+              role: {type: 'role', value: 'button'},
+              name: {type: 'computedString', value: 'Send'},
+              ignored: false,
+              properties: [
+                {name: 'disabled', value: {type: 'boolean', value: false}}
+              ]
+            }
+          ]
+        });
+      }
+      return callback({
+        nodes: [{
+          nodeId: 'ax-composer',
+          backendDOMNodeId: 101,
+          role: {type: 'role', value: 'textbox'},
+          name: {type: 'computedString', value: 'Message'},
+          value: {type: 'string', value: ''},
+          ignored: false,
+          properties: [
+            {name: 'editable', value: {type: 'boolean', value: true}},
+            {name: 'multiline', value: {type: 'boolean', value: true}},
+            {name: 'focused', value: {type: 'boolean', value: true}}
+          ]
+        }]
+      });
+    }
+
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 21,
+    operationId: 'op-send-fallback',
+    controllerId: 'controller-21',
+    prompt,
+    completionMarkers: ['SEND_FALLBACK_OK']
+  });
+
+  const result = await controller.submitOperation(21, 'op-send-fallback', 'controller-21');
+  assert.equal(result.submitted, true);
+  assert.equal(result.submissionMethod, 'cdp_accessibility_send_button');
+  assert.ok(debuggerApi.commands.some(
+    (command) => command.method === 'DOM.focus' && command.params.backendNodeId === 202
+  ));
+  const enterEvents = debuggerApi.commands.filter(
+    (command) => command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+  );
+  assert.equal(enterEvents.length, 4);
+});
+
 test('CDP submit rejects an unacknowledged send instead of treating a red-box submission as accepted', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);

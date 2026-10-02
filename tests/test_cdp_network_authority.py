@@ -23,7 +23,7 @@ def test_cdp_network_authority_contract():
 
     assert "debugger" in manifest["permissions"]
     assert manifest["commands"]["pasi-toggle-runner"]["suggested_key"]["default"] == "Ctrl+Shift+K"
-    assert "suggested_key" not in manifest["commands"]["pasi-run-next"]
+    assert "pasi-run-next" not in manifest["commands"]
     manifest_scripts = [
         script
         for entry in manifest["content_scripts"]
@@ -64,7 +64,8 @@ def test_cdp_network_authority_contract():
     assert "chrome.alarms.onAlarm" in background
     assert "pasi-toggle-runner" in background
     assert "chrome.commands" in background
-    assert "runNextQueuedOperation" in background
+    assert "runNextQueuedOperation" not in background
+    assert "pasi.execution.run-next" not in background
     assert "dispatchNextOperationForController" not in background
     assert "claim_next: true" not in background
     assert "BRIDGE_NEXT_OPERATION_RE" in background

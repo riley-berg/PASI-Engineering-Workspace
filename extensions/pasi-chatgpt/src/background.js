@@ -150,21 +150,6 @@ function runnerStateIsDispatchable(state) {
   return String(state.execution_mode || '') === 'supervised_' + profile;
 }
 
-async function waitForSupervisedRunnerReady(timeoutMs = 15000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const state = await bridgeJson('/runner/state', 5000);
-    if (state === null) {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      continue;
-    }
-    if (runnerStateIsDispatchable(state)) return true;
-    if (state.available !== true || (state.status !== 'starting' && state.status !== 'running')) return false;
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  return false;
-}
-
 async function waitForNextOperationForController(tabId, controllerId, waitMs = 3000) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
@@ -180,7 +165,14 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 3
         continue;
       }
       bridgeRetryMs = 250;
-      if (!runnerStateIsDispatchable(runnerState)) return false;
+
+      // Keep the controller waiter dormant while no supervised runner is active.
+      // This lets an explicit Start wake dispatch immediately without relying on
+      // the periodic extension watchdog to create a new waiter.
+      if (!runnerStateIsDispatchable(runnerState)) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
 
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
@@ -206,10 +198,7 @@ function ensureSupervisedExecutionWaiter(tabId, controllerId) {
   const key = String(tabId) + ':' + String(controllerId);
   if (supervisedExecutionWaiters.has(key)) return true;
 
-  const waiter = (async () => {
-    if (!(await waitForSupervisedRunnerReady())) return false;
-    return waitForNextOperationForController(tabId, controllerId);
-  })()
+  const waiter = waitForNextOperationForController(tabId, controllerId)
     .catch((error) => {
       console.warn('[PASI supervised worker]', String(error?.message || error));
       return false;

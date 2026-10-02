@@ -26,14 +26,15 @@ body {
   --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #F4F1EC;
-  --status-ready: #F4F1EC;
-  --status-idle-summary: #A39892;
-  --status-paused: #6E7074;
+  --status-starting: #D6CEC8;
+  --status-stopped: #A39892;
+
   --status-failed: #F4F1EC;
   --status-completed: #6E7074;
   --warning-text: #D6CEC8;
-  --btn-primary: #45464A;
-  --btn-primary-hover: #5B5C61;
+  --btn-primary: #E7E2DA;
+  --btn-primary-hover: #F4F1EC;
+  --btn-primary-text: #17191E;
   --btn-secondary: #24262C;
   --btn-secondary-hover: #3A3538;
   --badge-m1: #45464A;
@@ -65,8 +66,9 @@ html.light-theme body {
   --status-failed: #333438;
   --status-completed: #707174;
   --warning-text: #45464A;
-  --btn-primary: #45464A;
-  --btn-primary-hover: #5B5C61;
+  --btn-primary: #24272D;
+  --btn-primary-hover: #3A3E46;
+  --btn-primary-text: #FFFFFF;
   --btn-secondary: #FFFFFF;
   --btn-secondary-hover: #F0ECE6;
   --badge-m1: #45464A;
@@ -250,6 +252,14 @@ html.light-theme body {
   color: var(--danger-text);
 }
 
+.status-text.starting {
+  color: var(--status-starting);
+}
+
+.status-text.stopped {
+  color: var(--status-stopped);
+}
+
 .status-desc {
   margin-top: 2px;
   color: var(--text-secondary);
@@ -261,14 +271,6 @@ html.light-theme body {
   color: var(--status-idle-summary);
 }
 
-.status-text.ready {
-  color: var(--status-ready);
-}
-
-.status-dot.ready {
-  background: var(--status-ready);
-}
-
 .status-dot {
   width: 7px;
   height: 7px;
@@ -277,13 +279,17 @@ html.light-theme body {
   background: var(--status-idle);
 }
 
+.status-dot.starting {
+  background: var(--status-starting);
+}
+
 .status-dot.running {
   background: var(--status-running, #45464A);
   animation: var(--runner-pulse-animation) 1.4s infinite;
 }
 
-.status-dot.paused {
-  background: var(--status-paused);
+.status-dot.stopped {
+  background: var(--status-stopped);
 }
 
 .status-dot.failed {
@@ -319,7 +325,7 @@ html.light-theme body {
 
 .btn-primary {
   background: var(--btn-primary);
-  color: #FFFFFF;
+  color: var(--btn-primary-text);
 }
 
 .btn:focus-visible,

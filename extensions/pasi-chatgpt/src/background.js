@@ -4,6 +4,7 @@ const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
 let STALE_MS = 45 * 1000;
 let operationDispatchTail = Promise.resolve();
+const supervisedExecutionWaiters = new Map();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 const cdpOperationTimings = new Map();
@@ -147,7 +148,6 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
     const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
     let bridgeRetryMs = 250;
     while (true) {
-      if (!(await supervisedExecutionAuthorized())) return false;
       if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
@@ -172,6 +172,26 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
   });
+}
+
+function ensureSupervisedExecutionWaiter(tabId, controllerId) {
+  if (typeof tabId !== 'number' || !controllerId) return false;
+  const key = String(tabId) + ':' + String(controllerId);
+  if (supervisedExecutionWaiters.has(key)) return true;
+
+  const waiter = waitForNextOperationForController(tabId, controllerId)
+    .catch((error) => {
+      console.warn('[PASI supervised worker]', String(error?.message || error));
+      return false;
+    })
+    .finally(() => {
+      if (supervisedExecutionWaiters.get(key) === waiter) {
+        supervisedExecutionWaiters.delete(key);
+      }
+    });
+
+  supervisedExecutionWaiters.set(key, waiter);
+  return true;
 }
 
 async function waitForTabNavigation(tabId, timeoutMs = 20000) {

@@ -179,14 +179,40 @@ def main() -> int:
 
     transport = UrllibBridgeTransport(timeout_seconds=10.0)
     fail_closed_if_active(transport)
-    read_health(transport)
-    browser = read_browser_diagnostics(transport)
-    initial_chat_url = str(browser["data"].get("chat_url") or "").strip()
-    if not initial_chat_url:
-        raise RuntimeError("browser health did not provide a current ChatGPT conversation URL")
-
     run_id = f"m1-cdp-{uuid.uuid4().hex}"
     started_at = utcnow()
+
+    def base_state(**extra: Any) -> dict[str, Any]:
+        state = {
+            "run_id": run_id,
+            "repo": "th3-st0v3/PASI-Engineering-Workspace",
+            "started_at": started_at.isoformat(),
+            "status": "running",
+            "execution_mode": EXECUTION_MODE,
+            "runner_profile": "m1",
+            "target_operations": args.operations,
+            "completed_operations": 0,
+            "last_updated_at": utcnow().isoformat(),
+        }
+        state.update(extra)
+        return state
+
+    write_runner_state(base_state(phase="startup"))
+    try:
+        write_runner_pid(os.getpid())
+        atexit.register(clear_runner_pid)
+
+        write_runner_state(base_state(phase="health_check"))
+        read_health(transport)
+
+        write_runner_state(base_state(phase="browser_diagnostics"))
+        browser = read_browser_diagnostics(transport)
+        initial_chat_url = str(browser["data"].get("chat_url") or "").strip()
+        if not initial_chat_url:
+            raise RuntimeError("browser health did not provide a current ChatGPT conversation URL")
+    except Exception:
+        clear_runner_pid()
+        raise
 
     write_runner_state({
         "run_id": run_id,
@@ -198,8 +224,19 @@ def main() -> int:
         "completed_operations": 0,
         "chat_url": initial_chat_url,
     })
-    write_runner_pid(os.getpid())
-    atexit.register(clear_runner_pid)
+    write_runner_state({
+        "run_id": run_id,
+        "repo": "th3-st0v3/PASI-Engineering-Workspace",
+        "started_at": started_at.isoformat(),
+        "status": "running",
+        "execution_mode": EXECUTION_MODE,
+        "runner_profile": "m1",
+        "target_operations": args.operations,
+        "completed_operations": 0,
+        "phase": "ready_for_first_operation",
+        "chat_url": initial_chat_url,
+        "last_updated_at": utcnow().isoformat(),
+    })
 
     adapter = ChatGPTAdapter(
         transport=transport,

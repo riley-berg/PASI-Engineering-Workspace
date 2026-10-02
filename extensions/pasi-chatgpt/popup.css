@@ -26,6 +26,7 @@ body {
   --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #F4F1EC;
+  --status-ready: #F4F1EC;
   --status-idle-summary: #A39892;
   --status-paused: #6E7074;
   --status-failed: #F4F1EC;
@@ -58,12 +59,13 @@ html.light-theme body {
   --runner-option-outline: #45464A;
   --runner-option-selected: #45464A;
   --status-idle: #1A1B20;
+  --status-ready: #45464A;
   --status-idle-summary: #707174;
   --status-paused: #707174;
   --status-failed: #333438;
   --status-completed: #707174;
   --warning-text: #45464A;
-  --btn-primary: #45464A;
+  --btn-primary: #1A1B20;
   --btn-primary-hover: #333438;
   --btn-secondary: #FFFFFF;
   --btn-secondary-hover: #F0ECE6;
@@ -368,8 +370,12 @@ html.light-theme body .runner-card.selected {
   color: var(--status-idle-summary);
 }
 
+.status-text.ready {
+  color: var(--status-ready);
+}
+
 .status-dot.ready {
-  background: var(--status-idle);
+  background: var(--status-ready);
 }
 
 .status-dot {

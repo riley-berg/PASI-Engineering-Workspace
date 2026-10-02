@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from urllib.parse import urlsplit
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -57,6 +58,15 @@ def clear_runner_pid() -> None:
             path.unlink()
         except FileNotFoundError:
             pass
+
+
+def chat_conversation_identity(url: str) -> str:
+    parsed = urlsplit(str(url or "").strip())
+    hostname = parsed.hostname.casefold() if parsed.hostname else ""
+    path = parsed.path.rstrip("/")
+    if not hostname or not path:
+        return ""
+    return hostname + path
 
 
 def write_runner_state(payload: Mapping[str, Any]) -> None:
@@ -142,8 +152,8 @@ def validate_completed_operation(
 
     current_browser = read_browser_diagnostics(transport)
     current_chat_url = str(current_browser["data"].get("chat_url") or "").strip()
-    if current_chat_url != initial_chat_url:
-        raise RuntimeError(f"M1 operation {index} changed ChatGPT conversation URL")
+    if chat_conversation_identity(current_chat_url) != chat_conversation_identity(initial_chat_url):
+        raise RuntimeError(f"M1 operation {index} changed ChatGPT conversation identity")
 
     response_payload = dict(transport.request("GET", "/browser/response"))
     response_observation = response_payload.get("observation")

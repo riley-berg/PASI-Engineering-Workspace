@@ -105,7 +105,15 @@ test("light theme overrides the complete popup surface palette", () => {
   );
   assert.match(
     popupCss,
-    /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):focus-visible,[\s\S]*box-shadow:\s*inset 0 0 0 1px #DCD4C7/
+    /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):hover,[\s\S]*background-color:\s*#F0ECE6\s*!important/
+  );
+  assert.match(
+    popupCss,
+    /html\.light-theme body \.runner-select-option:not\(\[aria-selected="true"\]\):focus-visible[\s\S]*background-color:\s*#F0ECE6\s*!important/
+  );
+  assert.match(
+    popupCss,
+    /\.runner-select-option:hover,[\s\S]*\.runner-select-option:focus-visible\s*\{[\s\S]*box-shadow:\s*inset 0 0 0 1px var\(--runner-option-outline\)/
   );
   assert.match(
     popupCss,

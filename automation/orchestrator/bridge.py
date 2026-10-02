@@ -79,11 +79,31 @@ MAX_TIMING_KEYS = frozenset({
 })
 BRIDGE_TOKEN_FILE = Path.home() / ".pasi" / "bridge-token"
 RUNNER_CAPABILITIES_PATH = Path.home() / ".pasi" / "runner" / "capabilities.json"
-RUNNER_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))).expanduser().resolve()
-RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
-RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
+RUNNER_RUNTIME_DIR = Path(
+    os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))
+).expanduser().resolve()
+# The runtime root is shared, but each supervised profile owns an isolated
+# subdirectory so terminal errors cannot overwrite another runner's state.
+RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"  # legacy compatibility only
+RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"  # legacy compatibility only
 RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+
+
+def runner_runtime_dir(profile: str) -> Path:
+    return (RUNNER_RUNTIME_DIR / profile).resolve()
+
+
+def runner_state_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "state.json"
+
+
+def runner_control_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "control.json"
+
+
+def runner_pid_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "runner.pid"
 def runner_python() -> str:
     workspace_python = CONFIG.project_root / ".venv" / "bin" / "python"
     if workspace_python.is_file() and os.access(workspace_python, os.X_OK):
@@ -159,85 +179,94 @@ def load_runner_capabilities() -> dict[str, Any]:
         "execution_authorized": runner_execution_authorized(payload),
     }
 
-def runner_process_info() -> dict[str, Any] | None:
-    """Return the live PASI runner process and its profile, if one exists."""
-    candidate_pids: list[int] = []
+def runner_processes() -> list[dict[str, Any]]:
+    """Inspect live PASI runner processes instead of trusting stale PID files."""
+    profiles_by_script = {
+        "pasi_m1_cdp_chain.py": "m1",
+        "pasi_168h_acceptance.py": "168h",
+    }
+    legacy_scripts = {"pasi_168h_supervisor.sh", "pasi_overnight_engine_v2.py"}
+    processes: list[dict[str, Any]] = []
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return processes
 
-    def add_pid(value: object) -> None:
+    workspace_root = str(CONFIG.project_root.resolve())
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
         try:
-            pid = int(value)
-        except (TypeError, ValueError):
-            return
-        if pid > 1 and pid not in candidate_pids:
-            candidate_pids.append(pid)
-
-    for pid_path in (
-        RUNNER_RUNTIME_DIR / "runner.pid",
-        Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
-    ):
-        try:
-            add_pid(pid_path.read_text(encoding="utf-8").strip())
-        except OSError:
+            pid = int(entry.name)
+            if pid <= 1:
+                continue
+            raw = (entry / "cmdline").read_bytes()
+            cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "ignore").strip()
+        except (OSError, ValueError):
+            continue
+        if not cmdline:
             continue
 
-    try:
-        payload = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        payload = {}
-    if isinstance(payload, dict):
-        add_pid(payload.get("runner_pid"))
-
-    profile_by_script = (
-        ("pasi_m1_cdp_chain.py", "m1"),
-        ("pasi_168h_acceptance.py", "168h"),
-        ("pasi_168h_supervisor.sh", "168h"),
-        ("pasi_overnight_engine_v2.py", None),
-    )
-
-    for pid in candidate_pids:
-        try:
-            cmdline = (
-                Path(f"/proc/{pid}/cmdline")
-                .read_bytes()
-                .replace(b"\x00", b" ")
-                .decode("utf-8", "ignore")
-            )
-        except OSError:
-            continue
-
-        for script_name, profile in profile_by_script:
+        profile: str | None = None
+        script: str | None = None
+        for script_name, profile_name in profiles_by_script.items():
             if script_name in cmdline:
-                return {
-                    "pid": pid,
-                    "profile": profile,
-                    "cmdline": cmdline,
-                }
+                profile = profile_name
+                script = script_name
+                break
+        if profile is None:
+            for script_name in legacy_scripts:
+                if script_name in cmdline:
+                    profile = "legacy"
+                    script = script_name
+                    break
+        if profile is None:
+            continue
 
-    return None
+        processes.append({
+            "pid": pid,
+            "profile": profile,
+            "script": script,
+            "cmdline": cmdline,
+            "workspace": workspace_root in cmdline,
+            "recognized": profile in {"m1", "168h"} and workspace_root in cmdline,
+        })
+
+    processes.sort(key=lambda item: int(item["pid"]))
+    return processes
 
 
-def runner_process_is_alive() -> bool:
-    return runner_process_info() is not None
+def runner_process_info(profile: str | None = None) -> dict[str, Any] | None:
+    """Return a live runner process from the current Engineering Workspace."""
+    candidates = [
+        item for item in runner_processes()
+        if item.get("recognized") is True
+        and (profile is None or item.get("profile") == profile)
+    ]
+    return candidates[0] if candidates else None
 
 
-def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
-    execution_mode = str(payload.get("execution_mode") or "").strip()
-    return bool(
-        payload.get("status") == "running"
-        and execution_mode in {"supervised_168h", "supervised_m1"}
-        and runner_process_is_alive()
-    )
+def runner_process_is_alive(profile: str | None = None) -> bool:
+    return runner_process_info(profile) is not None
 
 
-def load_runner_state() -> dict[str, Any]:
+def _read_runner_state_file(profile: str) -> dict[str, Any]:
+    path = runner_state_path(profile)
     try:
-        if not RUNNER_STATE_PATH.is_file() or RUNNER_STATE_PATH.stat().st_size > 128_000:
-            return {"available": False, "reason": "runner state unavailable"}
-        payload = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
+        if not path.is_file() or path.stat().st_size > 128_000:
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"available": False, "reason": "runner state unreadable"}
-    if not isinstance(payload, dict):
-        return {"available": False, "reason": "runner state invalid"}
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _augment_runner_state(
+    profile: str,
+    payload: dict[str, Any],
+    processes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not payload:
+        return {"available": False, "runner_profile": profile, "reason": "runner state unavailable"}
 
     allowed = {
         "schema_version", "run_id", "started_at", "deadline_at", "worktree", "branch",
@@ -246,42 +275,96 @@ def load_runner_state() -> dict[str, Any]:
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
         "execution_mode", "runner_profile", "runner_pid", "log_path", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
         "current_operation_id", "current_operation_index", "current_operation_status",
-        "phase",
-        "last_operation_id", "last_request_id", "updated_at", "completed_at",
+        "last_operation_id", "last_request_id", "updated_at", "completed_at", "request_ids",
     }
-    result = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
-
-    process = runner_process_info()
-    process_alive = process is not None
-    result["process_alive"] = process_alive
-    result["ready"] = process_alive and result.get("status") == "running"
-    if process is not None:
-        result["process_pid"] = process["pid"]
-        result["process_profile"] = process.get("profile")
-        if process.get("profile") in RUNNER_PROFILES:
-            result["runner_profile"] = process["profile"]
-            result["execution_mode"] = "supervised_" + process["profile"]
+    result: dict[str, Any] = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    process = runner_process_info(profile)
+    result["process_alive"] = process is not None
+    result["ready"] = process is not None and result.get("status") == "running"
+    result["runner_profile"] = profile
+    result["process"] = process
+    result["process_pid"] = process.get("pid") if process else None
+    result["process_profile"] = process.get("profile") if process else None
+    result["process_cmdline"] = process.get("cmdline") if process else None
+    result["runtime_state_path"] = str(runner_state_path(profile))
 
     status = str(result.get("status") or "")
-    if not process_alive and status == "starting":
+    if process is None and status == "starting":
         result["status"] = "failed"
         result["ready"] = False
-        result.setdefault(
-            "error",
-            "runner exited before initialization completed",
-        )
-    elif not process_alive and status == "running":
+        result.setdefault("error", "runner exited before initialization completed")
+    elif process is None and status == "running":
         result["status"] = "failed"
         result["ready"] = False
-        result.setdefault(
-            "error",
-            "runner process is no longer alive",
-        )
-
+        result.setdefault("error", "runner process is no longer alive")
     return result
 
 
-def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
+def load_runner_state(profile: str | None = None) -> dict[str, Any]:
+    processes = runner_processes()
+    profiles = ("m1", "168h")
+    if profile is not None:
+        normalized = _runner_profile(profile)
+        return _augment_runner_state(normalized, _read_runner_state_file(normalized), processes)
+
+    per_profile = {
+        current_profile: _augment_runner_state(
+            current_profile,
+            _read_runner_state_file(current_profile),
+            processes,
+        )
+        for current_profile in profiles
+    }
+    active = [
+        item for item in processes
+        if item.get("recognized") is True and item.get("profile") in profiles
+    ]
+    active_profile = active[0].get("profile") if active else None
+
+    if active_profile:
+        selected = dict(per_profile[active_profile])
+    else:
+        available = [state for state in per_profile.values() if state.get("available")]
+        selected = max(
+            available,
+            key=lambda state: str(state.get("last_updated_at") or state.get("started_at") or ""),
+            default={"available": False, "reason": "runner state unavailable"},
+        )
+
+    selected["profiles"] = per_profile
+    selected["active_profile"] = active_profile
+    selected["processes"] = processes
+    selected["bridge_process"] = {
+        "pid": os.getpid(),
+        "cmdline": " ".join(str(part) for part in sys.argv),
+        "profile": "bridge",
+        "workspace": True,
+        "recognized": True,
+    }
+    selected["available"] = any(state.get("available") for state in per_profile.values())
+    return selected
+
+
+def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
+    profile = str(
+        payload.get("runner_profile") or payload.get("active_profile") or ""
+    ).strip().casefold()
+    if profile not in RUNNER_PROFILES:
+        return False
+    profile_state = (
+        payload.get("profiles", {}).get(profile)
+        if isinstance(payload.get("profiles"), Mapping)
+        else None
+    )
+    effective = profile_state if isinstance(profile_state, Mapping) else payload
+    return bool(
+        effective.get("status") == "running"
+        and str(effective.get("execution_mode") or "") == "supervised_" + profile
+        and runner_process_is_alive(profile)
+    )
+
+
+def _terminate_runner_processdef _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
     """Stop a supervised runner and its children without stopping the bridge."""
     try:
         process_group = os.getpgid(pid)
@@ -321,9 +404,9 @@ def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
     if runner_process_is_alive():
         raise RuntimeError("runner process did not stop after force termination")
 
-def _runner_pid() -> int | None:
+def _runner_pid(profile: str = "m1") -> int | None:
     try:
-        raw_pid = (RUNNER_STATE_PATH.parent / "runner.pid").read_text(encoding="utf-8").strip()
+        raw_pid = runner_pid_path(profile).read_text(encoding="utf-8").strip()
         pid = int(raw_pid)
     except (OSError, ValueError):
         return None
@@ -399,47 +482,26 @@ def _start_runner(profile: str) -> dict[str, Any]:
     executable = Path(command[0])
     script = Path(command[1])
     if not executable.is_file():
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner Python executable is unavailable",
-        }
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner Python executable is unavailable"}
     if not script.is_file():
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner script is missing from the active PASI workspace",
-        }
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is missing from the active PASI workspace"}
     if not os.access(script, os.R_OK):
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner script is not readable",
-        }
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is not readable"}
 
+    runtime_dir = runner_runtime_dir(profile)
+    state_path = runner_state_path(profile)
+    pid_path = runner_pid_path(profile)
     try:
         RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_path = RUNNER_LOG_DIR / ("runner-" + profile + ".log")
         log_handle = log_path.open("a", encoding="utf-8")
     except OSError as exc:
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner log is not writable: " + str(exc),
-        }
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner log is not writable: " + str(exc)}
 
     environment = os.environ.copy()
     environment.setdefault("PYTHONUNBUFFERED", "1")
     environment["PASI_RUNNER_PROFILE"] = profile
-    # Every supervised profile must publish to the exact runtime directory
-    # consumed by this bridge. The 168h runner historically defaulted to a
-    # separate acceptance directory, which left the bridge stuck in "starting"
-    # or reporting a dead runner even while the child process was valid.
-    environment["PASI_RUNTIME_DIR"] = str(RUNNER_RUNTIME_DIR)
+    environment["PASI_RUNTIME_DIR"] = str(runtime_dir)
     if profile == "168h":
         environment["PASI_GITHUB_TOKEN"] = github_token
         environment["PASI_PUSH"] = "1"
@@ -449,87 +511,45 @@ def _start_runner(profile: str) -> dict[str, Any]:
         "execution_mode": "supervised_" + profile,
         "runner_profile": profile,
         "log_path": str(log_path),
+        "runtime_state_path": str(state_path),
+        "runner_pid": None,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
-        atomic_write_json(RUNNER_STATE_PATH, starting_state)
-    except OSError:
-        log_handle.close()
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner state could not be initialized",
-        }
-
-    try:
+        atomic_write_json(state_path, starting_state)
         process = subprocess.Popen(
-            command,
-            cwd=CONFIG.project_root,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
+            command, cwd=CONFIG.project_root, env=environment,
+            stdin=subprocess.DEVNULL, stdout=log_handle, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
     except OSError as exc:
         log_handle.close()
         failed_state = dict(starting_state)
-        failed_state.update({
-            "status": "failed",
-            "error": "runner launch failed: " + str(exc),
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-        })
-        atomic_write_json(RUNNER_STATE_PATH, failed_state)
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner launch failed: " + str(exc),
-        }
+        failed_state.update({"status":"failed","error":"runner launch failed: "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
     except Exception as exc:
         log_handle.close()
         failed_state = dict(starting_state)
-        failed_state.update({
-            "status": "failed",
-            "error": "runner launch failed: " + type(exc).__name__ + ": " + str(exc),
-            "failed_at": datetime.now(timezone.utc).isoformat(),
-        })
-        atomic_write_json(RUNNER_STATE_PATH, failed_state)
-        return {
-            "accepted": False,
-            "action": "start",
-            "profile": profile,
-            "reason": "runner launch failed: " + type(exc).__name__ + ": " + str(exc),
-        }
+        failed_state.update({"status":"failed","error":"runner launch failed: "+type(exc).__name__+": "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
 
     log_handle.close()
     try:
-        current = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
-        if not isinstance(current, dict):
-            current = {}
-    except (OSError, json.JSONDecodeError):
-        current = {}
-    if current.get("status") not in {"running", "failed", "completed", "paused"}:
-        current = dict(starting_state)
-    current.update({
-        "runner_profile": profile,
-        "runner_pid": process.pid,
-        "log_path": str(log_path),
-    })
-    atomic_write_json(RUNNER_STATE_PATH, current)
+        current=json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(current,dict): current={}
+    except (OSError,json.JSONDecodeError):
+        current={}
+    if current.get("status") not in {"starting","running","failed","completed","paused","cancelled"}:
+        current=dict(starting_state)
+    current.update({"runner_profile":profile,"runner_pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)})
+    atomic_write_json(state_path,current)
     try:
-        (RUNNER_STATE_PATH.parent / "runner.pid").write_text(str(process.pid) + "\n", encoding="utf-8")
+        pid_path.write_text(str(process.pid)+"\n",encoding="utf-8")
     except OSError:
         pass
-
-    return {
-        "accepted": True,
-        "action": "start",
-        "profile": profile,
-        "pid": process.pid,
-        "log_path": str(log_path),
-    }
+    return {"accepted":True,"action":"start","profile":profile,"pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)}
 
 
 def request_runner_control(action: str, profile: object = None) -> dict[str, Any]:
@@ -581,7 +601,9 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
                 "reason": actual_profile.upper() + " runner is the active runner",
             }
 
-        state = load_runner_state()
+        state = load_runner_state(actual_profile or selected_profile or "m1")
+        state_path = runner_state_path(actual_profile or selected_profile or "m1")
+        pid_path = runner_pid_path(actual_profile or selected_profile or "m1")
         stopping = dict(state) if state.get("available") else {}
         stopping.update({
             "status": "stopping",
@@ -591,7 +613,7 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
             "paused_at": datetime.now(timezone.utc).isoformat(),
         })
         try:
-            atomic_write_json(RUNNER_STATE_PATH, stopping)
+            atomic_write_json(state_path, stopping)
             _terminate_runner_process(pid)
         except (OSError, RuntimeError) as exc:
             failed = dict(stopping)
@@ -601,7 +623,7 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
                 "failed_at": datetime.now(timezone.utc).isoformat(),
             })
             try:
-                atomic_write_json(RUNNER_STATE_PATH, failed)
+                atomic_write_json(state_path, failed)
             except OSError:
                 pass
             return {
@@ -616,13 +638,13 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
         paused["paused_at"] = datetime.now(timezone.utc).isoformat()
         paused["process_alive"] = False
         paused["ready"] = False
-        atomic_write_json(RUNNER_STATE_PATH, paused)
-        for pid_path in (
-            RUNNER_STATE_PATH.parent / "runner.pid",
+        atomic_write_json(state_path, paused)
+        for candidate in (
+            pid_path,
             Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid",
         ):
             try:
-                pid_path.unlink()
+                candidate.unlink()
             except FileNotFoundError:
                 pass
         return {
@@ -633,18 +655,22 @@ def request_runner_control(action: str, profile: object = None) -> dict[str, Any
             "status": "paused",
         }
 
-    current_state = load_runner_state()
+    control_profile = selected_profile or (
+        live_process.get("profile") if live_process else None
+    ) or "m1"
+    current_state = load_runner_state(control_profile)
     current_task = str(current_state.get("current_task", "")).strip()
     if not current_state.get("available") or not current_task:
         return {"accepted": False, "action": normalized, "reason": "no current runner task"}
-    RUNNER_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    control_path = runner_control_path(control_profile)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
         "action": normalized,
         "task_id": current_state.get("current_task_id", ""),
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
-    temporary = RUNNER_CONTROL_PATH.with_suffix(".json.tmp")
+    temporary = control_path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(RUNNER_CONTROL_PATH)
     return {"accepted": True, "action": normalized, "task": current_task}

@@ -142,21 +142,51 @@ function serializeOperationDispatch(task) {
   return next;
 }
 
-async function waitForNextOperationForController(tabId, controllerId, waitMs = 60000) {
+function runnerStateIsDispatchable(state) {
+  if (!state || state.available !== true) return false;
+  if (state.status !== 'running' || state.process_alive !== true || state.ready !== true) return false;
+  const profile = String(state.runner_profile || '');
+  if (profile !== 'm1' && profile !== '168h') return false;
+  return String(state.execution_mode || '') === 'supervised_' + profile;
+}
+
+async function waitForSupervisedRunnerReady(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await bridgeJson('/runner/state', 5000);
+    if (state === null) {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    if (runnerStateIsDispatchable(state)) return true;
+    if (state.available !== true || (state.status !== 'starting' && state.status !== 'running')) return false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
+}
+
+async function waitForNextOperationForController(tabId, controllerId, waitMs = 3000) {
   if (typeof tabId !== 'number' || !controllerId) return false;
   return serializeOperationDispatch(async () => {
-    const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
+    const boundedWaitMs = Math.max(1000, Math.min(5000, Number(waitMs) || 3000));
     let bridgeRetryMs = 250;
     while (true) {
       if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
+
+      const runnerState = await bridgeJson('/runner/state', 5000);
+      if (runnerState === null) {
+        await new Promise((resolve) => setTimeout(resolve, bridgeRetryMs));
+        bridgeRetryMs = Math.min(5000, bridgeRetryMs * 2);
+        continue;
+      }
+      bridgeRetryMs = 250;
+      if (!runnerStateIsDispatchable(runnerState)) return false;
+
       const payload = await bridgeJson(
         '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
         boundedWaitMs + 5000
       );
       if (payload === null) {
-        // A bridge restart or transient localhost failure must not permanently
-        // orphan the controller. Keep the handoff waiter alive with bounded
-        // exponential backoff until the bridge is reachable again.
         await new Promise((resolve) => setTimeout(resolve, bridgeRetryMs));
         bridgeRetryMs = Math.min(5000, bridgeRetryMs * 2);
         continue;
@@ -166,10 +196,7 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
       if (operation?.operation_id) {
         return dispatchOperationForController(tabId, controllerId, operation);
       }
-      // A prompt can take longer than one bridge long-poll to finish being
-      // parsed, patched, tested, committed, and acknowledged. Continue waiting
-      // instead of silently dropping the handoff after the first 60s window.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   });
 }
@@ -179,7 +206,10 @@ function ensureSupervisedExecutionWaiter(tabId, controllerId) {
   const key = String(tabId) + ':' + String(controllerId);
   if (supervisedExecutionWaiters.has(key)) return true;
 
-  const waiter = waitForNextOperationForController(tabId, controllerId)
+  const waiter = (async () => {
+    if (!(await waitForSupervisedRunnerReady())) return false;
+    return waitForNextOperationForController(tabId, controllerId);
+  })()
     .catch((error) => {
       console.warn('[PASI supervised worker]', String(error?.message || error));
       return false;

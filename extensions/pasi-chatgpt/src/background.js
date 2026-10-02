@@ -88,6 +88,7 @@ async function cdpNetworkObservation(event) {
         operationId,
         controllerId
       );
+      ensureSupervisedExecutionWaiter(event.tabId, controllerId);
       return;
     }
 
@@ -119,6 +120,7 @@ async function cdpNetworkObservation(event) {
     operationId,
     controllerId
   );
+  ensureSupervisedExecutionWaiter(event.tabId, controllerId);
 
 }
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
@@ -405,9 +407,36 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 }
 
 
-// Queueing is intentionally inert. Only an explicit keyboard/UI command may
-// call runNextQueuedOperation(), which claims and executes exactly one operation.
+// Queueing is intentionally inert during normal interactive use. Only an
+// explicit keyboard/UI command may call runNextQueuedOperation(). During a
+// real 168-hour acceptance run, the bridge exposes a live supervised execution
+// authorization; that mode may drain queued operations automatically.
 let manualDispatchInFlight = null;
+const supervisedWaiters = new Map();
+
+async function supervised168hAuthorized() {
+  const payload = await bridgeJson('/runner/state', 5000);
+  return Boolean(
+    payload?.available === true &&
+    payload?.status === 'running' &&
+    payload?.execution_mode === 'supervised_168h' &&
+    payload?.execution_authorized === true
+  );
+}
+
+function ensureSupervisedExecutionWaiter(tabId, controllerId) {
+  if (typeof tabId !== 'number' || !controllerId || supervisedWaiters.has(controllerId)) return false;
+  const promise = (async () => {
+    try {
+      if (!(await supervised168hAuthorized())) return false;
+      return await waitForNextOperationForController(tabId, controllerId);
+    } finally {
+      supervisedWaiters.delete(controllerId);
+    }
+  })();
+  supervisedWaiters.set(controllerId, promise);
+  return true;
+}
 
 async function findActiveChatTab() {
   const tabs = await chrome.tabs.query({
@@ -691,6 +720,7 @@ async function attachAndObserveTab(tab) {
   try {
     await cdpNetworkController.attachTab(tabId);
     await reportWorkerHealth(tab);
+    ensureSupervisedExecutionWaiter(tabId, controllerIdForTab(tabId));
     return true;
   } catch (_) {
     return false;

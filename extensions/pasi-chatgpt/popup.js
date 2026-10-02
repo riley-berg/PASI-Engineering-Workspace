@@ -14,14 +14,14 @@
     m1: {
       id: "m1",
       label: "M1",
-      title: "20-operation acceptance",
+      title: "20-Operation Acceptance",
       executionMode: "supervised_m1",
       badgeClass: "m1",
     },
     "168h": {
       id: "168h",
       label: "168h",
-      title: "long-run acceptance",
+      title: "168-Hour Long-Run Acceptance",
       executionMode: "supervised_168h",
       badgeClass: "long-run",
     },
@@ -124,8 +124,8 @@
   }
 
   const RUNNER_OPTIONS = Object.freeze([
-    {id: "m1", label: "M1 · 20-operation acceptance"},
-    {id: "168h", label: "168h · long-run acceptance"},
+    {id: "m1", label: "M1 · Acceptance"},
+    {id: "168h", label: "168h · Long-run"},
   ]);
 
   function normalizeProfile(profile) {
@@ -296,7 +296,7 @@
     if (status === "Completed") return "Last run completed.";
     if (status === "Paused") return "Runner is paused and can be started again.";
     if (status === "Failed") return String(state?.stop_reason || state?.last_result || "Last run failed.");
-    return "Awaiting start.";
+    return "Ready to execute.";
   }
 
   async function controlRunner(profileId) {
@@ -351,8 +351,8 @@
     const badge = document.createElement("span");
     badge.className = "badge " + profile.badgeClass;
     badge.textContent = profileId === "m1"
-      ? "M1 · 20-op acceptance"
-      : "168h · long-run";
+      ? "Runner: M1"
+      : "Runner: 168h";
 
     header.append(url, badge);
 

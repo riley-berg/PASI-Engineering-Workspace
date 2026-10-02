@@ -9,92 +9,6 @@ let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 const cdpOperationTimings = new Map();
 
-const DASHBOARD_URL = chrome.runtime.getURL('popup.html');
-const DASHBOARD_WIDTH = 380;
-const DASHBOARD_HEIGHT = 640;
-const DASHBOARD_MARGIN = 12;
-
-async function dashboardWorkArea(focusedWindow) {
-  try {
-    const displays = await chrome.system.display.getInfo();
-    const centerX = Number(focusedWindow?.left || 0) + Number(focusedWindow?.width || 0) / 2;
-    const centerY = Number(focusedWindow?.top || 0) + Number(focusedWindow?.height || 0) / 2;
-    const display = displays.find((item) => {
-      const bounds = item?.workArea || item?.bounds;
-      if (!bounds) return false;
-      return (
-        centerX >= bounds.left &&
-        centerX < bounds.left + bounds.width &&
-        centerY >= bounds.top &&
-        centerY < bounds.top + bounds.height
-      );
-    }) || displays.find((item) => item?.isPrimary) || displays[0];
-
-    return display?.workArea || display?.bounds || null;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function dashboardBounds(focusedWindow) {
-  const workArea = await dashboardWorkArea(focusedWindow);
-  const width = Math.max(
-    320,
-    Math.min(DASHBOARD_WIDTH, Number(workArea?.width || DASHBOARD_WIDTH) - DASHBOARD_MARGIN * 2)
-  );
-  const height = Math.max(
-    360,
-    Math.min(DASHBOARD_HEIGHT, Number(workArea?.height || DASHBOARD_HEIGHT) - DASHBOARD_MARGIN * 2)
-  );
-
-  if (!workArea) {
-    return {width, height};
-  }
-
-  const left = workArea.left + workArea.width - width - DASHBOARD_MARGIN;
-  const fullscreen = focusedWindow?.state === 'fullscreen';
-  const top = fullscreen
-    ? workArea.top + workArea.height - height - DASHBOARD_MARGIN
-    : workArea.top + DASHBOARD_MARGIN;
-
-  return {left, top, width, height};
-}
-
-async function openPasiDashboard(sourceWindowId) {
-  const windows = await chrome.windows.getAll({populate: true});
-  const existing = windows.find((window) =>
-    Array.isArray(window?.tabs) &&
-    window.tabs.some((tab) => String(tab?.url || '') === DASHBOARD_URL)
-  );
-
-  let sourceWindow = null;
-  if (typeof sourceWindowId === 'number') {
-    try {
-      sourceWindow = await chrome.windows.get(sourceWindowId);
-    } catch (_) {}
-  }
-
-  const bounds = await dashboardBounds(sourceWindow);
-
-  if (existing?.id != null) {
-    await chrome.windows.update(existing.id, {
-      focused: true,
-      state: 'normal',
-      ...bounds,
-    });
-    return existing.id;
-  }
-
-  const created = await chrome.windows.create({
-    type: 'popup',
-    focused: true,
-    url: DASHBOARD_URL,
-    ...bounds,
-  });
-  return created?.id ?? null;
-}
-
-
 async function cdpNetworkObservation(event) {
   const terminal = ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(event?.eventType);
   const kind = event?.eventType === 'COMPLETED'
@@ -610,12 +524,6 @@ async function bridgeJson(path, timeoutMs = 10000) {
     return null;
   }
 }
-
-chrome.action?.onClicked?.addListener((tab) => {
-  void openPasiDashboard(tab?.windowId).catch((error) => {
-    console.warn('[PASI dashboard window]', String(error?.message || error));
-  });
-});
 
 chrome.commands?.onCommand?.addListener((command) => {
   if (command !== 'pasi-toggle-runner') return;

@@ -142,7 +142,8 @@ const nodes = [
     value: {value: ''}
   }
 ];
-const target = cdp.findComposerAXNode(nodes);
+const controller = cdp.createController();
+const target = controller.findComposerAXNode(nodes);
 assert.equal(target.backendNodeId, 42);
 assert.equal(target.name, 'Message');
 assert.equal(target.semantic, true);

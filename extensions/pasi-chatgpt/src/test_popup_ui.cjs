@@ -9,14 +9,16 @@ const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
 const popupJs = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 const themeInit = fs.readFileSync(path.join(ROOT, "theme-init.js"), "utf8");
 
-test("popup has one neutral idle state and no legacy duplicate warning", () => {
+test("popup keeps the page-not-authorized warning separate from runner ready state", () => {
   assert.match(popupHtml, /id="idleState"[^>]*class="idle-state"[^>]*hidden/);
-  assert.match(popupHtml, /Ready/);
-  assert.match(popupHtml, /Ready to execute on this ChatGPT page\./);
+  assert.match(popupHtml, /Page not authorized/);
+  assert.match(popupHtml, /This page is not authorized for the PASI extension\./);
   assert.doesNotMatch(popupHtml, /No PASI userscripts match this page\./);
   assert.doesNotMatch(popupHtml, /systemWarning/);
   assert.doesNotMatch(popupJs, /No PASI userscripts match this page\./);
   assert.doesNotMatch(popupJs, /systemWarning/);
+  assert.doesNotMatch(popupHtml, /<div class="idle-title">Ready<\/div>/);
+  assert.doesNotMatch(popupHtml, /Ready to execute on this ChatGPT page\./);
 });
 
 test("ChatGPT is a supported runner target independently of userscript matches", () => {
@@ -157,6 +159,18 @@ test("custom runner picker has a single, stable hover/focus rule", () => {
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*transition:\s*none/);
 });
 
+test("runner selection does not rerender the dashboard", () => {
+  const selectStart = popupJs.indexOf("async function selectRunnerProfile(profile)");
+  const selectEnd = popupJs.indexOf("\n  function initializeRunnerPicker()", selectStart);
+  assert.ok(selectStart >= 0);
+  assert.ok(selectEnd > selectStart);
+  const selectBlock = popupJs.slice(selectStart, selectEnd);
+  assert.match(selectBlock, /await setProfile\(normalized\);/);
+  assert.match(selectBlock, /setRunnerSelection\(normalized\);/);
+  assert.match(selectBlock, /setSelectedRunnerCard\(normalized\);/);
+  assert.doesNotMatch(selectBlock, /await render\(\);/);
+});
+
 test("popup uses connected and ready runner semantics", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
   assert.match(popupJs, /return "Ready";/);
@@ -209,6 +223,11 @@ test("popup remains inside the compact width and hides only intentional UI regio
   assert.match(popupCss, /^\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/m);
 });
 
+test("ready indicator uses a dedicated high-contrast token", () => {
+  assert.match(popupCss, /\.status-text\.ready\s*\{[\s\S]*color:\s*var\(--status-ready\)/);
+  assert.match(popupCss, /\.status-dot\.ready\s*\{[\s\S]*background:\s*var\(--status-ready\)/);
+});
+
 test("popup control and text colors meet WCAG AA targets", () => {
   const relativeLuminance = (hex) => {
     const value = hex.replace("#", "");
@@ -231,6 +250,8 @@ test("popup control and text colors meet WCAG AA targets", () => {
   assert.ok(contrastRatio("#707174", "#FAF8F5") >= 4.5);
   assert.ok(contrastRatio("#55565A", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#1A1B20") >= 4.5);
+  assert.ok(contrastRatio("#45464A", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
   assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
 });

@@ -631,23 +631,16 @@ chrome.commands?.onCommand?.addListener((command) => {
       const body = JSON.parse(result.text || '{}');
       await attachExistingChatTabs();
       try {
-        await chrome.notifications.create({
-          type: 'basic',
-          iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-          title: 'PASI runner',
-          message: body.action === 'stop' ? 'Runner paused.' : 'Runner started.'
-        });
+        await chrome.action.setBadgeText({text: body.action === 'stop' ? 'PAUSE' : 'RUN'});
+        await chrome.action.setBadgeBackgroundColor({color: body.action === 'stop' ? '#6b7280' : '#059669'});
       } catch (_) {}
       return;
     }
 
     try {
-      await chrome.notifications.create({
-        type: 'basic',
-        iconUrl: chrome.runtime.getURL('icons/icon128.png'),
-        title: 'PASI runner control failed',
-        message: detail || (result.status ? 'Bridge request failed (HTTP ' + result.status + ').' : 'Bridge is unreachable.')
-      });
+      await chrome.action.setBadgeText({text: 'ERR'});
+      await chrome.action.setBadgeBackgroundColor({color: '#b91c1c'});
+      await chrome.action.setTitle({title: detail || (result.status ? 'PASI runner control failed (HTTP ' + result.status + ')' : 'PASI bridge unreachable')});
     } catch (_) {}
   })();
 });

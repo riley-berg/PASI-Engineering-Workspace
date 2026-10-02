@@ -2,7 +2,7 @@ from automation.orchestrator import bridge
 
 
 def test_runner_execution_authorized_requires_live_supervised_runner(monkeypatch):
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: True)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda profile=None: True)
 
     assert bridge.runner_execution_authorized({
         "status": "starting",
@@ -27,7 +27,7 @@ def test_runner_execution_authorized_requires_live_supervised_runner(monkeypatch
 
 
 def test_runner_execution_authorized_rejects_dead_process(monkeypatch):
-    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda: False)
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda profile=None: False)
 
     assert bridge.runner_execution_authorized({
         "status": "running",

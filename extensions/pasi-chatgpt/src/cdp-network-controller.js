@@ -469,12 +469,15 @@
       if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
         throw new Error('CDP submit target unavailable: ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE');
       }
+      const selectedRole = axRole(best);
+      const selectedName = axName(best);
+      const selectedSemantic = /\b(?:message|prompt|chat|ask)\b/i.test(selectedName.toLowerCase());
       return {
         backendNodeId,
         kind: 'accessibility_textbox',
-        role,
-        name: axName(best),
-        semantic,
+        role: selectedRole,
+        name: selectedName,
+        semantic: selectedSemantic,
         currentText: axValue(best.value),
         focused: axBooleanProperty(best, 'focused') === true
       };

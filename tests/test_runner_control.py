@@ -35,3 +35,27 @@ def test_supervised_168h_resolves_gh_token_and_injects_runner_environment(monkey
     assert result["accepted"] is True
     assert captured["environment"]["PASI_GITHUB_TOKEN"] == "gh-test-token"
     assert captured["environment"]["PASI_PUSH"] == "1"
+
+
+def test_github_token_falls_back_to_git_credential(monkeypatch):
+    monkeypatch.delenv("PASI_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    calls = []
+
+    class FakeResult:
+        stdout = "protocol=https\nhost=github.com\nusername=riley\npassword=git-test-token\n"
+
+    def fake_run(*args, **kwargs):
+        calls.append(args[0])
+        if args[0][0] == "gh":
+            return type("GhResult", (), {"stdout": ""})()
+        return FakeResult()
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert bridge._github_token() == "git-test-token"
+    assert calls == [
+        ["gh", "auth", "token", "--hostname", "github.com"],
+        ["git", "credential", "fill"],
+    ]

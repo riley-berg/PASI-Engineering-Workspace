@@ -368,3 +368,10 @@ test("popup renders terminal diagnostics from the matching profile state", () =>
 test("popup card factory accepts aggregate process diagnostics", () => {
   assert.match(popupJs, /function createRunnerCard\(profileId, state, aggregateState = state\)/);
 });
+
+
+test("popup refreshes live runner state while it remains open", () => {
+  assert.match(popupJs, /const runnerRefreshTimer = setInterval\(\(\) =>/);
+  assert.match(popupJs, /void render\(\);[s\S]*\}, 750\);/);
+  assert.match(popupJs, /clearInterval\(runnerRefreshTimer\)/);
+});

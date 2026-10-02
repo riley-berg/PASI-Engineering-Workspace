@@ -88,7 +88,6 @@ async function cdpNetworkObservation(event) {
         operationId,
         controllerId
       );
-      void waitForNextOperationForController(event.tabId, controllerId);
       return;
     }
 
@@ -121,14 +120,6 @@ async function cdpNetworkObservation(event) {
     controllerId
   );
 
-  // Explicit provider/context terminal states must not be immediately
-  // redispatched. Context exhaustion is surfaced to the runner, which
-  // creates the fresh conversation before submitting the task again.
-  const autoRetry = !new Set(['context_exhaustion', 'usage_limit', 'auth_failure'])
-    .has(String(event.classification || ''));
-  if (autoRetry) {
-    void dispatchNextOperationForController(event.tabId, controllerId);
-  }
 }
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
   debuggerApi: chrome.debugger,
@@ -258,7 +249,6 @@ async function executePromptOperation(tabId, controllerId, operation) {
       String(operation.operation_id),
       String(controllerId)
     );
-    void dispatchNextOperationForController(tabId, controllerId);
     return false;
   }
 }
@@ -281,16 +271,9 @@ async function executeAttachGithubOperation(tabId, controllerId, operation) {
       response_text: '',
       response_text_available: false,
       ack_only: true,
-      claim_next: true
+      claim_next: false
     }, 10000);
     if (!completion.ok) throw new Error('PASI_NATIVE: GitHub attachment completion rejected');
-    try {
-      const payload = JSON.parse(completion.text);
-      const next = payload?.next_operation;
-      if (next?.operation_id) {
-        void serializeOperationDispatch(() => dispatchOperationForController(tabId, controllerId, next));
-      }
-    } catch (_) {}
     return true;
   } catch (error) {
     await bridgeFetch('/chat/failed', 'POST', {
@@ -333,22 +316,13 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
       response_text: '',
       response_text_available: false,
       ack_only: true,
-      claim_next: true
+      claim_next: false
     }, 10000);
     if (!completion.ok) {
       throw new Error(
         'PASI_NATIVE: new chat completion failed: HTTP ' + String(completion.status || 0)
       );
     }
-    try {
-      const payload = JSON.parse(completion.text);
-      const next = payload?.next_operation;
-      if (next?.operation_id) {
-        void serializeOperationDispatch(() =>
-          dispatchOperationForController(tabId, controllerId, next)
-        );
-      }
-    } catch (_) {}
     return true;
   } catch (error) {
     const failure = String(error?.message || error).slice(0, 500);
@@ -403,21 +377,12 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
         response_text: '',
         response_text_available: false,
         ack_only: true,
-        claim_next: true
+        claim_next: false
       }, 10000);
       if (!completion.ok) {
         throw new Error('PASI_NATIVE: reasoning completion rejected');
       }
 
-      try {
-        const completedPayload = JSON.parse(completion.text);
-        const next = completedPayload?.next_operation;
-        if (next?.operation_id) {
-          void serializeOperationDispatch(() =>
-            dispatchOperationForController(tabId, controllerId, next)
-          );
-        }
-      } catch (_) {}
       return true;
     } catch (error) {
       await bridgeFetch('/chat/failed', 'POST', {
@@ -440,16 +405,54 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 }
 
 
-async function dispatchNextOperationForController(tabId, controllerId) {
-  if (typeof tabId !== 'number' || !controllerId) return false;
-  // Queue dispatch must remain live while the response-processing barrier is
-  // pending. A non-blocking /next-operation probe can observe the barrier,
-  // return no operation, and then leave the controller with no waiter to wake
-  // when /chat/processed releases the next task. Reuse the durable long-poll
-  // waiter so both startup and barrier-release paths converge on the same
-  // handoff behavior.
-  return waitForNextOperationForController(tabId, controllerId);
+// Queueing is intentionally inert. Only an explicit keyboard/UI command may
+// call runNextQueuedOperation(), which claims and executes exactly one operation.
+let manualDispatchInFlight = null;
+
+async function findActiveChatTab() {
+  const tabs = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+    url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
+  });
+  if (tabs[0]?.id != null) return tabs[0];
+  const candidates = await chrome.tabs.query({
+    url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
+  });
+  return candidates.find((tab) => typeof tab.id === 'number') || null;
 }
+
+async function runNextQueuedOperation(trigger = 'explicit') {
+  if (manualDispatchInFlight) {
+    return {ok: false, reason: 'execution_already_in_flight', trigger};
+  }
+
+  manualDispatchInFlight = (async () => {
+    const tab = await findActiveChatTab();
+    const tabId = tab?.id;
+    if (typeof tabId !== 'number') {
+      return {ok: false, reason: 'no_active_chatgpt_tab', trigger};
+    }
+    const controllerId = controllerIdForTab(tabId);
+    await cdpNetworkController?.attachTab?.(tabId);
+    await reportWorkerHealth(tab);
+    const dispatched = await waitForNextOperationForController(tabId, controllerId);
+    return {
+      ok: Boolean(dispatched),
+      dispatched: Boolean(dispatched),
+      controller_id: controllerId,
+      tab_id: tabId,
+      trigger
+    };
+  })();
+
+  try {
+    return await manualDispatchInFlight;
+  } finally {
+    manualDispatchInFlight = null;
+  }
+}
+
 
 const BRIDGE_ROUTES = new Set([
   'GET /health',
@@ -551,7 +554,30 @@ async function bridgeJson(path, timeoutMs = 10000) {
   }
 }
 
+chrome.commands?.onCommand?.addListener((command) => {
+  if (command !== 'pasi-run-next') return;
+  void runNextQueuedOperation('keyboard');
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type === 'pasi.execution.run-next') {
+    const senderUrl = String(sender?.url || '');
+    const extensionPrefix = `chrome-extension://${chrome.runtime.id}/`;
+    const trustedExtension = senderUrl.startsWith(extensionPrefix);
+    const trustedChatTab = isChatGPTUrl(senderUrl) && Number.isInteger(sender?.tab?.id);
+    if (!trustedExtension && !trustedChatTab) {
+      sendResponse({ok: false, reason: 'untrusted_execution_request'});
+      return undefined;
+    }
+    runNextQueuedOperation(trustedChatTab ? 'webpage' : 'extension-ui')
+      .then(sendResponse)
+      .catch((error) => sendResponse({
+        ok: false,
+        reason: String(error?.message || error).slice(0, 500)
+      }));
+    return true;
+  }
+
   if (message?.type === 'pasi-control-center-bridge-request') {
     const senderUrl = String(sender?.url || '');
     const extensionPrefix = `chrome-extension://${chrome.runtime.id}/`;
@@ -632,14 +658,14 @@ async function reportWorkerHealth(tab) {
   }, 5000);
 }
 
-async function attachAndDispatchTab(tab) {
+async function attachAndObserveTab(tab) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return false;
   if (!cdpNetworkController?.attachTab) return false;
   try {
     await cdpNetworkController.attachTab(tabId);
     await reportWorkerHealth(tab);
-    return await dispatchNextOperationForController(tabId, controllerIdForTab(tabId));
+    return true;
   } catch (_) {
     return false;
   }
@@ -651,11 +677,11 @@ async function attachExistingChatTabs() {
   });
   const active = tabs.find((tab) => tab.active && typeof tab.id === 'number');
   if (active) {
-    await attachAndDispatchTab(active);
+    await attachAndObserveTab(active);
     return;
   }
   for (const tab of tabs) {
-    if (await attachAndDispatchTab(tab)) return;
+    if (await attachAndObserveTab(tab)) return;
   }
 }
 
@@ -666,7 +692,7 @@ async function inspect() {
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
   if (tabs[0]) {
-    await attachAndDispatchTab(tabs[0]);
+    await attachAndObserveTab(tabs[0]);
     return;
   }
   await attachExistingChatTabs();
@@ -716,14 +742,14 @@ if (chrome.tabs?.onRemoved) {
 if (chrome.tabs?.onActivated) {
   chrome.tabs.onActivated.addListener((activeInfo) => {
     void chrome.tabs.get(activeInfo.tabId)
-      .then((tab) => attachAndDispatchTab(tab))
+      .then((tab) => attachAndObserveTab(tab))
       .catch(() => undefined);
   });
 }
 if (chrome.tabs?.onUpdated) {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo?.status === 'complete' && isChatGPTUrl(tab?.url)) {
-      void attachAndDispatchTab(tab);
+      void attachAndObserveTab(tab);
     }
   });
 }

@@ -26,7 +26,7 @@ EXPECTED_BRIDGE_TRANSITIONS = {
     }) for status in OPERATION_STATUSES
 }
 
-@pytest.mark.parametrize("current,target", product(sorted(OPERATION_STATUSES), repeat=2))
+@pytest.mark.parametrize("current,target", list(product(sorted(OPERATION_STATUSES), repeat=2)))
 def test_canonical_transition_matrix_exhaustively_accepts_and_rejects(current, target):
     expected = target in EXPECTED_CANONICAL_TRANSITIONS[current]
     state = OperationState(operation_id=f"op-{current}-{target}", operation_type="prompt", status=current)

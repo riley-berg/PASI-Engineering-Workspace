@@ -51,8 +51,8 @@ html.light-theme body {
   --border-color: #D7DDE5;
   --text-primary: #171A20;
   --text-secondary: #4F5661;
-  --text-muted: #707780;
-  --status-unavailable: #707780;
+  --text-muted: #666E78;
+  --status-unavailable: #666E78;
   --status-starting: #56606C;
   --status-running: #27313D;
   --status-failed: #A23D3D;

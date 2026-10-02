@@ -55,13 +55,13 @@ test("queue-style manual operation dispatch is removed from the popup", () => {
 test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /body\.light-theme\s*\{/);
   assert.match(popupCss, /--bg-main:\s*#FAF8F5/);
-  assert.match(popupCss, /--bg-card:\s*#F2EEE8/);
+  assert.match(popupCss, /--bg-card:\s*#EAE4DA/);
   assert.match(popupCss, /--text-primary:\s*#111215/);
   assert.match(popupCss, /--text-secondary:\s*#423731/);
   assert.match(popupCss, /--text-muted:\s*#665953/);
   assert.match(popupCss, /--btn-primary:\s*#1A1B20/);
   assert.match(popupCss, /--btn-primary-hover:\s*#2C2E35/);
-  assert.match(popupCss, /--btn-secondary:\s*#F2EEE8/);
+  assert.match(popupCss, /--btn-secondary:\s*#EAE4DA/);
   assert.doesNotMatch(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
@@ -70,6 +70,9 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--status-badge-bg:\s*rgba\(26, 27, 32/);
   assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(26, 27, 32/);
   assert.match(popupCss, /--status-badge-text:\s*#1A1B20/);
+  assert.match(popupCss, /--border-color:\s*#DCD4C7/);
+  assert.match(popupCss, /--idle-border:\s*#DCD4C7/);
+  assert.match(popupCss, /--idle-bg:\s*rgba\(234, 228, 218/);
   assert.doesNotMatch(popupCss, /#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /rgba?\(\s*59\s*,\s*130\s*,\s*246\b/i);
 });
@@ -92,6 +95,9 @@ test("popup uses the requested sepia/obsidian dark palette and no blue primary b
   assert.match(popupCss, /\.status-dot\.running[\s\S]*background:\s*#45464A/);
   assert.match(popupCss, /\.btn-primary\s*\{[\s\S]*color:\s*#fff/);
   assert.match(popupCss, /--text-primary:\s*#F4F1EC/);
+  assert.match(popupCss, /\.btn-primary[\s\S]*color:\s*#FFFFFF/);
+  assert.match(popupCss, /#runnerSelect:focus[\s\S]*outline|#runnerSelect:focus[\s\S]*box-shadow:\s*0 0 0 2px rgba\(244, 241, 236/);
+  assert.match(popupCss, /\.btn:focus-visible/);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#(?:2563eb|3b82f6)/i);
   assert.doesNotMatch(popupCss, /--btn-primary:\s*#54433A/);
   assert.doesNotMatch(popupCss, /--btn-primary-hover:\s*#69564B/);

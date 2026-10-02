@@ -88,3 +88,12 @@ def test_local_tests_run_all_suites_before_reporting_failure(tmp_path, monkeypat
         return
 
     raise AssertionError("run_local_tests should report the aggregate failure")
+
+def test_m1_conversation_identity_ignores_url_query_changes() -> None:
+    from scripts.pasi_m1_cdp_chain import chat_conversation_identity
+
+    assert chat_conversation_identity("https://chatgpt.com/c/abc123") == "chatgpt.com/c/abc123"
+    assert chat_conversation_identity("https://chatgpt.com/c/abc123?model=gpt-5") == "chatgpt.com/c/abc123"
+    assert chat_conversation_identity("https://www.chatgpt.com/c/abc123/") == "www.chatgpt.com/c/abc123"
+    assert chat_conversation_identity("https://chatgpt.com/c/xyz789") != "chatgpt.com/c/abc123"
+

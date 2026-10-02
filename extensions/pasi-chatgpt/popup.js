@@ -189,12 +189,17 @@
       });
     });
 
+    if (!response) {
+      setStatus("Run-next received no response from the extension worker. Reload the extension and try again.", true);
+      return;
+    }
+
     if (response?.dispatched) {
       setStatus("Dispatched " + response.operation_id + ".");
       return;
     }
 
-    const reason = String(response?.reason || response?.error || "unknown result");
+    const reason = String(response?.reason || response?.error || "extension worker returned no dispatch reason");
     if (reason === "no_queued_operation") {
       setStatus("No queued operation is waiting.", true);
     } else {
@@ -233,13 +238,19 @@
 
     const stateLabelText = runnerStatusLabel(state, profileId);
     const statusText = document.createElement("div");
-    statusText.className = "status-text " + stateLabelText.toLowerCase().replace(/[^a-z]+/g, "-");
-    statusText.textContent =
-      stateLabelText === "Running" ? "🟢 Running" :
-      stateLabelText === "Paused" ? "🟡 Paused" :
-      stateLabelText === "Failed" ? "🔴 Failed" :
-      stateLabelText === "Completed" ? "🟢 Completed" :
-      "🟢 Ready";
+    const stateClass =
+      stateLabelText === "Running" ? "running" :
+      stateLabelText === "Paused" ? "paused" :
+      stateLabelText === "Failed" ? "failed" :
+      stateLabelText === "Completed" ? "completed" :
+      "ready";
+    statusText.className = "status-text " + stateClass;
+    const dot = document.createElement("span");
+    dot.className = "status-dot " + stateClass;
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = stateLabelText;
+    statusText.append(dot, label);
 
     const desc = document.createElement("div");
     desc.className = "status-desc";
@@ -258,6 +269,9 @@
     toggle.onclick = async () => {
       toggle.disabled = true;
       try {
+        await setProfile(profileId);
+        const selector = $("runnerSelect");
+        if (selector) selector.value = profileId;
         await toggleRunner(profileId, state);
         await render();
       } catch (error) {
@@ -459,10 +473,8 @@
         warning.hidden = Boolean(activeResult.scripts?.length);
       }
       await applyTheme();
-      $("profileSummary").textContent =
-        selectedProfile === "168h"
-          ? "168h long-run · 20-operation acceptance"
-          : "M1 · 20-operation acceptance";
+      const selector = $("runnerSelect");
+      if (selector) selector.value = selectedProfile;
       if (!$("status").classList.contains("error")) {
         setStatus("");
       }
@@ -475,10 +487,9 @@
     void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));
   });
 
-  $("profileSummary").addEventListener("click", async () => {
+  $("runnerSelect").addEventListener("change", async (event) => {
     try {
-      const next = (await getProfile()) === "m1" ? "168h" : "m1";
-      await setProfile(next);
+      await setProfile(event.target.value === "168h" ? "168h" : "m1");
       await render();
     } catch (error) {
       setStatus(String(error?.message || error), true);

@@ -223,15 +223,36 @@ def _runner_profile(profile: object) -> str:
     return value
 
 
+def _github_token() -> str:
+    """Resolve a GitHub credential for supervised runners without storing it."""
+    configured = (
+        os.environ.get("PASI_GITHUB_TOKEN", "").strip()
+        or os.environ.get("GITHUB_TOKEN", "").strip()
+    )
+    if configured:
+        return configured
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token", "--hostname", "github.com"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    return result.stdout.strip()
+
+
 def _start_runner(profile: str) -> dict[str, Any]:
     if runner_process_is_alive():
         return {"accepted": False, "action": "start", "profile": profile, "reason": "runner already running"}
 
-    if profile == "168h":
-        if not os.environ.get("PASI_GITHUB_TOKEN", "").strip() and not os.environ.get("GITHUB_TOKEN", "").strip():
-            return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
-        if os.environ.get("PASI_PUSH", "").strip() != "1":
-            return {"accepted": False, "action": "start", "profile": profile, "reason": "PASI_PUSH=1 is required for a real 168-hour run"}
+    github_token = _github_token() if profile == "168h" else ""
+    if profile == "168h" and not github_token:
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
 
     command = list(RUNNER_PROFILES[profile])
     executable = Path(command[0])
@@ -272,6 +293,9 @@ def _start_runner(profile: str) -> dict[str, Any]:
 
     environment = os.environ.copy()
     environment.setdefault("PYTHONUNBUFFERED", "1")
+    if profile == "168h":
+        environment["PASI_GITHUB_TOKEN"] = github_token
+        environment["PASI_PUSH"] = "1"
     try:
         process = subprocess.Popen(
             command,

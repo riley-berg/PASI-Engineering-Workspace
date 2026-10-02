@@ -123,148 +123,6 @@
     await chrome.storage.local.set({"pasi.runner.profile": profile});
   }
 
-  const RUNNER_OPTIONS = Object.freeze([
-    {id: "m1", label: "M1 · Acceptance"},
-    {id: "168h", label: "168h · Long-run"},
-  ]);
-
-  function normalizeProfile(profile) {
-    return profile === "168h" ? "168h" : "m1";
-  }
-
-  function runnerOptionElements() {
-    return [...document.querySelectorAll("#runnerSelectMenu [role=\"option\"]")];
-  }
-
-  function setRunnerSelection(profile) {
-    const normalized = normalizeProfile(profile);
-    const trigger = $("runnerSelect");
-    const label = $("runnerSelectLabel");
-    const options = runnerOptionElements();
-
-    if (!trigger) return;
-
-    const selected = RUNNER_OPTIONS.find((option) => option.id === normalized) || RUNNER_OPTIONS[0];
-    trigger.dataset.value = selected.id;
-    trigger.setAttribute("aria-activedescendant", "runnerOption-" + selected.id);
-
-    if (label) label.textContent = selected.label;
-
-    for (const option of options) {
-      const isSelected = option.dataset.value === selected.id;
-      option.setAttribute("aria-selected", isSelected ? "true" : "false");
-      option.tabIndex = isSelected ? 0 : -1;
-    }
-  }
-
-  function setSelectedRunnerCard(profile) {
-    const normalized = normalizeProfile(profile);
-    for (const card of document.querySelectorAll("#runnerCards .runner-card")) {
-      card.classList.toggle("selected", card.dataset.profile === normalized);
-    }
-  }
-
-  function closeRunnerPicker({restoreFocus = false} = {}) {
-    const trigger = $("runnerSelect");
-    const menu = $("runnerSelectMenu");
-    if (!trigger || !menu) return;
-
-    menu.hidden = true;
-    trigger.setAttribute("aria-expanded", "false");
-    trigger.classList.remove("open");
-    if (restoreFocus) trigger.focus();
-  }
-
-  function openRunnerPicker() {
-    const trigger = $("runnerSelect");
-    const menu = $("runnerSelectMenu");
-    if (!trigger || !menu) return;
-
-    setRunnerSelection(trigger.dataset.value || "m1");
-    menu.hidden = false;
-    trigger.setAttribute("aria-expanded", "true");
-    trigger.classList.add("open");
-
-    const selected = menu.querySelector('[role="option"][aria-selected="true"]');
-    if (selected) selected.focus();
-  }
-
-  async function selectRunnerProfile(profile) {
-    const normalized = normalizeProfile(profile);
-    await setProfile(normalized);
-    setRunnerSelection(normalized);
-    setSelectedRunnerCard(normalized);
-    closeRunnerPicker({restoreFocus: true});
-  }
-
-  function initializeRunnerPicker() {
-    const trigger = $("runnerSelect");
-    const menu = $("runnerSelectMenu");
-    if (!trigger || !menu) return;
-
-    setRunnerSelection("m1");
-
-    trigger.addEventListener("click", () => {
-      if (menu.hidden) openRunnerPicker();
-      else closeRunnerPicker({restoreFocus: true});
-    });
-
-    trigger.addEventListener("keydown", (event) => {
-      if (event.key === "ArrowDown" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowLeft") {
-        event.preventDefault();
-        openRunnerPicker();
-      } else if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        if (menu.hidden) openRunnerPicker();
-        else closeRunnerPicker({restoreFocus: true});
-      } else if (event.key === "Escape") {
-        event.preventDefault();
-        closeRunnerPicker({restoreFocus: false});
-      }
-    });
-
-    for (const option of runnerOptionElements()) {
-      option.addEventListener("click", () => {
-        void selectRunnerProfile(option.dataset.value).catch((error) => {
-          closeRunnerPicker({restoreFocus: true});
-          setStatus(String(error?.message || error), true);
-        });
-      });
-
-      option.addEventListener("keydown", (event) => {
-        const options = runnerOptionElements();
-        const index = options.indexOf(option);
-
-        if (event.key === "ArrowDown" || event.key === "ArrowRight") {
-          event.preventDefault();
-          options[(index + 1) % options.length].focus();
-        } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
-          event.preventDefault();
-          options[(index - 1 + options.length) % options.length].focus();
-        } else if (event.key === "Home") {
-          event.preventDefault();
-          options[0].focus();
-        } else if (event.key === "End") {
-          event.preventDefault();
-          options[options.length - 1].focus();
-        } else if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          void selectRunnerProfile(option.dataset.value).catch((error) => {
-            closeRunnerPicker({restoreFocus: true});
-            setStatus(String(error?.message || error), true);
-          });
-        } else if (event.key === "Escape") {
-          event.preventDefault();
-          closeRunnerPicker({restoreFocus: true});
-        }
-      });
-    }
-
-    document.addEventListener("pointerdown", (event) => {
-      if (!menu.hidden && !event.target.closest(".runner-picker")) closeRunnerPicker();
-    });
-  }
-
   function runnerIsRunning(state) {
     return state?.available === true && state?.status === "running";
   }
@@ -302,8 +160,30 @@
     }
     if (status === "Completed") return "Last run completed.";
     if (status === "Paused") return "Runner is paused and can be started again.";
-    if (status === "Failed") return String(state?.stop_reason || state?.last_result || "Last run failed.");
+    if (status === "Failed") return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
     return "Ready to execute.";
+  }
+
+  async function waitForRunnerState(profileId, action, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    let state = await getRunnerState();
+
+    while (Date.now() < deadline) {
+      const activeProfile = activeProfileForState(state);
+      const running = runnerIsRunning(state);
+
+      if (action === "start") {
+        if (running && activeProfile === profileId) return state;
+        if (state?.status === "failed" || state?.status === "completed" || state?.status === "cancelled") return state;
+      } else if (!running || activeProfile !== profileId) {
+        return state;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      state = await getRunnerState();
+    }
+
+    return state;
   }
 
   async function controlRunner(profileId, requestedAction) {
@@ -344,18 +224,30 @@
       throw new Error(String(result.reason || "Runner action was rejected."));
     }
 
+    const settledState = await waitForRunnerState(profileId, action);
+    if (action === "start" && settledState?.status === "failed") {
+      throw new Error(
+        String(
+          settledState?.error ||
+          settledState?.stop_reason ||
+          settledState?.last_result ||
+          (profileId === "168h" ? "168h" : "M1") + " runner failed during startup."
+        )
+      );
+    }
+
     setStatus(
       action === "stop"
-        ? (profileId === "168h" ? "168h" : "M1") + " runner paused."
+        ? (profileId === "168h" ? "168h" : "M1") + " runner stopped."
         : (profileId === "168h" ? "168h" : "M1") + " runner started."
     );
 
     return action;
   }
-  function createRunnerCard(profileId, state, selectedProfile) {
+  function createRunnerCard(profileId, state) {
     const profile = RUNNER_PROFILES[profileId];
     const card = document.createElement("section");
-    card.className = "runner-card " + (profileId === selectedProfile ? "selected" : "");
+    card.className = "runner-card";
     card.dataset.profile = profileId;
 
     const header = document.createElement("div");
@@ -419,7 +311,6 @@
       toggle.disabled = true;
       try {
         await setProfile(profileId);
-        setRunnerSelection(profileId);
         await controlRunner(profileId, runningThisProfile ? "stop" : "start");
         await render();
       } catch (error) {
@@ -434,7 +325,7 @@
     return card;
   }
 
-  function renderRunnerDashboard(state, selectedProfile, visible) {
+  function renderRunnerDashboard(state, visible) {
     const root = $("runnerCards");
     const controls = $("runnerControls");
     root.replaceChildren();
@@ -447,7 +338,7 @@
     }
 
     for (const profileId of Object.keys(RUNNER_PROFILES)) {
-      root.append(createRunnerCard(profileId, state, selectedProfile));
+      root.append(createRunnerCard(profileId, state));
     }
 
     $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
@@ -634,10 +525,9 @@
     try {
       applyTheme();
 
-      const [activeResult, runnerState, selectedProfile] = await Promise.all([
+      const [activeResult, runnerState] = await Promise.all([
         send(TYPES.active),
         getRunnerState(),
-        getProfile(),
       ]);
 
       const activeUrl = String(activeResult.url || "");
@@ -650,15 +540,13 @@
       currentUrl.hidden = true;
       if (!currentUrl.parentElement) document.body.append(currentUrl);
 
-      renderRunnerDashboard(runnerState, selectedProfile, runnerSupported);
+      renderRunnerDashboard(runnerState, runnerSupported);
       await renderUserscripts(activeResult);
 
       const idle = $("idleState");
       if (idle) {
         idle.hidden = runnerSupported || userscriptsMatched;
       }
-
-      setRunnerSelection(selectedProfile);
 
       if (clearStatus && !$("status").classList.contains("error")) {
         setStatus("");
@@ -671,8 +559,6 @@
   $("themeToggle").addEventListener("click", () => {
     void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));
   });
-
-  initializeRunnerPicker();
 
   void render();
 })();

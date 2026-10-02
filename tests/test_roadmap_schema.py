@@ -54,6 +54,14 @@ def test_canonical_roadmap_objects_cannot_retain_legacy_schema_versions():
             phases=(),
             tasks=(),
         )
+    with pytest.raises(RoadmapError, match="canonical schema version 4"):
+        Roadmap(
+            roadmap_id="invalid-v3-object",
+            version=3,
+            revision=0,
+            phases=(),
+            tasks=(),
+        )
 
 
 @pytest.mark.parametrize("version", [1, 5])

@@ -192,37 +192,6 @@
     );
   }
 
-  async function runNext() {
-    setStatus("Dispatching one queued operation…");
-    const response = await new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({type: "pasi.execution.run-next"}, (result) => {
-        const runtimeError = chrome.runtime.lastError;
-        if (runtimeError) {
-          reject(new Error(runtimeError.message));
-          return;
-        }
-        resolve(result || null);
-      });
-    });
-
-    if (!response) {
-      setStatus("Run-next received no response from the extension worker. Reload the extension and try again.", true);
-      return;
-    }
-
-    if (response?.dispatched) {
-      setStatus("Dispatched " + response.operation_id + ".");
-      return;
-    }
-
-    const reason = String(response?.reason || response?.error || "extension worker returned no dispatch reason");
-    if (reason === "no_queued_operation") {
-      setStatus("No queued operation is waiting.", true);
-    } else {
-      setStatus("Run-next did not dispatch: " + reason, true);
-    }
-  }
-
   function createRunnerCard(profileId, state, selectedProfile) {
     const profile = RUNNER_PROFILES[profileId];
     const card = document.createElement("section");
@@ -519,15 +488,6 @@
     }
   });
 
-  $("runNextButton").addEventListener("click", () => {
-    const button = $("runNextButton");
-    button.disabled = true;
-    void runNext()
-      .catch((error) => setStatus(String(error?.message || error), true))
-      .finally(() => {
-        button.disabled = false;
-      });
-  });
 
   void render();
 })();

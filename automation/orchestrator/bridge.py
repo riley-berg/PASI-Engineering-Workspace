@@ -118,7 +118,34 @@ def load_runner_capabilities() -> dict[str, Any]:
         return {"available": False, "reason": "capability report invalid"}
     # The bridge exposes only machine-health metadata; secrets and command output are not persisted here.
     allowed = {"schema_version", "generated_at", "runner_name", "repository", "resources", "boundary", "runtime", "required_ok", "failures", "recommended_labels", "actions"}
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    return {
+        "available": True,
+        **{key: payload[key] for key in allowed if key in payload},
+        "execution_authorized": runner_execution_authorized(payload),
+    }
+
+def runner_process_is_alive() -> bool:
+    try:
+        raw_pid = (RUNNER_RUNTIME_DIR / "runner.pid").read_text(encoding="utf-8").strip()
+        pid = int(raw_pid)
+    except (OSError, ValueError):
+        return False
+    if pid <= 1:
+        return False
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
+    except OSError:
+        return False
+    return "pasi_168h_acceptance.py" in cmdline
+
+
+def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
+    return bool(
+        payload.get("status") == "running"
+        and payload.get("execution_mode") == "supervised_168h"
+        and runner_process_is_alive()
+    )
+
 
 def load_runner_state() -> dict[str, Any]:
     try:
@@ -134,6 +161,7 @@ def load_runner_state() -> dict[str, Any]:
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
+        "execution_mode",
     }
     return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
 

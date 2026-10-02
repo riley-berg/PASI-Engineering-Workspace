@@ -289,6 +289,13 @@ html.light-theme body .runner-select:focus-visible {
 html.light-theme body .runner-select-menu {
   box-shadow: 0 8px 20px rgba(17, 18, 21, .12);
 }
+
+html.light-theme body .runner-select-option:not([aria-selected="true"]):hover,
+html.light-theme body .runner-select-option:not([aria-selected="true"]):focus-visible {
+  background: #F0ECE6 !important;
+  background-color: #F0ECE6 !important;
+  box-shadow: none;
+}
 .status {
   min-height: 16px;
   margin-bottom: 6px;

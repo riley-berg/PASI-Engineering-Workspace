@@ -23,12 +23,12 @@ body {
   --text-primary: #EADBCB;
   --text-secondary: #CBBBAA;
   --text-muted: #9A8978;
-  --btn-primary: #2F261D;
-  --btn-primary-hover: #4A3728;
+  --btn-primary: #604830;
+  --btn-primary-hover: #765A3D;
   --btn-secondary: #2F261D;
   --btn-secondary-hover: #604830;
-  --badge-m1: #2F261D;
-  --badge-long: #2F261D;
+  --badge-m1: #604830;
+  --badge-long: #604830;
   --status-ready: #B59B7D;
   --status-badge-bg: rgba(96, 72, 48, .18);
   --status-badge-active-bg: rgba(96, 72, 48, .26);
@@ -149,6 +149,10 @@ select {
 
 #runnerSelect:focus {
   border-color: var(--btn-primary);
+  box-shadow: 0 0 0 2px rgba(96, 72, 48, .18);
+}
+
+body.light-theme #runnerSelect:focus {
   box-shadow: 0 0 0 2px rgba(47, 38, 29, .18);
 }
 
@@ -192,6 +196,11 @@ select {
 }
 
 .runner-card.selected {
+  border-color: #604830;
+  box-shadow: 0 0 0 1px rgba(96, 72, 48, .28);
+}
+
+body.light-theme .runner-card.selected {
   border-color: #2F261D;
   box-shadow: 0 0 0 1px rgba(47, 38, 29, .24);
 }
@@ -272,19 +281,35 @@ select {
 }
 
 .status-dot.running {
-  background: #604830;
+  background: #8A6A49;
   animation: pasi-runner-pulse 1.4s infinite;
 }
 
+body.light-theme .status-dot.running {
+  background: #604830;
+}
+
 .status-dot.paused {
+  background: #f59e0b;
+}
+
+body.light-theme .status-dot.paused {
   background: #8A6748;
 }
 
 .status-dot.failed {
+  background: #ef4444;
+}
+
+body.light-theme .status-dot.failed {
   background: #7A3F32;
 }
 
 .status-dot.completed {
+  background: #10b981;
+}
+
+body.light-theme .status-dot.completed {
   background: #4F5D42;
 }
 
@@ -313,6 +338,10 @@ select {
 
 .btn-primary {
   background: var(--btn-primary);
+  color: #fff;
+}
+
+body.light-theme .btn-primary {
   color: #F4ECE1;
 }
 
@@ -395,8 +424,12 @@ select {
 
 .warn {
   margin-top: 7px;
-  color: var(--btn-primary);
+  color: #d97706;
   font-size: 9px;
+}
+
+body.light-theme .warn {
+  color: var(--btn-primary);
 }
 
 .idle-state {
@@ -430,6 +463,16 @@ select {
 }
 
 @keyframes pasi-runner-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(96, 72, 48, .38); }
+  70% { box-shadow: 0 0 0 5px rgba(96, 72, 48, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(96, 72, 48, 0); }
+}
+
+body.light-theme .status-dot.running {
+  animation-name: pasi-runner-pulse-light;
+}
+
+@keyframes pasi-runner-pulse-light {
   0% { box-shadow: 0 0 0 0 rgba(47, 38, 29, .32); }
   70% { box-shadow: 0 0 0 5px rgba(47, 38, 29, 0); }
   100% { box-shadow: 0 0 0 0 rgba(47, 38, 29, 0); }

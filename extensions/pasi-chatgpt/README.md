@@ -67,6 +67,10 @@ Network header modification uses Chrome declarative network rules, which support
 
 Downloads accept relative paths beneath the browser Downloads directory, including subdirectories; parent traversal is rejected.
 
+## API layering
+
+The page-facing PASI API is the v2 contract plus the v3 extensions. The native userscript manager is a separate boundary exposed through `PASIUserScript`/GM-compatible bindings from `src/userscript_runtime.js`; there is no page-facing `PASI.userScripts` manager layer.
+
 ## Native userscript architecture
 
 PASI now implements a three-tier userscript boundary using Chrome's native MV3 User Scripts API rather than a userscript-manager dependency.

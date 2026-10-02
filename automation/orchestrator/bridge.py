@@ -214,9 +214,31 @@ def load_runner_state() -> dict[str, Any]:
         "last_operation_id", "last_request_id", "updated_at", "completed_at",
     }
     result = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
-    if result.get("status") == "starting" and not runner_process_is_alive():
+
+    # The persisted state is a durable snapshot, not the authority for
+    # liveness. A runner can still be alive briefly while its script is
+    # publishing a terminal state, or a stale state file can outlive an
+    # unexpectedly terminated process. The popup and control endpoints must
+    # agree on the actual process reality.
+    process_alive = runner_process_is_alive()
+    status = str(result.get("status") or "")
+    active_statuses = {"starting", "running", "stopping"}
+
+    if process_alive and status not in active_statuses:
+        result["status"] = "running"
+        profile = str(result.get("runner_profile") or "")
+        if profile in RUNNER_PROFILES:
+            result["execution_mode"] = "supervised_" + profile
+        result.pop("error", None)
+        result.pop("failed_at", None)
+        result.pop("completed_at", None)
+    elif not process_alive and status in {"starting", "running"}:
         result["status"] = "failed"
-        result.setdefault("error", "runner exited before initialization completed")
+        result.setdefault(
+            "error",
+            "runner process is no longer alive",
+        )
+
     return result
 
 def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:

@@ -9,7 +9,6 @@ const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
 const popupJs = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
 const themeInit = fs.readFileSync(path.join(ROOT, "theme-init.js"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8"));
-const backgroundJs = fs.readFileSync(path.join(ROOT, "src", "background.js"), "utf8");
 
 test("popup keeps the page-not-authorized warning separate from runner ready state", () => {
   assert.match(popupHtml, /id="idleState"[^>]*class="idle-state"[^>]*hidden/);
@@ -132,13 +131,9 @@ test("runner cards do not animate theme surface or border changes", () => {
   assert.doesNotMatch(runnerCardRule, /background-color|border-color/);
 });
 
-test("dashboard opens as a bounded extension window instead of a browser action popup", () => {
-  assert.equal(manifest.action.default_popup, undefined);
-  assert.ok(manifest.permissions.includes("system.display"));
-  assert.match(backgroundJs, /chrome\.action\?\.onClicked\?\.addListener/);
-  assert.match(backgroundJs, /chrome\.windows\.create\(\{[\s\S]*type: 'popup'/);
-  assert.match(backgroundJs, /chrome\.system\.display\.getInfo\(\)/);
-  assert.match(backgroundJs, /state === 'fullscreen'/);
+test("dashboard remains the native toolbar popup", () => {
+  assert.equal(manifest.action.default_popup, "popup.html");
+  assert.doesNotMatch(JSON.stringify(manifest.permissions), /system\.display/);
 });
 
 test("runner readiness labels are operational states, not static ready claims", () => {

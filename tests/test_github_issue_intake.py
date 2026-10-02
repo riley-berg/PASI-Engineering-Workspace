@@ -71,7 +71,7 @@ def test_github_issue_intake_applies_as_real_roadmap_task():
     )
     roadmap = Roadmap(
         roadmap_id="pasi-main",
-        version=3,
+        version=4,
         revision=0,
         phases=(RoadmapPhase("P2", "Planner", status=PhaseStatus.ACTIVE),),
         tasks=(),

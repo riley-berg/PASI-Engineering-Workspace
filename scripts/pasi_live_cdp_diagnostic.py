@@ -336,6 +336,7 @@ def exercise_handoff(
     )
 
     acknowledge_processed(transport, first)
+    print("EXPLICIT TRIGGER REQUIRED: press Alt+Shift+P again to run the queued handoff operation.", flush=True)
     second_terminal = wait_until_status(
         transport,
         second_id,
@@ -428,10 +429,11 @@ def main() -> int:
         )
         operation_id = adapter.submit_prompt(make_probe_prompt(marker), completion_markers=[marker])
         print(f"LIVE OPERATION: {operation_id}", flush=True)
+        print("EXPLICIT TRIGGER REQUIRED: press Alt+Shift+P to run exactly one queued PASI operation.", flush=True)
         step_results.append({
             "ok": True,
-            "step": "prompt_submission",
-            "summary": f"queued live probe operation {operation_id}",
+            "step": "operation_queued",
+            "summary": f"queued live probe operation {operation_id}; waiting for explicit execution command",
         })
 
         terminal = wait_until_status(

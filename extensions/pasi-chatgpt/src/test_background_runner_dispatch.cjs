@@ -6,15 +6,17 @@ const test = require("node:test");
 const ROOT = path.resolve(__dirname, "..");
 const background = fs.readFileSync(path.join(ROOT, "src", "background.js"), "utf8");
 
-test("background gates supervised operation dispatch on an active runner", () => {
+test("background keeps the dispatcher dormant until a live supervised runner exists", () => {
   assert.match(background, /const supervisedExecutionWaiters = new Map\(\);/);
   assert.match(background, /function runnerStateIsDispatchable\(state\)/);
   assert.match(background, /state\.status !== 'running'/);
   assert.match(background, /state\.process_alive !== true/);
   assert.match(background, /state\.ready !== true/);
   assert.match(background, /execution_mode[^\n]+supervised_/);
-  assert.match(background, /async function waitForSupervisedRunnerReady\(timeoutMs = 15000\)/);
-  assert.match(background, /waitForSupervisedRunnerReady\(\)/);
+  assert.match(background, /if \(!runnerStateIsDispatchable\(runnerState\)\)/);
+  assert.match(background, /setTimeout\(resolve, 500\)/);
+  assert.match(background, /waitForNextOperationForController\(tabId, controllerId\)/);
+  assert.doesNotMatch(background, /waitForSupervisedRunnerReady\(/);
   assert.match(background, /ensureSupervisedExecutionWaiter\(tabId, controllerIdForTab\(tabId\)\);/);
 });
 

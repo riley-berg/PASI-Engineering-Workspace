@@ -338,8 +338,8 @@ def main() -> int:
     atexit.register(clear_runner_pid)
     worktree = args.worktree.expanduser().resolve()
     initial_started_at = utcnow().isoformat()
-    write_runner_pid()
     try:
+        write_runner_pid()
         write_state({
             "run_id": run_id,
             "repo": REPO,

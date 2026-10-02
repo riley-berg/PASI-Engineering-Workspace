@@ -36,7 +36,7 @@ def test_runner_start_publishes_shared_runtime_directory(monkeypatch, tmp_path):
     result = bridge._start_runner("168h")
 
     assert result["accepted"] is True
-    assert captured["environment"]["PASI_RUNTIME_DIR"] == str(runtime)
+    assert captured["environment"]["PASI_RUNTIME_DIR"] == str(runtime / "168h")
 
 
 def test_load_runner_state_preserves_m1_dispatch_progress(monkeypatch, tmp_path):
@@ -73,6 +73,15 @@ def test_load_runner_state_preserves_m1_dispatch_progress(monkeypatch, tmp_path)
     assert result["current_operation_index"] == 1
     assert result["current_operation_status"] == "queued"
     assert result["phase"] == "waiting_for_cdp_dispatch"
+
+
+def test_runner_start_uses_profile_isolated_runtime(monkeypatch, tmp_path):
+    runtime = tmp_path / "runtime"
+    monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", runtime)
+
+    assert bridge.runner_runtime_dir("m1") == (runtime / "m1").resolve()
+    assert bridge.runner_runtime_dir("168h") == (runtime / "168h").resolve()
+    assert bridge.runner_state_path("m1") != bridge.runner_state_path("168h")
 
 
 def test_runner_start_uses_profile_isolated_runtime(monkeypatch, tmp_path):

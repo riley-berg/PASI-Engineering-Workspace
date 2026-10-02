@@ -12,19 +12,21 @@
       <span class="brand">PASI Dashboard</span>
       <span id="connectionBadge" class="status-badge">Ready</span>
     </div>
-    <div class="header-actions">
-      <button id="themeToggle" class="theme-toggle" type="button" title="Toggle UI Mode" aria-label="Toggle UI Mode">🌙</button>
-      <a href="options.html" target="_blank">Dashboard</a>
-    </div>
+    <button id="themeToggle" class="theme-toggle" type="button" title="Switch to light theme" aria-label="Switch to light theme">🌙</button>
   </header>
 
-  <div class="profile-summary">
-    <label for="runnerSelect">Selected runner</label>
-    <select id="runnerSelect" aria-label="Selected runner">
-      <option value="m1">M1 · 20-operation acceptance</option>
-      <option value="168h">168h · long-run acceptance</option>
-    </select>
-  </div>
+  <section id="runnerControls" class="runner-controls" aria-label="Runner controls">
+    <label class="profile-summary" for="runnerSelect">
+      <span>Selected runner</span>
+      <select id="runnerSelect" aria-label="Selected runner">
+        <option value="m1">M1 · 20-operation acceptance</option>
+        <option value="168h">168h · long-run acceptance</option>
+      </select>
+    </label>
+    <button id="runNextButton" class="btn btn-secondary queue-button" type="button">
+      Run next queued op
+    </button>
+  </section>
 
   <div id="status" class="status" role="status" aria-live="polite"></div>
 
@@ -32,9 +34,11 @@
 
   <section id="scripts" aria-label="PASI userscripts"></section>
 
-  <footer id="systemWarning" class="system-warning">
-    ⚠️ No PASI userscripts match this page.
-  </footer>
+  <section id="idleState" class="idle-state" hidden aria-live="polite">
+    <div class="idle-icon" aria-hidden="true">⚠️</div>
+    <div class="idle-title">Extension idle</div>
+    <div class="idle-copy">Navigate to a supported page to activate userscripts.</div>
+  </section>
 
   <script src="popup.js"></script>
 </body>

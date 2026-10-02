@@ -159,7 +159,8 @@ async function waitForNextOperationForController(tabId, controllerId, waitMs = 6
     while (true) {
       if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
       const payload = await bridgeJson(
-        '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
+        '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
+        boundedWaitMs + 5000
       );
       if (payload === null) {
         // A bridge restart or transient localhost failure must not permanently
@@ -540,8 +541,8 @@ async function bridgeFetch(path, method = 'GET', body = null, timeoutMs = 5000) 
   }
 }
 
-async function bridgeJson(path) {
-  const response = await bridgeFetch(path);
+async function bridgeJson(path, timeoutMs = 10000) {
+  const response = await bridgeFetch(path, 'GET', null, timeoutMs);
   if (!response.ok) return null;
   try {
     return JSON.parse(response.text);

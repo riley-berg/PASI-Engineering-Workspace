@@ -346,7 +346,7 @@ def test_transient_failure_from_queued_operation_rejects_queued_to_queued(tmp_pa
         "expected",
     )
 
-    with pytest.raises(InvalidOperationTransition, match="queued -> queued"):
+    with pytest.raises(InvalidOperationTransition, match=r"'queued' -> 'queued'"):
         bridge.fail_operation(
             operation.operation_id,
             "PASI_CDP: network failure",

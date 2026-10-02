@@ -172,11 +172,20 @@ def summarize_output(step_results: list[dict[str, Any]], final: Mapping[str, Any
 
 
 def run_local_tests(root: Path) -> dict[str, Any]:
+    extension_tests = sorted(
+        root.glob("extensions/pasi-chatgpt/src/test_*.cjs")
+    )
     commands = [
         ([sys.executable, "-m", "pytest", "-q"], "pytest"),
         (["node", "--test", "web/app.test.js"], "frontend"),
+        (
+            ["node", "--test", *[str(test.relative_to(root)) for test in extension_tests]],
+            "extension",
+        ),
     ]
     results: dict[str, Any] = {}
+    failures: dict[str, Any] = {}
+
     for command, name in commands:
         started = time.monotonic()
         completed = subprocess.run(
@@ -196,13 +205,19 @@ def run_local_tests(root: Path) -> dict[str, Any]:
             "output_tail": output,
         }
         if completed.returncode != 0:
-            raise DiagnosticFailure(
-                f"local_tests.{name}",
-                f"{name} failed",
-                results[name],
-            )
-    return results
+            failures[name] = results[name]
 
+    if failures:
+        raise DiagnosticFailure(
+            "local_tests",
+            f"{len(failures)} local test command(s) failed after the complete test set was executed",
+            {
+                "results": results,
+                "failed": failures,
+            },
+        )
+
+    return results
 
 def make_probe_prompt(marker: str) -> str:
     return (

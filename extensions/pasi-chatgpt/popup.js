@@ -187,6 +187,13 @@
       const phase = String(state?.phase || "");
       const currentStatus = String(state?.current_operation_status || "");
       const currentId = String(state?.current_operation_id || "");
+      const startupPhases = {
+        startup: "Starting M1 runner.",
+        health_check: "Checking bridge and browser health.",
+        browser_diagnostics: "Reading the active ChatGPT browser state.",
+        ready_for_first_operation: "Ready for the first M1 operation."
+      };
+      if (startupPhases[phase]) return startupPhases[phase];
       if (phase === "waiting_for_cdp_dispatch" || currentStatus === "queued") {
         return currentId
           ? "Waiting for CDP dispatch of " + currentId

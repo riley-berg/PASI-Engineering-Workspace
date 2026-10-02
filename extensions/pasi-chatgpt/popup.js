@@ -334,8 +334,7 @@
         await render();
       } catch (error) {
         setStatus(String(error?.message || error), true);
-      } finally {
-        toggle.disabled = false;
+        await render();
       }
     };
 

@@ -549,6 +549,8 @@
 
   function setThemeUi(light) {
     document.documentElement.classList.toggle("light-theme", light);
+    document.documentElement.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
+    document.documentElement.style.colorScheme = light ? "light" : "dark";
     document.documentElement.removeAttribute("data-theme-pending");
     document.documentElement.removeAttribute("data-popup-paint-pending");
 

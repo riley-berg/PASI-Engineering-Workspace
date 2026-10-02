@@ -31,6 +31,31 @@
   async function render() {
     try {
       const result = await send(TYPES.active);
+      const executionCard = document.createElement("section");
+      executionCard.className = "card";
+      const executionTitle = document.createElement("div");
+      executionTitle.className = "name";
+      executionTitle.textContent = "Execution";
+      const runNext = document.createElement("button");
+      runNext.textContent = "Run next queued operation";
+      runNext.onclick = async () => {
+        runNext.disabled = true;
+        status("Starting exactly one queued operation…");
+        try {
+          const response = await send("pasi.execution.run-next");
+          if (response.dispatched) {
+            status("Dispatched " + response.operation_id + ".");
+          } else {
+            status("No operation dispatched: " + (response.reason || "unknown result"), true);
+          }
+        } catch (error) {
+          status(String(error.message || error), true);
+        } finally {
+          runNext.disabled = false;
+        }
+      };
+      executionCard.append(executionTitle, runNext);
+      $("scripts").replaceChildren(executionCard);
       $("site").textContent = result.url || "No inspectable page";
       const root = $("scripts");
       root.replaceChildren();

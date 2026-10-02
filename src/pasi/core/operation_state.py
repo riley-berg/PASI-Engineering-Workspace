@@ -198,6 +198,35 @@ class OperationState:
         }
         return cls(**payload)
 
+    @classmethod
+    def from_chat_operation(cls, operation: Mapping[str, Any]) -> "OperationState":
+        if not isinstance(operation, Mapping):
+            raise InvalidOperationState("chat operation must be a mapping")
+        prompt = operation.get("prompt", "")
+        response = operation.get("response_text", "")
+        return cls(
+            operation_id=str(operation.get("operation_id", "")),
+            operation_type=str(operation.get("operation_type", "")),
+            status=str(operation.get("status", "queued")),
+            schema_version=OPERATION_STATE_SCHEMA_VERSION,
+            state_revision=int(operation.get("state_revision", 0)),
+            run_id=str(operation.get("run_id", "")),
+            task_id=str(operation.get("task_id", "")),
+            provider=str(operation.get("provider", "chatgpt_browser")),
+            phase=str(operation.get("phase", "")),
+            attempt=int(operation.get("attempt", 0)),
+            prompt_digest=digest_text(prompt) if isinstance(prompt, str) and prompt else "",
+            response_digest=digest_text(response) if isinstance(response, str) and response else "",
+            verification_status=str(operation.get("verification_status", "")),
+            commit_sha=str(operation.get("commit_sha", "")),
+            pr_number=operation.get("pr_number"),
+            failure_signature=str(operation.get("failure_signature", "")),
+            recovery_count=int(operation.get("recovery_count", 0)),
+            metadata=operation.get("metadata", {}),
+            created_at=str(operation.get("created_at", utc_now())),
+            updated_at=str(operation.get("updated_at", utc_now())),
+        )
+
     def can_transition_to(self, status: str) -> bool:
         normalized = _bounded_string(status, name="status", limit=64, allow_empty=False)
         if normalized not in OPERATION_STATUSES:

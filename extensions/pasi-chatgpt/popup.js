@@ -323,9 +323,14 @@
     toggle.disabled = stoppingThisProfile || (runnerIsActive(state) && activeProfileForState(state) !== profileId);
 
     toggle.onclick = async () => {
+      const stopping = activeThisProfile;
       toggle.disabled = true;
+      if (stopping) {
+        toggle.textContent = "Stopping…";
+        toggle.setAttribute("aria-label", "Stopping runner");
+      }
       try {
-        await controlRunner(profileId, activeThisProfile ? "stop" : "start");
+        await controlRunner(profileId, stopping ? "stop" : "start");
         await render();
       } catch (error) {
         setStatus(String(error?.message || error), true);

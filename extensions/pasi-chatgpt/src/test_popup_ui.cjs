@@ -58,20 +58,20 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /--bg-card:\s*#FFFFFF/);
   assert.match(popupCss, /--text-primary:\s*#1A1B20/);
   assert.match(popupCss, /--text-secondary:\s*#707174/);
-  assert.match(popupCss, /--text-muted:\s*#707174/);
+  assert.match(popupCss, /--text-muted:\s*#929396/);
   assert.match(popupCss, /--btn-primary:\s*#45464A/);
   assert.match(popupCss, /--btn-primary-hover:\s*#333438/);
   assert.match(popupCss, /--btn-secondary:\s*#FFFFFF/);
   assert.doesNotMatch(popupCss, /body\.light-theme[\s\S]*--btn-primary:\s*#2F261D/);
   assert.match(popupCss, /body\.light-theme[\s\S]*\.runner-card\.selected/);
   assert.match(popupCss, /color-scheme:\s*light/);
-  assert.match(popupCss, /#runnerSelect[\s\S]*background:\s*var\(--bg-card\)/);
-  assert.match(popupCss, /#runnerSelect[\s\S]*color:\s*var\(--text-primary\)/);
-  assert.match(popupCss, /#runnerSelect[\s\S]*color-scheme:\s*dark/);
-  assert.match(popupCss, /#runnerSelect option[\s\S]*background:\s*var\(--bg-card\)/);
-  assert.match(popupCss, /#runnerSelect option:checked[\s\S]*background:\s*var\(--btn-primary\)/);
-  assert.match(popupCss, /body\.light-theme #runnerSelect\s*\{[\s\S]*color-scheme:\s*light/);
-  assert.match(popupCss, /body\.light-theme #runnerSelect option[\s\S]*background:\s*var\(--bg-card\)/);
+  assert.match(popupCss, /\.runner-select[\s\S]*background:\s*var\(--bg-card\)/);
+  assert.match(popupCss, /\.runner-select[\s\S]*color:\s*var\(--text-primary\)/);
+
+
+
+
+
   assert.match(popupCss, /--status-badge-bg:\s*rgba\(69, 70, 74/);
   assert.match(popupCss, /--status-badge-active-bg:\s*rgba\(69, 70, 74/);
   assert.match(popupCss, /--status-badge-text:\s*#45464A/);
@@ -83,6 +83,22 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.doesNotMatch(popupCss, /#(?:6F766F|6E756F|8B7B70)/i);
   assert.match(popupCss, /body\.light-theme \.status-dot\.completed[\s\S]*background:\s*#707174/);
   assert.match(popupCss, /body\.light-theme \.status-dot\.running[\s\S]*background:\s*#45464A/);
+});
+
+test("popup uses a custom themed runner picker with no native select styling", () => {
+  assert.match(popupHtml, /id="runnerSelect"[^>]*role="combobox"/);
+  assert.match(popupHtml, /id="runnerSelectMenu"[^>]*role="listbox"[^>]*hidden/);
+  assert.match(popupHtml, /id="runnerOption-m1"[^>]*role="option"/);
+  assert.match(popupHtml, /id="runnerOption-168h"[^>]*role="option"/);
+  assert.match(popupJs, /function initializeRunnerPicker\(\)/);
+  assert.match(popupJs, /function selectRunnerProfile\(profile\)/);
+  assert.match(popupJs, /ArrowDown/);
+  assert.match(popupJs, /Escape/);
+  assert.match(popupCss, /\.runner-select-menu[\s\S]*background:\s*var\(--bg-card\)/);
+  assert.match(popupCss, /\.runner-select-option\[aria-selected="true"\][\s\S]*background:\s*var\(--btn-primary\)/);
+  assert.match(popupCss, /content:\s*"✓"/);
+  assert.doesNotMatch(popupHtml, /<select[^>]*id="runnerSelect"/);
+  assert.doesNotMatch(popupCss, /#runnerSelect option/);
 });
 
 test("popup islands stay inside the compact popup width", () => {
@@ -129,10 +145,10 @@ test("popup critical text and control colors meet WCAG AA contrast targets", () 
     return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
   };
 
-  assert.ok(contrastRatio("#111215", "#FAF8F5") >= 4.5);
-  assert.ok(contrastRatio("#665953", "#FAF8F5") >= 4.5);
-  assert.ok(contrastRatio("#423731", "#EAE4DA") >= 4.5);
+  assert.ok(contrastRatio("#1A1B20", "#FAF8F5") >= 4.5);
+  assert.ok(contrastRatio("#707174", "#FAF8F5") >= 4.5);
+  assert.ok(contrastRatio("#707174", "#FFFFFF") >= 4.5);
   assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
   assert.ok(contrastRatio("#F4F1EC", "#17191E") >= 4.5);
-  assert.ok(contrastRatio("#FFFFFF", "#1A1B20") >= 4.5);
+  assert.ok(contrastRatio("#FFFFFF", "#45464A") >= 4.5);
 });

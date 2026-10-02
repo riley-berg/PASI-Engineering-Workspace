@@ -1,5 +1,7 @@
 [hidden] { display: none !important; }
 
+html[data-theme-pending] body { visibility: hidden; }
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -365,7 +367,7 @@ html.light-theme body .runner-card.selected {
   line-height: 1.35;
 }
 
-.status-desc.ready-summary {
+.status-desc.idle-summary {
   color: var(--status-idle-summary);
 }
 

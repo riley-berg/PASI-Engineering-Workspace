@@ -299,22 +299,34 @@
     return "Ready to execute.";
   }
 
-  async function controlRunner(profileId) {
+  async function controlRunner(profileId, requestedAction) {
+    const action = requestedAction === "stop" ? "stop" : "start";
     const currentState = await getRunnerState();
     const activeProfile = activeProfileForState(currentState);
     const running = runnerIsRunning(currentState);
-    const isActiveProfile = activeProfile === profileId;
 
-    if (running && !isActiveProfile) {
+    if (action === "start" && running) {
+      if (activeProfile && activeProfile !== profileId) {
+        throw new Error(
+          String(activeProfile).toUpperCase() +
+          " runner is already running. Pause it before starting " +
+          (profileId === "168h" ? "168h" : "M1") +
+          "."
+        );
+      }
       throw new Error(
-        String(activeProfile || "Another").toUpperCase() +
-        " runner is already running. Pause it before starting " +
         (profileId === "168h" ? "168h" : "M1") +
-        "."
+        " runner is already running."
       );
     }
 
-    const action = running && isActiveProfile ? "stop" : "start";
+    if (action === "stop" && (!running || activeProfile !== profileId)) {
+      throw new Error(
+        (profileId === "168h" ? "168h" : "M1") +
+        " runner is not running."
+      );
+    }
+
     const raw = await bridgeRequest("POST", "/runner/control", {
       action,
       profile: profileId,
@@ -333,7 +345,6 @@
 
     return action;
   }
-
   function createRunnerCard(profileId, state, selectedProfile) {
     const profile = RUNNER_PROFILES[profileId];
     const card = document.createElement("section");
@@ -401,7 +412,7 @@
       try {
         await setProfile(profileId);
         setRunnerSelection(profileId);
-        await controlRunner(profileId);
+        await controlRunner(profileId, runningThisProfile ? "stop" : "start");
         await render();
       } catch (error) {
         setStatus(String(error?.message || error), true);

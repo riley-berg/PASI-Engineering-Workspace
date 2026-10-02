@@ -103,3 +103,40 @@ The wrapper exposes compatible aliases including `GM_getValue`, `GM_setValue`, `
 Chrome clears dynamically registered user scripts when an extension updates, so PASI persists its registry in `chrome.storage.local` and restores enabled scripts from the service worker's install/update lifecycle.
 
 This architecture gives PASI the useful Tampermonkey-style separation—privileged core, injection wrapper, isolated script runtime—without making Tampermonkey itself part of the system.
+
+
+## Phase 1 — network interceptor
+
+Phase 1 introduces a read-only transport observer for ChatGPT generation traffic. It wraps the page's native `fetch()` in the `MAIN` world at `document_start`, observes a cloned response stream, and emits bounded lifecycle events without consuming or modifying the response delivered to ChatGPT.
+
+The interceptor is intentionally independent of the existing DOM controller during Phase 1. It exposes:
+
+- `PASI_NETWORK_LIFECYCLE` — JSON-encoded lifecycle events.
+- `window.__PASI_NETWORK_INTERCEPTOR_HEALTH__()` — installation and active-request state.
+- `PASI_NETWORK_BIND_OPERATION` — an event-based operation correlation seam for later controller integration.
+
+Phase 1 covers request detection, response cloning, stream completion, transport interruption, HTTP/provider error classification, context/usage-limit classification, bounded stall detection, duplicate-terminal suppression, and idempotent installation.
+
+Phase 1 does not yet make the interceptor authoritative for completion, recovery, or chat rollover. The existing DOM controller remains the production path until transport observations are validated against real ChatGPT traffic.
+
+Run the deterministic interceptor contract tests with:
+
+```
+node --test extensions/pasi-chatgpt/src/test_network_interceptor.js
+```
+
+For a live browser smoke check, load the Engineering Workspace extension and run in the ChatGPT page console:
+
+```js
+const events = [];
+window.addEventListener('PASI_NETWORK_LIFECYCLE', event => {
+  events.push(JSON.parse(event.detail));
+  console.log(events.at(-1));
+});
+window.dispatchEvent(new CustomEvent('PASI_NETWORK_BIND_OPERATION', {
+  detail: 'phase1-manual-operation'
+}));
+window.__PASI_NETWORK_INTERCEPTOR_HEALTH__();
+```
+
+A real generation should produce one `STARTED` event followed by exactly one terminal event: `COMPLETED`, `INTERRUPTED`, or `FAILED`.

@@ -1,4 +1,3 @@
-try { importScripts("vendor/typescript.js"); } catch (_) {}
 importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';
@@ -239,6 +238,16 @@ async function injectExistingChatTabs() {
       continue;
     } catch (_) {
       // No live controller listener is present; inject into the existing tab.
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world: 'MAIN',
+        files: ['src/network-interceptor.js']
+      });
+    } catch (_) {
+      // Retry the interceptor independently from the DOM controller.
     }
 
     try {

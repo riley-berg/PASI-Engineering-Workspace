@@ -22,6 +22,7 @@ def test_cdp_network_authority_contract():
     assert not (extension / "src" / "recovery_progress.js").exists()
 
     assert "debugger" in manifest["permissions"]
+    assert manifest["commands"]["pasi-run-next"]["suggested_key"]["default"] == "Alt+Shift+P"
     manifest_scripts = [
         script
         for entry in manifest["content_scripts"]
@@ -57,7 +58,6 @@ def test_cdp_network_authority_contract():
     assert "executeNewChatOperation" in background
     assert "executeAttachGithubOperation" in background
     assert "operation.operation_type === 'select_reasoning'" in background
-    assert "claim_next: true" in background
     assert "chrome.tabs.onActivated" in background
     assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background

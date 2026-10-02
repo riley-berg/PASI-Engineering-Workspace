@@ -37,6 +37,15 @@ def test_supervised_execution_authorization_requires_live_acceptance_runner(monk
     }) is False
 
 
+def test_atomic_runner_state_write_is_available(tmp_path: Path):
+    from automation.orchestrator import bridge as bridge_module
+
+    target = tmp_path / "runner" / "state.json"
+    bridge_module.atomic_write_json(target, {"status": "paused", "profile": "m1"})
+
+    assert target.read_text(encoding="utf-8") == '{\n  "status": "paused",\n  "profile": "m1"\n}\n'
+
+
 def test_runner_start_reports_missing_script_instead_of_raising_server_error(tmp_path: Path, monkeypatch):
     from automation.orchestrator import bridge as bridge_module
 

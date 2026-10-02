@@ -116,7 +116,7 @@ test("popup uses connected and operational runner semantics", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
   assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
   assert.match(popupJs, /return "Stopped";/);
-  assert.match(popupJs, /return "Starting";/);
+  assert.match(popupJs, /state\.status === "starting"/);\n  assert.match(popupJs, /activeProfileForState\(state\) === profileId \? "Starting" : "Another runner active"/);
   assert.doesNotMatch(popupJs, /Ready to execute|return "Ready";/);
 });
 

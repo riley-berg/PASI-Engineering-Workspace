@@ -443,3 +443,33 @@ html.light-theme body .theme-toggle:focus-visible {
   70% { box-shadow: 0 0 0 5px rgba(69, 70, 74, 0); }
   100% { box-shadow: 0 0 0 0 rgba(69, 70, 74, 0); }
 }
+
+
+.runner-diagnostics {
+  margin-top: 7px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 6px;
+}
+
+.runner-diagnostics summary {
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.runner-diagnostics pre {
+  margin-top: 6px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--btn-secondary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

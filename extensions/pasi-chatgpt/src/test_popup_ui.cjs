@@ -95,8 +95,10 @@ test("light theme overrides the complete popup surface palette", () => {
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-badge-bg:\s*rgba\(112, 113, 116, .12\)/);
   assert.match(popupCss, /html\.light-theme body[\s\S]*--status-badge-active-bg:\s*rgba\(112, 113, 116, .18\)/);
   assert.match(popupCss, /--runner-option-hover:\s*#F0ECE6/);
+  assert.match(popupCss, /html {\n  background: #0D0E11/);
   assert.match(popupCss, /--runner-option-selected:\s*#45464A/);
   assert.match(popupCss, /--runner-option-selected-hover:\s*#333438/);
+  assert.doesNotMatch(popupCss, /--runner-option-hover:\s*#2C2927/);
   assert.match(popupCss, /\.runner-select-option\s*\{[\s\S]*font-weight:\s*600/);
   const pickerHoverRule = popupCss.match(/\.runner-select-option:hover,\s*\.runner-select-option:focus-visible\s*\{[^}]*\}/)?.[0];
   assert.ok(pickerHoverRule);
@@ -147,6 +149,10 @@ test("popup bootstraps the saved theme before first paint", () => {
   assert.ok(themeScriptIndex >= 0);
   assert.ok(stylesheetIndex >= 0);
   assert.ok(themeScriptIndex < stylesheetIndex);
+  assert.match(popupHtml, /<html lang="en" style="background:#0D0E11;color-scheme:dark">/);
+  assert.match(themeInit, /style\.backgroundColor = "#FAF8F5"/);
+  assert.match(themeInit, /style\.backgroundColor = "#0D0E11"/);
+  assert.match(popupJs, /style\.backgroundColor = light \? "#FAF8F5" : "#0D0E11"/);
   assert.match(themeInit, /localStorage\.getItem\("pasi\.popup\.theme"\)/);
   assert.match(themeInit, /document\.documentElement\.classList\.add\("light-theme"\)/);
   assert.match(themeInit, /data-theme-pending/);

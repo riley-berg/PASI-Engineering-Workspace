@@ -277,7 +277,7 @@
     if (state.status === "paused") return "Paused";
     if (state.status === "failed") return "Failed";
     if (state.status === "completed") return "Completed";
-    return "Ready";
+    return "Idle";
   }
 
   function runnerSummary(state, profileId) {
@@ -296,7 +296,7 @@
     if (status === "Completed") return "Last run completed.";
     if (status === "Paused") return "Runner is paused and can be started again.";
     if (status === "Failed") return String(state?.stop_reason || state?.last_result || "Last run failed.");
-    return "Ready to start.";
+    return "Awaiting start.";
   }
 
   async function toggleRunner(profileId, state) {
@@ -363,7 +363,7 @@
       stateLabelText === "Paused" ? "paused" :
       stateLabelText === "Failed" ? "failed" :
       stateLabelText === "Completed" ? "completed" :
-      "ready";
+      "idle";
     statusText.className = "status-text " + stateClass;
 
     const dot = document.createElement("span");
@@ -375,7 +375,7 @@
     statusText.append(dot, label);
 
     const desc = document.createElement("div");
-    desc.className = "status-desc" + (stateLabelText === "Ready" ? " ready-summary" : "");
+    desc.className = "status-desc" + (stateLabelText === "Idle" ? " idle-summary" : "");
     desc.textContent = runnerSummary(state, profileId);
     body.append(statusText, desc);
 
@@ -415,7 +415,7 @@
     controls.hidden = !visible;
 
     if (!visible) {
-      $("connectionBadge").textContent = "Ready";
+      $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
       $("connectionBadge").classList.remove("active");
       return;
     }
@@ -424,9 +424,8 @@
       root.append(createRunnerCard(profileId, state, selectedProfile));
     }
 
-    const active = runnerIsRunning(state);
-    $("connectionBadge").textContent = active ? "Active" : "Ready";
-    $("connectionBadge").classList.toggle("active", active);
+    $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
+    $("connectionBadge").classList.remove("active");
   }
 
   async function renderUserscripts(activeResult) {
@@ -548,10 +547,9 @@
     }
   }
 
-  async function applyTheme() {
-    const stored = await chrome.storage.local.get("pasi.popup.theme");
-    const light = stored?.["pasi.popup.theme"] === "light";
-    document.body.classList.toggle("light-theme", light);
+  function setThemeUi(light) {
+    document.documentElement.classList.toggle("light-theme", light);
+    document.documentElement.removeAttribute("data-theme-pending");
 
     const button = $("themeToggle");
     button.textContent = light ? "☀️" : "🌙";
@@ -559,15 +557,43 @@
     button.setAttribute("aria-label", button.title);
   }
 
-  async function toggleTheme() {
-    const light = !document.body.classList.contains("light-theme");
-    document.body.classList.toggle("light-theme", light);
-    await chrome.storage.local.set({"pasi.popup.theme": light ? "light" : "dark"});
+  function getLocalTheme() {
+    try {
+      return localStorage.getItem("pasi.popup.theme");
+    } catch (_) {
+      return null;
+    }
+  }
 
-    const button = $("themeToggle");
-    button.textContent = light ? "☀️" : "🌙";
-    button.title = light ? "Switch to dark theme" : "Switch to light theme";
-    button.setAttribute("aria-label", button.title);
+  function setLocalTheme(theme) {
+    try {
+      localStorage.setItem("pasi.popup.theme", theme);
+    } catch (_) {
+      // chrome.storage.local remains the durable fallback.
+    }
+  }
+
+  async function applyTheme() {
+    let theme = getLocalTheme();
+
+    if (theme !== "light" && theme !== "dark") {
+      const stored = await chrome.storage.local.get("pasi.popup.theme");
+      theme = stored?.["pasi.popup.theme"] === "light" ? "light" : "dark";
+      setLocalTheme(theme);
+    }
+
+    setThemeUi(theme === "light");
+  }
+
+  async function toggleTheme() {
+    const light = !document.documentElement.classList.contains("light-theme");
+    const theme = light ? "light" : "dark";
+    setLocalTheme(theme);
+    document.documentElement.classList.toggle("light-theme", light);
+
+    await chrome.storage.local.set({"pasi.popup.theme": theme});
+
+    setThemeUi(light);
   }
 
   async function render() {

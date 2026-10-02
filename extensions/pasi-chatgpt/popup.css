@@ -23,7 +23,8 @@ body {
   --text-secondary: #BCC4CE;
   --text-muted: #8A94A3;
   --status-unavailable: #8A94A3;
-  --status-starting: #AEB7C4;
+  --status-launching: #AEB7C4;
+  --status-active: #C4CDD7;
   --status-running: #DDE6F0;
   --status-failed: #F3B0B0;
   --status-completed: #A4ADB8;
@@ -52,7 +53,8 @@ html.light-theme body {
   --text-secondary: #4F5661;
   --text-muted: #666E78;
   --status-unavailable: #666E78;
-  --status-starting: #56606C;
+  --status-launching: #56606C;
+  --status-active: #3F4A56;
   --status-running: #27313D;
   --status-failed: #A23D3D;
   --status-completed: #56606C;
@@ -216,9 +218,13 @@ html.light-theme body {
   font-weight: 600;
 }
 
-.status-text.starting,
+.status-text.launching,
 .status-text.stopping {
-  color: var(--status-starting);
+  color: var(--status-launching);
+}
+
+.status-text.active {
+  color: var(--status-active);
 }
 
 .status-text.running {
@@ -252,9 +258,13 @@ html.light-theme body {
   background: var(--status-unavailable);
 }
 
-.status-dot.starting,
+.status-dot.launching,
 .status-dot.stopping {
-  background: var(--status-starting);
+  background: var(--status-launching);
+}
+
+.status-dot.active {
+  background: var(--status-active);
 }
 
 .status-dot.running {

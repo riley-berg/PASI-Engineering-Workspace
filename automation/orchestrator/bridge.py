@@ -88,6 +88,8 @@ RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"  # legacy compatibility on
 RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"  # legacy compatibility only
 RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+RUNNER_START_PROBE_SECONDS = 1.5
+RUNNER_START_PROBE_INTERVAL_SECONDS = 0.1
 
 
 def runner_runtime_dir(profile: str) -> Path:
@@ -567,6 +569,47 @@ def _start_runner(profile: str) -> dict[str, Any]:
         pid_path.write_text(str(process.pid)+"\n",encoding="utf-8")
     except OSError:
         pass
+    # Give the supervised process a short startup probe. A successful Popen() only
+    # proves that the child was created; it does not prove that the 168h supervisor
+    # survived argument validation, worktree initialization, or schedule loading.
+    poll = getattr(process, "poll", None)
+    if callable(poll):
+        deadline = time.monotonic() + RUNNER_START_PROBE_SECONDS
+        while time.monotonic() < deadline:
+            return_code = poll()
+            if return_code is not None:
+                try:
+                    current = json.loads(state_path.read_text(encoding="utf-8"))
+                    if not isinstance(current, dict):
+                        current = {}
+                except (OSError, json.JSONDecodeError):
+                    current = {}
+                failure = dict(current) if current else dict(starting_state)
+                failure_error = str(
+                    failure.get("error")
+                    or f"runner exited during startup with exit code {return_code}"
+                ).strip()
+                failure.update({
+                    "status": "failed",
+                    "runner_profile": profile,
+                    "runner_pid": process.pid,
+                    "log_path": str(log_path),
+                    "runtime_state_path": str(state_path),
+                    "error": failure_error,
+                    "failed_at": datetime.now(timezone.utc).isoformat(),
+                })
+                atomic_write_json(state_path, failure)
+                return {
+                    "accepted": False,
+                    "action": "start",
+                    "profile": profile,
+                    "reason": failure_error,
+                    "pid": process.pid,
+                    "log_path": str(log_path),
+                    "runtime_state_path": str(state_path),
+                }
+            time.sleep(RUNNER_START_PROBE_INTERVAL_SECONDS)
+
     return {"accepted":True,"action":"start","profile":profile,"pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)}
 
 

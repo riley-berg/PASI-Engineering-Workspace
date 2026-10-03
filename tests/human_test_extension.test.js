@@ -28,7 +28,7 @@ test("test protocol is typed and excludes arbitrary script steps", () => {
     "wait_for_text","assert_url_contains","wait_ms","reload",
     "screenshot","api_get_json","runtime_control"
   ]) assert.ok(protocol.includes(JSON.stringify(action)) || protocol.includes(action));
-  assert.equal(service.includes("executeScript({target"), true);
+  assert.match(service, /chrome\.scripting\.executeScript\(\{\s*target:/);
   assert.equal(service.includes('func:'), false);
   assert.equal(runner.includes("eval("), false);
   assert.equal(runner.includes("new Function"), false);

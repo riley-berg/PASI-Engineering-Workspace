@@ -342,6 +342,22 @@ test("runner authorization follows the live active ChatGPT tab", () => {
   );
 });
 
+
+test("runner authorization survives opening the popup from another window", () => {
+  assert.match(
+    popupJs,
+    /const openTabs = await chrome\.tabs\.query\(\{\}\)/
+  );
+  assert.match(
+    popupJs,
+    /openTabs\.find\(\(tab\) => isRunnerTargetUrl\(tab\?\.url\)\)/
+  );
+  assert.match(
+    popupJs,
+    /if \(authorizedUrl\) activeUrl = authorizedUrl;/
+  );
+});
+
 test("M1 startup phases are surfaced instead of appearing silently stuck", () => {
   assert.match(popupJs, /startup: "Starting M1 runner\."/);
   assert.match(popupJs, /health_check: "Checking bridge and browser health\."/);

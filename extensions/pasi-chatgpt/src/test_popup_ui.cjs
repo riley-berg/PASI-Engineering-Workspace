@@ -151,15 +151,19 @@ test("runner state labels never claim inactive work is running", () => {
   assert.doesNotMatch(popupJs, /return "Stopped";|Not running/);
 });
 
-test("active runner cards expose Stop whenever the live process is active", () => {
+test("active runner cards expose Stop only after startup is operational", () => {
+  assert.match(popupJs, /function runnerProcessIsLive\(state\)/);
   assert.match(popupJs, /function runnerProcessIsActive\(state\)/);
-  assert.match(popupJs, /status === "starting"/);
-  assert.match(popupJs, /status === "running"/);
-  assert.match(popupJs, /status === "stopping"/);
+  assert.match(popupJs, /return state\?\.status === "running" \|\| state\?\.status === "stopping";/);
+  assert.match(popupJs, /function runnerIsStarting\(state, profileId\)/);
   assert.match(popupJs, /return "Launching"/);
   assert.match(popupJs, /return "Active process"/);
   assert.match(popupJs, /const activeThisProfile = runnerIsActive\(state\)/);
-  assert.match(popupJs, /toggle\.textContent = stoppingThisProfile \? "Stopping" : activeThisProfile \? "Stop" : "Start";/);
+  assert.match(
+    popupJs,
+    /startingThisProfile \? "Starting" :[\s\S]*stoppingThisProfile \? "Stopping" :[\s\S]*activeThisProfile \? "Stop" :[\s\S]*"Start"/
+  );
+  assert.match(popupJs, /toggle\.disabled = startingThisProfile \|\| stoppingThisProfile \|\| anotherRunnerActive;/);
 });
 
 test("light and dark primary controls use distinct high-contrast palettes", () => {

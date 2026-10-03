@@ -1,5 +1,5 @@
-[object Object]
-
+import assert from "node:assert/strict";
+import test from "node:test";
 test("planner status and memory normalizers preserve authoritative state", async () => {
   const { normalizeRoadmapSummary, normalizePlannerMemory, plannerTaskStatusClass } = await import("./planner.js");
   const summary = normalizeRoadmapSummary({

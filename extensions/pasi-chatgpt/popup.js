@@ -452,6 +452,12 @@
 
   function renderRunnerDashboard(state, visible) {
     const root = $("runnerCards");
+    const openDiagnostics = new Map(
+      [...root.querySelectorAll(".runner-card")].map((card) => [
+        card.dataset.profile,
+        card.querySelector(".runner-diagnostics")?.open === true,
+      ])
+    );
     root.replaceChildren();
 
     if (!visible) {
@@ -469,11 +475,16 @@
       const globalActiveProfile = String(state?.active_profile || "");
       const anotherRunnerActive =
         Boolean(globalActiveProfile) && globalActiveProfile !== profileId;
-      root.append(createRunnerCard(
+      const card = createRunnerCard(
         profileId,
         profileState,
         {...state, _anotherRunnerActive: anotherRunnerActive}
-      ));
+      );
+      const diagnostic = card.querySelector(".runner-diagnostics");
+      if (diagnostic) {
+        diagnostic.open = openDiagnostics.get(profileId) === true;
+      }
+      root.append(card);
     }
 
     $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";

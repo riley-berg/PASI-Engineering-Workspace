@@ -291,14 +291,33 @@ def _augment_runner_state(
     result["runtime_state_path"] = str(runner_state_path(profile))
 
     status = str(result.get("status") or "")
-    if process is None and status == "starting":
+    if process is not None:
+        if status in {"starting", "running", "stopping"}:
+            result["state_consistency"] = "consistent"
+            result["diagnostic_warning"] = None
+        elif status in {"failed", "completed", "roadmap_complete", "deadline_reached", "paused", "cancelled"}:
+            result["state_consistency"] = "live_process_terminal_state"
+            result["diagnostic_warning"] = (
+                "runner process is alive while persisted state is " + (status or "unknown")
+            )
+        else:
+            result["state_consistency"] = "live_process_unknown_state"
+            result["diagnostic_warning"] = "runner process is alive with an unrecognized persisted state"
+    elif status == "starting":
         result["status"] = "failed"
         result["ready"] = False
+        result["state_consistency"] = "persisted_starting_without_process"
+        result["diagnostic_warning"] = "runner startup state remains persisted but no live runner process was detected"
         result.setdefault("error", "runner exited before initialization completed")
-    elif process is None and status == "running":
+    elif status == "running":
         result["status"] = "failed"
         result["ready"] = False
+        result["state_consistency"] = "persisted_running_without_process"
+        result["diagnostic_warning"] = "runner state says running but no live runner process was detected"
         result.setdefault("error", "runner process is no longer alive")
+    else:
+        result["state_consistency"] = "consistent"
+        result["diagnostic_warning"] = None
     return result
 
 

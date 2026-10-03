@@ -114,7 +114,7 @@
     }
   }
 
-  function runnerProcessIsActive(state) {
+  function runnerProcessIsLive(state) {
     if (!state?.available) return false;
     if (typeof state.process_alive === "boolean") {
       return state.process_alive;
@@ -126,8 +126,21 @@
     );
   }
 
+  function runnerProcessIsActive(state) {
+    if (!runnerProcessIsLive(state)) return false;
+    return state?.status === "running" || state?.status === "stopping";
+  }
+
   function runnerIsActive(state) {
     return runnerProcessIsActive(state);
+  }
+
+  function runnerIsStarting(state, profileId) {
+    return (
+      runnerProcessIsLive(state) &&
+      state?.status === "starting" &&
+      activeProfileForState(state) === profileId
+    );
   }
 
   function activeProfileForState(state) {
@@ -153,9 +166,9 @@
   function runnerStatusLabel(state, profileId) {
     if (!state?.available) return "Unavailable";
     const activeProfile = activeProfileForState(state);
-    const processActive = runnerProcessIsActive(state);
+    const processLive = runnerProcessIsLive(state);
 
-    if (processActive) {
+    if (processLive) {
       if (activeProfile !== profileId) return "Another runner active";
       if (state.status === "running" && state.ready === true) return "Running";
       if (state.status === "stopping") return "Stopping";
@@ -251,11 +264,11 @@
 
     while (Date.now() < deadline) {
       const activeProfile = activeProfileForState(state);
-      const active = runnerIsActive(state);
+      const processLive = runnerProcessIsLive(state);
 
       if (action === "start") {
         if (runnerIsReady(state, profileId)) return state;
-        if (!active || state?.status === "failed") return state;
+        if (!processLive || state?.status === "failed") return state;
       } else if (!active || activeProfile !== profileId) {
         return state;
       }
@@ -271,9 +284,10 @@
     const action = requestedAction === "stop" ? "stop" : "start";
     const currentState = await getRunnerState();
     const activeProfile = activeProfileForState(currentState);
+    const processLive = runnerProcessIsLive(currentState);
     const running = runnerIsActive(currentState);
 
-    if (action === "start" && running) {
+    if (action === "start" && processLive) {
       if (activeProfile && activeProfile !== profileId) {
         throw new Error(
           String(activeProfile).toUpperCase() +
@@ -289,6 +303,12 @@
     }
 
     if (action === "stop" && (!running || activeProfile !== profileId)) {
+      if (runnerIsStarting(currentState, profileId)) {
+        throw new Error(
+          (profileId === "168h" ? "168h" : "M1") +
+          " runner is still starting; stop is unavailable until it is running."
+        );
+      }
       throw new Error(
         (profileId === "168h" ? "168h" : "M1") +
         " runner is not running."
@@ -346,6 +366,8 @@
     const lines = [
       "Profile: " + profileId,
       "State: " + String(state?.status || "unavailable"),
+      "State consistency: " + String(state?.state_consistency || "unknown"),
+      "Diagnostic warning: " + String(state?.diagnostic_warning || "none"),
       "Phase: " + String(state?.phase || "n/a"),
       "Execution: " + String(state?.execution_mode || "n/a"),
       "Ready: " + (state?.ready === true ? "yes" : "no"),
@@ -444,10 +466,15 @@
     toggle.className = "btn btn-primary";
     toggle.type = "button";
     const activeThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
+    const startingThisProfile = runnerIsStarting(state, profileId);
     const anotherRunnerActive = aggregateState?._anotherRunnerActive === true;
     const stoppingThisProfile = activeThisProfile && state?.status === "stopping";
-    toggle.textContent = stoppingThisProfile ? "Stopping" : activeThisProfile ? "Stop" : "Start";
-    toggle.disabled = stoppingThisProfile || anotherRunnerActive;
+    toggle.textContent =
+      startingThisProfile ? "Starting" :
+      stoppingThisProfile ? "Stopping" :
+      activeThisProfile ? "Stop" :
+      "Start";
+    toggle.disabled = startingThisProfile || stoppingThisProfile || anotherRunnerActive;
 
     toggle.onclick = async () => {
       const stopping = activeThisProfile;

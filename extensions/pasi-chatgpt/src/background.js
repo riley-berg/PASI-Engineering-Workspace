@@ -219,8 +219,8 @@ function serializeOperationDispatch(task) {
 function runnerStateIsDispatchable(state) {
   if (!state || state.available !== true) return false;
   if (state.status !== 'running' || state.process_alive !== true || state.ready !== true) return false;
-  const profile = String(state.runner_profile || '');
-  if (profile !== 'm1' && profile !== '168h') return false;
+  const profile = String(state.runner_profile || '').trim().toLowerCase();
+  if (!/^[a-z][a-z0-9._-]{1,63}$/.test(profile)) return false;
   return String(state.execution_mode || '') === 'supervised_' + profile;
 }
 
@@ -549,7 +549,13 @@ const BRIDGE_ROUTES = new Set([
   'GET /status',
   'GET /runner/capabilities',
   'GET /runner/state',
+  'GET /runner/registry',
   'POST /runner/control',
+  'POST /runner/registry/create',
+  'POST /runner/registry/revision',
+  'POST /runner/registry/validate',
+  'POST /runner/registry/promote',
+  'POST /runner/registry/rollback',
   'GET /browser/observation',
   'GET /browser/health',
   'GET /browser/state',
@@ -697,8 +703,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const method = String(message.method || 'GET').toUpperCase();
     const path = String(message.path || '');
     const allowed = (
-      (method === 'GET' && new Set(['/status', '/browser/observation', '/runner/capabilities', '/runner/state']).has(path))
-      || (method === 'POST' && path === '/runner/control')
+      (method === 'GET' && new Set(['/status', '/browser/observation', '/runner/capabilities', '/runner/state', '/runner/registry']).has(path))
+      || (method === 'POST' && new Set([
+        '/runner/control',
+        '/runner/registry/create',
+        '/runner/registry/revision',
+        '/runner/registry/validate',
+        '/runner/registry/promote',
+        '/runner/registry/rollback'
+      ]).has(path))
     );
     if (!allowed) {
       sendResponse({ ok: false, status: 403, text: '' });

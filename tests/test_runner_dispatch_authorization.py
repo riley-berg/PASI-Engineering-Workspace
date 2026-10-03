@@ -33,3 +33,14 @@ def test_runner_execution_authorized_rejects_dead_process(monkeypatch):
         "status": "running",
         "execution_mode": "supervised_m1",
     }) is False
+
+
+def test_runner_execution_authorized_accepts_registered_custom_profile(monkeypatch):
+    monkeypatch.setattr(bridge, "all_runner_profiles", lambda: ("m1", "168h", "site-checker"))
+    monkeypatch.setattr(bridge, "runner_process_is_alive", lambda profile=None: profile == "site-checker")
+
+    assert bridge.runner_execution_authorized({
+        "status": "running",
+        "runner_profile": "site-checker",
+        "execution_mode": "supervised_site-checker",
+    }) is True

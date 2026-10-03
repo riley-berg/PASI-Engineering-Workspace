@@ -441,3 +441,35 @@ test("popup preserves open diagnostics while refreshing runner state", () => {
   assert.match(popupJs, /card\.querySelector\("\.runner-diagnostics"\)\?\.open === true/);
   assert.match(popupJs, /diagnostic\.open = openDiagnostics\.get\(profileId\) === true/);
 });
+
+
+test("popup preserves scroll position while runner state is re-rendered", () => {
+  assert.match(popupJs, /function restorePopupScroll\(scrollTop\)/);
+  assert.match(popupJs, /const scrollTop = .*scrollTop.*\|\| window\.scrollY/);
+  assert.match(popupJs, /root\.replaceChildren\(\)/);
+  assert.match(popupJs, /restorePopupScroll\(scrollTop\)/);
+});
+
+test("popup runner cards come from the backend registry instead of a fixed two-runner list", () => {
+  assert.match(popupJs, /function getRunnerRegistry\(\)/);
+  assert.match(popupJs, /\/runner\/registry/);
+  assert.match(popupJs, /for \(const entry of registryRunners\)/);
+  assert.match(popupJs, /const registryEntry = registryRunners\.find/);
+  assert.match(popupJs, /function runnerProfileMeta\(profileId/);
+});
+
+test("popup exposes user runner creation and candidate revision controls", () => {
+  assert.match(popupHtml, /id="createRunnerForm"/);
+  assert.match(popupHtml, /id="createRevisionForm"/);
+  assert.match(popupJs, /\/runner\/registry\/create/);
+  assert.match(popupJs, /\/runner\/registry\/revision/);
+  assert.match(popupJs, /\/runner\/registry\/promote/);
+  assert.match(popupJs, /\/runner\/registry\/rollback/);
+});
+
+
+test("popup recognizes arbitrary supervised runner profiles", () => {
+  assert.match(popupJs, /function activeProfileForState\(state\)[\s\S]*mode\.startsWith\("supervised_"/);
+  assert.match(popupJs, /\^\[a-z\]\[a-z0-9\.\_\-\]\{1,63\}\$/);
+  assert.match(popupJs, /runnerProfileMeta\(profileId, state, registryEntry\)/);
+});

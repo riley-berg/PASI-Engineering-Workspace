@@ -553,6 +553,7 @@ const BRIDGE_ROUTES = new Set([
   'POST /runner/control',
   'POST /runner/registry/create',
   'POST /runner/registry/revision',
+  'POST /runner/registry/validate',
   'POST /runner/registry/promote',
   'POST /runner/registry/rollback',
   'GET /browser/observation',
@@ -707,6 +708,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         '/runner/control',
         '/runner/registry/create',
         '/runner/registry/revision',
+        '/runner/registry/validate',
         '/runner/registry/promote',
         '/runner/registry/rollback'
       ]).has(path))

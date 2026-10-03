@@ -24,6 +24,7 @@ from .runner_registry import (
     RunnerRegistryError,
     create_revision,
     create_runner,
+    validate_revision,
     get_runner,
     list_user_runners,
     promote_revision,
@@ -2733,6 +2734,17 @@ def runner_registry_payload() -> dict[str, Any]:
                         payload.get("args"),
                         source=str(payload.get("source") or "automation"),
                         project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/validate":
+                self._send_json({
+                    "ok": True,
+                    "revision": validate_revision(
+                        payload.get("id"),
+                        payload.get("version"),
+                        payload.get("evidence"),
                     ),
                 })
                 return

@@ -221,6 +221,40 @@ def create_revision(
     return revision
 
 
+def validate_revision(
+    runner_id: object,
+    version: object,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = _validate_id(runner_id)
+    requested = int(version)
+    if not isinstance(evidence, Mapping):
+        raise RunnerRegistryError("validation evidence must be an object")
+    serialized = json.dumps(dict(evidence), ensure_ascii=False, separators=(",", ":"))
+    if len(serialized) > 20_000:
+        raise RunnerRegistryError("validation evidence exceeds the bounded size")
+
+    document = _load_document()
+    runner = _stored_runner(document, normalized)
+    if runner is None:
+        raise RunnerRegistryError("runner does not exist")
+    candidate = runner.get("candidate")
+    if not isinstance(candidate, Mapping) or int(candidate.get("version", -1)) != requested:
+        raise RunnerRegistryError("requested candidate revision is not staged")
+
+    validation = dict(evidence)
+    validation["validated_at"] = _now()
+    validation["revision"] = requested
+    candidate = dict(candidate)
+    candidate["validation"] = validation
+    candidate["validation_state"] = "passed"
+    runner["candidate"] = candidate
+    runner["updated_at"] = validation["validated_at"]
+    document["runners"][normalized] = runner
+    _save_document(document)
+    return candidate
+
+
 def promote_revision(
     runner_id: object,
     version: object,
@@ -236,6 +270,8 @@ def promote_revision(
     candidate = runner.get("candidate")
     if not isinstance(candidate, Mapping) or int(candidate.get("version", -1)) != requested:
         raise RunnerRegistryError("requested candidate revision is not staged")
+    if str(candidate.get("created_by") or "") == "automation" and candidate.get("validation_state") != "passed":
+        raise RunnerRegistryError("automation candidate must have passed validation evidence before promotion")
 
     root = _project_root(project_root)
     clean_entrypoint = _validate_entrypoint(candidate.get("entrypoint"), root)

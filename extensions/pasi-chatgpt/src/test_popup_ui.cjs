@@ -466,3 +466,10 @@ test("popup exposes user runner creation and candidate revision controls", () =>
   assert.match(t, /\/runner\/registry\/promote/);
   assert.match(t, /\/runner\/registry\/rollback/);
 });
+
+
+test("popup recognizes arbitrary supervised runner profiles", () => {
+  assert.match(popupJs, /function activeProfileForState\(state\)[\s\S]*supervised_\)[\s\S]*derived/);
+  assert.match(popupJs, /\^\[a-z\]\[a-z0-9\.\_\-\]\{1,63\}\$/);
+  assert.match(popupJs, /runnerProfileMeta\(profileId, state, registryEntry\)/);
+});

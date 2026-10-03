@@ -453,7 +453,7 @@ def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
     execution_mode = str(payload.get("execution_mode") or "").strip().casefold()
     if not profile and execution_mode.startswith("supervised_"):
         profile = execution_mode.removeprefix("supervised_")
-    if profile not in RUNNER_PROFILES:
+    if profile not in set(all_runner_profiles()):
         return False
     profile_state = (
         payload.get("profiles", {}).get(profile)
@@ -1036,7 +1036,18 @@ class BridgeState:
         tab_id: int | None = None,
         params: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        allowed = {"screenshot", "dom", "console_errors", "network"}
+        allowed = {
+            "screenshot",
+            "page_state",
+            "dom",
+            "accessibility",
+            "console_errors",
+            "network",
+            "click",
+            "fill",
+            "press_key",
+            "scroll",
+        }
         action = str(action or "").strip()
         if action not in allowed:
             raise ValueError("unsupported browser-test action")

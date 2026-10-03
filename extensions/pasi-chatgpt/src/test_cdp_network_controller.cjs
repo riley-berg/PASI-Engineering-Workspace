@@ -179,6 +179,37 @@ test('CDP controller keeps prompt bindings exclusive and exposes idle state', as
 
 test('bounded browser interactions use native CDP input and selectors', async () => {
   const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [
+          {
+            nodeId: 'ax-start',
+            backendDOMNodeId: 42,
+            role: {type: 'role', value: 'button'},
+            name: {type: 'computedString', value: 'Start'},
+            ignored: false,
+            properties: []
+          },
+          {
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 43,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: ''},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}}
+            ]
+          }
+        ]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
   const controller = source.createController({debuggerApi});
   controller.install();
 

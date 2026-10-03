@@ -1,0 +1,32 @@
+# PASI AI-facing Secure MCP Tunnel profile template.
+#
+# Runtime secrets are intentionally supplied through environment variables:
+#   CONTROL_PLANE_TUNNEL_ID
+#   CONTROL_PLANE_API_KEY
+#
+# Start this profile through scripts/pasi_agent_tunnel.sh from the repository
+# root. Do not commit a real tunnel ID or API key here.
+
+config_version: 1
+
+control_plane:
+  base_url: https://api.openai.com
+  # CONTROL_PLANE_TUNNEL_ID is resolved from the runtime environment.
+  api_key: env:CONTROL_PLANE_API_KEY
+
+health:
+  listen_addr: 127.0.0.1:8787
+
+admin_ui:
+  open_browser: false
+
+log:
+  level: info
+  format: json
+
+mcp:
+  commands:
+    - channel: main
+      # The launcher changes to the repository root before tunnel-client starts,
+      # so this remains portable across checkouts.
+      command: ./.venv/bin/python scripts/pasi_agent_mcp.py

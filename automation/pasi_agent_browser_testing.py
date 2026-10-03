@@ -67,7 +67,7 @@ def _request(
 
 
 class BrowserTestingClient:
-    """Read-only RPC client to the extension's CDP testing boundary."""
+    """RPC client to the extension's bounded CDP browser-testing boundary."""
 
     def request(
         self,

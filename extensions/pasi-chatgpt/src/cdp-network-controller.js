@@ -1673,6 +1673,144 @@
       };
     }
 
+    function findBrowserTestAXNode(nodes, target, role) {
+      const needle = String(target || '').trim();
+      if (!needle) throw new Error('target is required');
+      const roles = role ? new Set([String(role).trim()]) : null;
+      const node = findAXNodeByText(nodes, needle, roles);
+      if (!node) {
+        throw new Error('No accessible element matched target: ' + needle);
+      }
+      return node;
+    }
+
+    async function browserTestClick(tabId, params = {}) {
+      const nodes = await readAXTree(tabId);
+      const target = findBrowserTestAXNode(nodes, params.target, params.role);
+      const coordinates = await clickAXNode(tabId, target);
+      return {
+        kind: 'interaction',
+        action: 'click',
+        tab_id: tabId,
+        target: axName(target),
+        role: axRole(target),
+        coordinates,
+        success: true,
+      };
+    }
+
+    async function browserTestFill(tabId, params = {}) {
+      const value = typeof params.value === 'string' ? params.value : '';
+      if (value.length > 20_000) throw new Error('fill value exceeds bound');
+      const nodes = await readAXTree(tabId);
+      const roles = new Set(['textbox', 'searchbox', 'combobox', 'generic']);
+      const target = params.target
+        ? findBrowserTestAXNode(nodes, params.target, params.role)
+        : findEditableAXNode(nodes);
+      if (!target) throw new Error('No accessible editable element matched target');
+      const backendNodeId = Number(target?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP editable control has no backend node');
+      }
+      const editable = axBooleanProperty(target, 'editable');
+      const multiline = axBooleanProperty(target, 'multiline');
+      const role = axRole(target);
+      if (!(editable === true || multiline === true || roles.has(role))) {
+        throw new Error('Target is not an editable accessibility control');
+      }
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId});
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Control',
+        code: 'ControlLeft',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Control',
+        code: 'ControlLeft',
+        modifiers: 0,
+      });
+      await fillAXNode(tabId, target, value);
+      return {
+        kind: 'interaction',
+        action: 'fill',
+        tab_id: tabId,
+        target: axName(target),
+        role,
+        value_length: value.length,
+        success: true,
+      };
+    }
+
+    async function browserTestPressKey(tabId, params = {}) {
+      const key = String(params.key || '').trim();
+      const allowedNamed = new Set([
+        'Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+        'Home', 'End', 'PageUp', 'PageDown', 'Backspace', 'Delete', 'Space'
+      ]);
+      if (!key || key.length > 30 || (key.length !== 1 && !allowedNamed.has(key))) {
+        throw new Error('key must be one printable character or a supported named key');
+      }
+      const modifiers = Math.max(0, Math.min(15, Number(params.modifiers) || 0));
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key,
+        code: key.length === 1 ? '' : key,
+        modifiers,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key,
+        code: key.length === 1 ? '' : key,
+        modifiers,
+      });
+      return {
+        kind: 'interaction',
+        action: 'press_key',
+        tab_id: tabId,
+        key,
+        modifiers,
+        success: true,
+      };
+    }
+
+    async function browserTestScroll(tabId, params = {}) {
+      const deltaX = Math.max(-5000, Math.min(5000, Number(params.delta_x) || 0));
+      const deltaY = Math.max(-5000, Math.min(5000, Number(params.delta_y) || 0));
+      const metrics = await sendCommand(tabId, 'Page.getLayoutMetrics');
+      const viewport = metrics?.visualViewport || metrics?.layoutViewport || {};
+      const x = Math.max(1, Number(viewport.clientWidth || viewport.width || 1) / 2);
+      const y = Math.max(1, Number(viewport.clientHeight || viewport.height || 1) / 2);
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x,
+        y,
+        deltaX,
+        deltaY,
+      });
+      return {
+        kind: 'interaction',
+        action: 'scroll',
+        tab_id: tabId,
+        delta_x: deltaX,
+        delta_y: deltaY,
+        success: true,
+      };
+    }
+
     function browserTestConsoleErrors(tabId, params = {}) {
       const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
       const errors = (consoleErrors.get(tabId) || []).slice(-limit);
@@ -1713,6 +1851,10 @@
       if (normalized === 'dom') return browserTestDom(tabId, params);
       if (normalized === 'console_errors') return browserTestConsoleErrors(tabId, params);
       if (normalized === 'network') return browserTestNetwork(tabId, params);
+      if (normalized === 'click') return browserTestClick(tabId, params);
+      if (normalized === 'fill') return browserTestFill(tabId, params);
+      if (normalized === 'press_key') return browserTestPressKey(tabId, params);
+      if (normalized === 'scroll') return browserTestScroll(tabId, params);
       throw new Error('Unsupported browser-test action');
     }
 

@@ -17,6 +17,8 @@ from automation.orchestrator.state import StateManager
 
 
 EXPECTED_TOOLS = {
+    "pasi.control_runner",
+    "pasi.run_browser_test",
     "pasi.get_runner_state",
     "pasi.get_process_state",
     "pasi.get_browser_state",
@@ -31,7 +33,7 @@ EXPECTED_TOOLS = {
 }
 
 
-def test_agent_tool_contracts_are_exactly_the_read_only_seven():
+def test_agent_tool_contracts_match_the_declared_runtime_tools():
     assert set(TOOL_NAMES) == EXPECTED_TOOLS
     assert set(TOOL_INPUT_SCHEMAS) == EXPECTED_TOOLS
     assert set(TOOL_OUTPUT_SCHEMAS) == EXPECTED_TOOLS
@@ -40,6 +42,46 @@ def test_agent_tool_contracts_are_exactly_the_read_only_seven():
         assert TOOL_INPUT_SCHEMAS[name]["type"] == "object"
         assert TOOL_INPUT_SCHEMAS[name]["additionalProperties"] is False
         assert TOOL_OUTPUT_SCHEMAS[name]["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+
+
+def test_runner_control_returns_observed_terminal_state(monkeypatch):
+    service = PasiAgentObservationService()
+
+    monkeypatch.setattr(
+        bridge,
+        "request_runner_control",
+        lambda action, profile: {
+            "accepted": True,
+            "action": action,
+            "profile": profile,
+            "pid": 4242,
+        },
+    )
+    monkeypatch.setattr(
+        bridge,
+        "load_runner_state",
+        lambda profile: {
+            "available": True,
+            "runner_profile": profile,
+            "status": "failed",
+            "execution_mode": "supervised_" + profile,
+            "ready": False,
+            "process_alive": False,
+            "runner_pid": 4242,
+            "phase": "initialization_failed",
+            "error": "RuntimeError: test failure",
+            "failed_at": "2026-10-03T07:00:00+00:00",
+        },
+    )
+
+    result = service.observe(
+        "pasi.control_runner",
+        {"profile": "168h", "action": "start", "wait_ms": 250, "_request_id": "control-1"},
+    )
+    assert result["ok"] is True
+    assert result["data"]["accepted"] is True
+    assert result["data"]["status"] == "failed"
+    assert result["data"]["state"]["error"]["code"] == "RUNNER_FAILED"
 
 
 def test_runner_observation_preserves_m1_and_168h_separation(monkeypatch):
@@ -211,6 +253,16 @@ def test_mcp_server_advertises_exact_tool_schemas():
     for name in EXPECTED_TOOLS:
         assert tools[name].input_schema == TOOL_INPUT_SCHEMAS[name]
         assert tools[name].output_schema == TOOL_OUTPUT_SCHEMAS[name]
+
+
+def test_runner_control_and_browser_interaction_tools_are_bounded():
+    assert TOOL_INPUT_SCHEMAS["pasi.control_runner"]["additionalProperties"] is False
+    assert TOOL_INPUT_SCHEMAS["pasi.control_runner"]["properties"]["wait_ms"]["maximum"] == 10000
+    actions = TOOL_INPUT_SCHEMAS["pasi.run_browser_test"]["properties"]["action"]["enum"]
+    assert "click" in actions
+    assert "fill" in actions
+    assert "press_key" in actions
+    assert "scroll" in actions
 
 
 def test_browser_tools_are_read_only_and_bounded():

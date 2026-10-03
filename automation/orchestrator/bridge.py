@@ -20,6 +20,16 @@ from .models import ChatOperation
 from pasi.core.operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
+from .runner_registry import (
+    RunnerRegistryError,
+    create_revision,
+    create_runner,
+    get_runner,
+    list_user_runners,
+    promote_revision,
+    registry_snapshot,
+    rollback_runner,
+)
 from scripts.pasi_timeout_policy import load_timeout_policy
 
 
@@ -119,6 +129,57 @@ RUNNER_PROFILES = {
 }
 
 
+def runner_registry_entries() -> list[dict[str, Any]]:
+    entries = [
+        {
+            "id": "m1",
+            "name": "20-Operation Acceptance",
+            "source": "builtin",
+            "stable_version": 1,
+            "candidate_version": None,
+            "entrypoint": "scripts/pasi_m1_cdp_chain.py",
+        },
+        {
+            "id": "168h",
+            "name": "168-Hour Long-Run Acceptance",
+            "source": "builtin",
+            "stable_version": 1,
+            "candidate_version": None,
+            "entrypoint": "scripts/pasi_168h_acceptance.py",
+        },
+    ]
+    for runner in list_user_runners():
+        stable = runner.get("stable") if isinstance(runner, Mapping) else None
+        candidate = runner.get("candidate") if isinstance(runner, Mapping) else None
+        entries.append({
+            "id": str(runner.get("id") or ""),
+            "name": str(runner.get("name") or runner.get("id") or ""),
+            "source": str(runner.get("source") or "user"),
+            "stable_version": stable.get("version") if isinstance(stable, Mapping) else None,
+            "candidate_version": candidate.get("version") if isinstance(candidate, Mapping) else None,
+            "entrypoint": stable.get("entrypoint") if isinstance(stable, Mapping) else None,
+        })
+    return entries
+
+
+def all_runner_profiles() -> tuple[str, ...]:
+    return tuple(entry["id"] for entry in runner_registry_entries() if entry.get("id"))
+
+
+def runner_command(profile: str) -> list[str]:
+    if profile in RUNNER_PROFILES:
+        return list(RUNNER_PROFILES[profile])
+    definition = get_runner(profile)
+    if not isinstance(definition, Mapping):
+        raise ValueError("unsupported runner profile")
+    stable = definition.get("stable")
+    if not isinstance(stable, Mapping):
+        raise ValueError("runner has no stable revision")
+    entrypoint = str(stable.get("entrypoint") or "").strip()
+    args = stable.get("args") if isinstance(stable.get("args"), list) else []
+    return [runner_python(), str((CONFIG.project_root / entrypoint).resolve()), *[str(arg) for arg in args]]
+
+
 def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     """Atomically persist a small JSON control/state document."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,9 +245,13 @@ def load_runner_capabilities() -> dict[str, Any]:
 def runner_processes() -> list[dict[str, Any]]:
     """Inspect live PASI runner processes instead of trusting stale PID files."""
     profiles_by_script = {
-        "pasi_m1_cdp_chain.py": "m1",
-        "pasi_168h_acceptance.py": "168h",
+        str(Path(command[1]).name): profile
+        for profile, command in RUNNER_PROFILES.items()
     }
+    for definition in list_user_runners():
+        stable = definition.get("stable")
+        if isinstance(stable, Mapping) and stable.get("entrypoint"):
+            profiles_by_script[Path(str(stable["entrypoint"])).name] = str(definition["id"])
     legacy_scripts = {"pasi_168h_supervisor.sh", "pasi_overnight_engine_v2.py"}
     processes: list[dict[str, Any]] = []
     proc_root = Path("/proc")
@@ -230,7 +295,7 @@ def runner_processes() -> list[dict[str, Any]]:
             "script": script,
             "cmdline": cmdline,
             "workspace": workspace_root in cmdline,
-            "recognized": profile in {"m1", "168h"} and workspace_root in cmdline,
+            "recognized": profile in all_runner_profiles() and workspace_root in cmdline,
         })
 
     processes.sort(key=lambda item: int(item["pid"]))
@@ -323,7 +388,7 @@ def _augment_runner_state(
 
 def load_runner_state(profile: str | None = None) -> dict[str, Any]:
     processes = runner_processes()
-    profiles = ("m1", "168h")
+    profiles = all_runner_profiles()
     if profile is not None:
         normalized = _runner_profile(profile)
         return _augment_runner_state(normalized, _read_runner_state_file(normalized), processes)
@@ -454,7 +519,7 @@ def _runner_pid(profile: str = "m1") -> int | None:
 
 def _runner_profile(profile: object) -> str:
     value = str(profile or "m1").strip().casefold()
-    if value not in RUNNER_PROFILES:
+    if value not in set(all_runner_profiles()):
         raise ValueError("unsupported runner profile")
     return value
 
@@ -517,7 +582,7 @@ def _start_runner(profile: str) -> dict[str, Any]:
     if profile == "168h" and not github_token:
         return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
 
-    command = list(RUNNER_PROFILES[profile])
+    command = runner_command(profile)
     executable = Path(command[0])
     script = Path(command[1])
     if not executable.is_file():
@@ -2349,6 +2414,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(body)
 
+def runner_registry_payload() -> dict[str, Any]:
+    active = runner_process_info()
+    snapshot = registry_snapshot()
+    snapshot["builtins"] = runner_registry_entries()[:2]
+    snapshot["active_profile"] = active.get("profile") if active else None
+    return snapshot
+
+
     def _read_json(self) -> dict[str, Any]:
         raw_length = self.headers.get(
             "Content-Length",
@@ -2428,6 +2501,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/runner/state":
             self._send_json(load_runner_state())
+            return
+
+        if path == "/runner/registry":
+            self._send_json(runner_registry_payload())
             return
 
         if path == "/runner/diagnostics":
@@ -2617,6 +2694,56 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._browser_observation(payload)
                 return
 
+            if path == "/runner/registry/create":
+                runner_id = payload.get("id")
+                name = payload.get("name")
+                entrypoint = payload.get("entrypoint")
+                args = payload.get("args")
+                source = str(payload.get("source") or "user")
+                self._send_json({
+                    "ok": True,
+                    "runner": create_runner(
+                        runner_id,
+                        name,
+                        entrypoint,
+                        args,
+                        source=source,
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/revision":
+                self._send_json({
+                    "ok": True,
+                    "revision": create_revision(
+                        payload.get("id"),
+                        payload.get("entrypoint"),
+                        payload.get("args"),
+                        source=str(payload.get("source") or "automation"),
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/promote":
+                self._send_json({
+                    "ok": True,
+                    "runner": promote_revision(
+                        payload.get("id"),
+                        payload.get("version"),
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/rollback":
+                self._send_json({
+                    "ok": True,
+                    "runner": rollback_runner(payload.get("id")),
+                })
+                return
+
             if path == "/runner/control":
                 action = payload.get("action")
                 if not isinstance(action, str):
@@ -2661,7 +2788,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
 
-        except InvalidOperationTransition as exc:
+        except (InvalidOperationTransition, RunnerRegistryError, ValueError) as exc:
             self._send_json(
                 {
                     "error": str(exc)

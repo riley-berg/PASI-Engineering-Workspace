@@ -949,6 +949,55 @@ test('browser testing exposes screenshot and bounded DOM snapshot inspection', a
   assert.equal(dom.elements[0].visible, true);
 });
 
+test('browser testing exposes accessibility and page-state evidence without Runtime.evaluate', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [{
+          nodeId: 'ax-start',
+          backendDOMNodeId: 12,
+          role: {type: 'role', value: 'button'},
+          name: {type: 'computedString', value: 'Start'},
+          ignored: false,
+          properties: [
+            {name: 'focused', value: {type: 'boolean', value: true}},
+          ],
+        }],
+      });
+    }
+    if (method === 'Page.getFrameTree') {
+      this.commands.push({method, params});
+      return callback({
+        frameTree: {
+          frame: {
+            url: 'https://example.com/',
+            securityOrigin: 'https://example.com',
+            mimeType: 'text/html',
+          },
+        },
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+  const controller = source.createController({debuggerApi});
+  controller.install();
+
+  const accessibility = await controller.runBrowserTest(55, 'accessibility', {name: 'Start', role: 'button'});
+  assert.equal(accessibility.kind, 'accessibility');
+  assert.equal(accessibility.elements[0].name, 'Start');
+  assert.equal(accessibility.elements[0].role, 'button');
+  assert.equal(accessibility.elements[0].focused, true);
+
+  const page = await controller.runBrowserTest(55, 'page_state');
+  assert.equal(page.url, 'https://example.com/');
+  assert.equal(page.security_origin, 'https://example.com');
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
+});
+
+
 test('browser testing records console errors and sanitizes network URLs', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});

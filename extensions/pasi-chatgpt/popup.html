@@ -47,6 +47,30 @@
 
   <main id="runnerCards" class="runners-list" aria-label="PASI runners"></main>
 
+  <details id="runnerManagement" class="runner-management">
+    <summary>Runner management</summary>
+    <div class="runner-management-body">
+      <div id="runnerRegistryList" class="runner-registry-list" aria-live="polite"></div>
+
+      <form id="createRunnerForm" class="runner-form">
+        <div class="runner-form-title">Create runner</div>
+        <label>Runner ID <input id="createRunnerId" name="id" autocomplete="off" placeholder="my-runner" required></label>
+        <label>Name <input id="createRunnerName" name="name" autocomplete="off" placeholder="My runner" required></label>
+        <label>Workspace script <input id="createRunnerEntrypoint" name="entrypoint" autocomplete="off" placeholder="scripts/my_runner.py" required></label>
+        <label>Args JSON <input id="createRunnerArgs" name="args" autocomplete="off" placeholder='["--mode","acceptance"]'></label>
+        <button id="createRunnerButton" class="btn btn-secondary" type="submit">Create runner</button>
+      </form>
+
+      <form id="createRevisionForm" class="runner-form">
+        <div class="runner-form-title">Stage revised runner</div>
+        <label>Runner ID <input id="revisionRunnerId" name="id" autocomplete="off" placeholder="my-runner" required></label>
+        <label>Workspace script <input id="revisionEntrypoint" name="entrypoint" autocomplete="off" placeholder="scripts/my_runner_v2.py" required></label>
+        <label>Args JSON <input id="revisionArgs" name="args" autocomplete="off" placeholder='["--mode","acceptance-v2"]'></label>
+        <button id="createRevisionButton" class="btn btn-secondary" type="submit">Stage candidate</button>
+      </form>
+    </div>
+  </details>
+
   <section id="scripts" aria-label="PASI userscripts"></section>
 
   <section id="idleState" class="idle-state" hidden aria-live="polite">

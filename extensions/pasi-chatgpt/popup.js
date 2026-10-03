@@ -159,13 +159,15 @@
   }
 
   function activeProfileForState(state) {
-    const processProfile = String(state?.process_profile || "");
-    if (processProfile === "m1" || processProfile === "168h") return processProfile;
-    const explicit = String(state?.runner_profile || "");
-    if (explicit === "m1" || explicit === "168h") return explicit;
+    const processProfile = String(state?.process_profile || "").trim().toLowerCase();
+    if (/^[a-z][a-z0-9._-]{1,63}$/.test(processProfile)) return processProfile;
+    const explicit = String(state?.runner_profile || "").trim().toLowerCase();
+    if (/^[a-z][a-z0-9._-]{1,63}$/.test(explicit)) return explicit;
     const mode = String(state?.execution_mode || "");
-    if (mode === "supervised_m1") return "m1";
-    if (mode === "supervised_168h") return "168h";
+    if (mode.startsWith("supervised_")) {
+      const derived = mode.slice("supervised_".length).trim().toLowerCase();
+      if (/^[a-z][a-z0-9._-]{1,63}$/.test(derived)) return derived;
+    }
     return null;
   }
 
@@ -211,20 +213,52 @@
     return "";
   }
 
-  function runnerSummary(state, profileId) {
+  function runnerProfileMeta(profileId, state = {}, registryEntry = null) {
+    const fallback = RUNNER_PROFILES[profileId] || {
+      id: profileId,
+      title: profileId,
+      badgeClass: "custom",
+    };
+    const entry = registryEntry && typeof registryEntry === "object" ? registryEntry : {};
+    return {
+      id: profileId,
+      title: String(entry.name || state?.runner_name || fallback.title || profileId),
+      source: String(entry.source || (
+        RUNNER_PROFILES[profileId] ? "builtin" : state?.runner_source || "user"
+      )),
+      stableVersion: Number.isFinite(Number(entry.stable_version))
+        ? Number(entry.stable_version)
+        : null,
+      candidateVersion: Number.isFinite(Number(entry.candidate_version))
+        ? Number(entry.candidate_version)
+        : null,
+      badgeClass: fallback.badgeClass || "custom",
+    };
+  }
+
+  function runnerSummary(state, profileId, registryEntry = null) {
     const status = runnerStatusLabel(state, profileId);
+    const profileMeta = runnerProfileMeta(profileId, state, registryEntry);
     if (status === "Launching") return "Runner process launched; waiting for ready state.";
     if (status === "Stopping") return "Stopping runner…";
     if (status === "Running") {
       const phase = String(state?.phase || "");
       const currentStatus = String(state?.current_operation_status || "");
       const currentId = String(state?.current_operation_id || "");
-      const startupPhases = {
-        startup: "Starting M1 runner.",
-        health_check: "Checking bridge and browser health.",
-        browser_diagnostics: "Reading the active ChatGPT browser state.",
-        ready_for_first_operation: "Ready for the first M1 operation."
-      };
+      const runnerName = profileMeta.title;
+      const startupPhases = profileId === "m1"
+        ? {
+            startup: "Starting M1 runner.",
+            health_check: "Checking bridge and browser health.",
+            browser_diagnostics: "Reading the active ChatGPT browser state.",
+            ready_for_first_operation: "Ready for the first M1 operation."
+          }
+        : {
+            startup: "Starting " + runnerName + " runner.",
+            health_check: "Checking bridge and browser health.",
+            browser_diagnostics: "Reading the active ChatGPT browser state.",
+            ready_for_first_operation: "Ready for the first operation."
+          };
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
       const hasProgress = Number.isFinite(completed) && Number.isFinite(target) && target > 0;
@@ -413,7 +447,8 @@
   }
 
   function createRunnerCard(profileId, state, aggregateState = state) {
-    const profile = RUNNER_PROFILES[profileId];
+    const registryEntry = aggregateState?._registryEntry || null;
+    const profile = runnerProfileMeta(profileId, state, registryEntry);
     const card = document.createElement("section");
     card.className = "runner-card";
     card.dataset.profile = profileId;
@@ -428,9 +463,9 @@
 
     const badge = document.createElement("span");
     badge.className = "badge " + profile.badgeClass;
-    badge.textContent = profileId === "m1"
-      ? "Runner: M1"
-      : "Runner: 168h";
+    badge.textContent = profile.source === "builtin"
+      ? (profileId === "m1" ? "Runner: M1" : profileId === "168h" ? "Runner: 168h" : "Runner")
+      : "Runner: " + profileId;
 
     header.append(url, badge);
 
@@ -463,7 +498,7 @@
       label.textContent = stateLabelText;
       statusText.append(dot, label);
 
-      const summary = runnerSummary(state, profileId);
+      const summary = runnerSummary(state, profileId, registryEntry);
       if (summary) {
         const desc = document.createElement("div");
         desc.className = "status-desc";
@@ -507,6 +542,14 @@
       }
     };
 
+    const candidateVersion = profile.candidateVersion;
+    if (candidateVersion != null) {
+      const candidate = document.createElement("div");
+      candidate.className = "runner-candidate";
+      candidate.textContent = "Candidate revision v" + String(candidateVersion) + " staged.";
+      body.append(candidate);
+    }
+
     const diagnostic = document.createElement("details");
     diagnostic.className = "runner-diagnostics";
     const diagnosticSummary = document.createElement("summary");
@@ -521,35 +564,61 @@
     return card;
   }
 
+  function restorePopupScroll(scrollTop) {
+    const value = Math.max(0, Number(scrollTop) || 0);
+    const restore = () => {
+      const scroller = document.scrollingElement || document.documentElement;
+      if (scroller) scroller.scrollTop = value;
+      if (window.scrollY !== value && typeof window.scrollTo === "function") {
+        window.scrollTo({top: value, left: 0, behavior: "auto"});
+      }
+    };
+    restore();
+    requestAnimationFrame(restore);
+  }
+
   function renderRunnerDashboard(state, visible) {
+    const registry = state?._runnerRegistry || null;
     const root = $("runnerCards");
+    const scrollTop = (document.scrollingElement || document.documentElement)?.scrollTop || window.scrollY || 0;
     const openDiagnostics = new Map(
       [...root.querySelectorAll(".runner-card")].map((card) => [
         card.dataset.profile,
         card.querySelector(".runner-diagnostics")?.open === true,
       ])
     );
-    root.replaceChildren();
 
     if (!visible) {
+      root.replaceChildren();
       $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
       $("connectionBadge").classList.remove("active");
+      restorePopupScroll(scrollTop);
       return;
     }
 
     const profiles = state?.profiles && typeof state.profiles === "object"
-      ? state.profiles
+      ? {...state.profiles}
       : {};
-
+    const registryRunners = Array.isArray(registry?.runners) ? registry.runners : [];
+    for (const entry of registryRunners) {
+      const id = String(entry?.id || "").trim();
+      if (id && !profiles[id]) profiles[id] = {available: false, runner_profile: id};
+    }
     for (const profileId of Object.keys(RUNNER_PROFILES)) {
+      if (!profiles[profileId]) profiles[profileId] = {available: false, runner_profile: profileId};
+    }
+
+    root.replaceChildren();
+    for (const profileId of Object.keys(profiles)) {
       const profileState = profiles[profileId] || state;
+      const registryEntry = registryRunners.find((entry) => String(entry?.id || "") === profileId) || null;
       const globalActiveProfile = String(state?.active_profile || "");
       const anotherRunnerActive =
         Boolean(globalActiveProfile) && globalActiveProfile !== profileId;
       const card = createRunnerCard(
         profileId,
         profileState,
-        {...state, _anotherRunnerActive: anotherRunnerActive}
+        {...state, _anotherRunnerActive: anotherRunnerActive, _registryEntry: registryEntry}
       );
       const diagnostic = card.querySelector(".runner-diagnostics");
       if (diagnostic) {
@@ -560,17 +629,20 @@
 
     $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
     $("connectionBadge").classList.remove("active");
+    restorePopupScroll(scrollTop);
   }
 
   async function renderUserscripts(activeResult) {
     const root = $("scripts");
-    root.replaceChildren();
 
     const scripts = Array.isArray(activeResult?.scripts) ? activeResult.scripts : [];
     const menu = await send(TYPES.menu);
+    const scrollTop = (document.scrollingElement || document.documentElement)?.scrollTop || window.scrollY || 0;
+    root.replaceChildren();
     const commands = Array.isArray(menu.commands) ? menu.commands : [];
 
     if (!scripts.length && !commands.length) {
+      restorePopupScroll(scrollTop);
       return;
     }
 
@@ -679,6 +751,8 @@
 
       root.append(card);
     }
+
+    restorePopupScroll(scrollTop);
   }
 
   function updateThemeToggleButton(light) {
@@ -738,6 +812,147 @@
     }
   }
 
+  async function getRunnerRegistry() {
+    try {
+      const response = await bridgeRequest("GET", "/runner/registry");
+      return parseBridgeResponse(response);
+    } catch (error) {
+      return {schema_version: 1, runners: [], error: String(error?.message || error)};
+    }
+  }
+
+  function parseArgsJson(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+      throw new Error("Args JSON must be an array of strings.");
+    }
+    return parsed;
+  }
+
+  async function runnerRegistryRequest(path, body) {
+    const raw = await bridgeRequest("POST", path, body);
+    return parseBridgeResponse(raw);
+  }
+
+  async function renderRunnerRegistry(registry) {
+    const root = $("runnerRegistryList");
+    if (!root) return;
+    const scrollTop = (document.scrollingElement || document.documentElement)?.scrollTop || window.scrollY || 0;
+    root.replaceChildren();
+
+    const runners = Array.isArray(registry?.runners) ? registry.runners : [];
+    if (!runners.length) {
+      const empty = document.createElement("div");
+      empty.className = "runner-registry-empty";
+      empty.textContent = "No user-created runners yet.";
+      root.append(empty);
+      restorePopupScroll(scrollTop);
+      return;
+    }
+
+    for (const runner of runners) {
+      const row = document.createElement("div");
+      row.className = "runner-registry-row";
+      const label = document.createElement("div");
+      label.className = "runner-registry-label";
+      const name = document.createElement("strong");
+      name.textContent = String(runner?.name || runner?.id || "Runner");
+      const meta = document.createElement("span");
+      const stableVersion = runner?.stable?.version == null ? "—" : "v" + String(runner.stable.version);
+      const candidateVersion = runner?.candidate?.version == null ? "" : " · candidate v" + String(runner.candidate.version);
+      meta.textContent = String(runner?.id || "") + " · stable " + stableVersion + candidateVersion;
+      label.append(name, meta);
+      row.append(label);
+
+      if (runner?.candidate?.version != null) {
+        const promote = document.createElement("button");
+        promote.className = "btn btn-secondary";
+        promote.type = "button";
+        promote.textContent = "Promote";
+        promote.onclick = async () => {
+          promote.disabled = true;
+          try {
+            await runnerRegistryRequest("/runner/registry/promote", {
+              id: runner.id,
+              version: runner.candidate.version,
+            });
+            setStatus("Candidate promoted to stable.");
+            await render();
+          } catch (error) {
+            setStatus(String(error?.message || error), true);
+            promote.disabled = false;
+          }
+        };
+        row.append(promote);
+      }
+
+      const rollback = document.createElement("button");
+      rollback.className = "btn btn-secondary";
+      rollback.type = "button";
+      rollback.textContent = runner?.candidate ? "Discard" : "Rollback";
+      rollback.onclick = async () => {
+        rollback.disabled = true;
+        try {
+          await runnerRegistryRequest("/runner/registry/rollback", {id: runner.id});
+          setStatus(runner?.candidate ? "Candidate discarded." : "Runner rolled back.");
+          await render();
+        } catch (error) {
+          setStatus(String(error?.message || error), true);
+          rollback.disabled = false;
+        }
+      };
+      row.append(rollback);
+      root.append(row);
+    }
+
+    restorePopupScroll(scrollTop);
+  }
+
+  async function handleCreateRunner(event) {
+    event.preventDefault();
+    const button = $("createRunnerButton");
+    button.disabled = true;
+    try {
+      await runnerRegistryRequest("/runner/registry/create", {
+        id: $("createRunnerId").value,
+        name: $("createRunnerName").value,
+        entrypoint: $("createRunnerEntrypoint").value,
+        args: parseArgsJson($("createRunnerArgs").value),
+        source: "user",
+      });
+      setStatus("Runner created.");
+      event.target.reset();
+      await render();
+    } catch (error) {
+      setStatus(String(error?.message || error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function handleCreateRevision(event) {
+    event.preventDefault();
+    const button = $("createRevisionButton");
+    button.disabled = true;
+    try {
+      await runnerRegistryRequest("/runner/registry/revision", {
+        id: $("revisionRunnerId").value,
+        entrypoint: $("revisionEntrypoint").value,
+        args: parseArgsJson($("revisionArgs").value),
+        source: "user",
+      });
+      setStatus("Candidate revision staged.");
+      event.target.reset();
+      await render();
+    } catch (error) {
+      setStatus(String(error?.message || error), true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function getLiveActiveUrl(fallbackUrl) {
     let activeUrl = String(fallbackUrl || "");
 
@@ -764,9 +979,10 @@
     try {
       applyTheme();
 
-      const [activeResult, runnerState] = await Promise.all([
+      const [activeResult, runnerState, runnerRegistry] = await Promise.all([
         send(TYPES.active),
         getRunnerState(),
+        getRunnerRegistry(),
       ]);
 
       // Resolve authorization from the live active tab on every render.
@@ -780,7 +996,9 @@
       currentUrl.hidden = true;
       if (!currentUrl.parentElement) document.body.append(currentUrl);
 
+      runnerState._runnerRegistry = runnerRegistry;
       renderRunnerDashboard(runnerState, runnerSupported);
+      await renderRunnerRegistry(runnerRegistry);
       await renderUserscripts(activeResult);
 
       const idle = $("idleState");
@@ -795,6 +1013,13 @@
       setStatus(String(error?.message || error), true);
     }
   }
+
+  $("createRunnerForm")?.addEventListener("submit", (event) => {
+    void handleCreateRunner(event);
+  });
+  $("createRevisionForm")?.addEventListener("submit", (event) => {
+    void handleCreateRevision(event);
+  });
 
   $("themeToggle").addEventListener("click", () => {
     void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));

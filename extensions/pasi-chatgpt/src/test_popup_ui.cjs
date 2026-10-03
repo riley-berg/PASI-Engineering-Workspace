@@ -248,6 +248,19 @@ test("runner start requires ready state before claiming the runner is ready", ()
   assert.doesNotMatch(popupJs, /runner started\./);
 });
 
+test("popup preserves bridge errors when runner state cannot be read", () => {
+  assert.match(popupJs, /const message = String\(error\?\.message \|\| error/);
+  assert.match(popupJs, /available: false,[\s\S]*reason: message/);
+  assert.match(popupJs, /Runner state unavailable:/);
+});
+
+test("popup refuses to call a runner ready when post-start state is unavailable", () => {
+  assert.match(
+    popupJs,
+    /if \(!settledState\?\.available\) \{[\s\S]*throw new Error/
+  );
+});
+
 test("failed runner state exposes its diagnostic error", () => {
   assert.match(popupJs, /state\?\.error \|\| state\?\.stop_reason/);
 });

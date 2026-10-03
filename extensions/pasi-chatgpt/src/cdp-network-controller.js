@@ -1673,6 +1673,65 @@
       };
     }
 
+    async function browserTestAccessibility(tabId, params = {}) {
+      const nodes = await readAXTree(tabId);
+      const needle = String(params.name || params.target || "").trim().toLowerCase();
+      const roleFilter = String(params.role || "").trim().toLowerCase();
+      const limit = Math.min(Math.max(Number(params.limit) || 100, 1), 200);
+      const elements = [];
+
+      for (const node of Array.isArray(nodes) ? nodes : []) {
+        if (node?.ignored === true) continue;
+        const name = axName(node);
+        const role = axRole(node);
+        if (needle && !name.toLowerCase().includes(needle)) continue;
+        if (roleFilter && role.toLowerCase() !== roleFilter) continue;
+        elements.push({
+          name: name.slice(0, MAX_BROWSER_TEST_TEXT_CHARS),
+          role,
+          description: String(node?.description?.value || "").slice(0, 1000),
+          focused: axBooleanProperty(node, "focused") === true,
+          disabled: axBooleanProperty(node, "disabled") === true,
+          selected: axSelected(node) === true,
+          checked: axBooleanProperty(node, "checked") === true,
+          pressed: axBooleanProperty(node, "pressed") === true,
+          editable: axBooleanProperty(node, "editable") === true,
+          multiline: axBooleanProperty(node, "multiline") === true,
+          backend_node_id: Number.isInteger(Number(node?.backendDOMNodeId))
+            ? Number(node.backendDOMNodeId)
+            : null,
+        });
+        if (elements.length >= limit) break;
+      }
+
+      return {
+        kind: "accessibility",
+        tab_id: tabId,
+        name_filter: needle || null,
+        role_filter: roleFilter || null,
+        matched_count: elements.length,
+        elements,
+        source: "cdp_accessibility_tree",
+      };
+    }
+
+    async function browserTestPageState(tabId) {
+      const frameTree = await sendCommand(tabId, "Page.getFrameTree");
+      const metrics = await sendCommand(tabId, "Page.getLayoutMetrics");
+      const frame = frameTree?.frameTree?.frame || {};
+      const viewport = metrics?.visualViewport || metrics?.layoutViewport || {};
+      return {
+        kind: "page_state",
+        tab_id: tabId,
+        url: String(frame.url || ""),
+        security_origin: String(frame.securityOrigin || ""),
+        mime_type: String(frame.mimeType || ""),
+        width: Number(viewport.clientWidth || viewport.width || 0),
+        height: Number(viewport.clientHeight || viewport.height || 0),
+        source: "cdp_page_state",
+      };
+    }
+
     function findBrowserTestAXNode(nodes, target, role) {
       const needle = String(target || '').trim();
       if (!needle) throw new Error('target is required');
@@ -1848,7 +1907,9 @@
       await attachTab(tabId);
       const normalized = String(action || '').trim();
       if (normalized === 'screenshot') return browserTestScreenshot(tabId);
+      if (normalized === 'page_state') return browserTestPageState(tabId);
       if (normalized === 'dom') return browserTestDom(tabId, params);
+      if (normalized === 'accessibility') return browserTestAccessibility(tabId, params);
       if (normalized === 'console_errors') return browserTestConsoleErrors(tabId, params);
       if (normalized === 'network') return browserTestNetwork(tabId, params);
       if (normalized === 'click') return browserTestClick(tabId, params);

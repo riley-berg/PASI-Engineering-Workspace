@@ -9,7 +9,8 @@ from typing import Any
 
 
 ROADMAP_SCHEMA_VERSION = 4
-SUPPORTED_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3, 4})
+LEGACY_ROADMAP_SCHEMA_VERSIONS = frozenset({2, 3})
+SUPPORTED_ROADMAP_INPUT_VERSIONS = LEGACY_ROADMAP_SCHEMA_VERSIONS | {ROADMAP_SCHEMA_VERSION}
 
 
 class RoadmapError(ValueError):
@@ -222,10 +223,10 @@ class Roadmap:
 
     def __post_init__(self) -> None:
         _nonempty(self.roadmap_id, name="roadmap id")
-        if self.version not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
-            raise RoadmapError(f"unsupported roadmap schema version: {self.version}")
-        if self.version in {2, 3}:
-            object.__setattr__(self, "version", ROADMAP_SCHEMA_VERSION)
+        if self.version != ROADMAP_SCHEMA_VERSION:
+            raise RoadmapError(
+                f"roadmap objects must use canonical schema version {ROADMAP_SCHEMA_VERSION}"
+            )
         if self.revision < 0:
             raise RoadmapError("roadmap revision must be non-negative")
 
@@ -529,7 +530,8 @@ class Roadmap:
     def from_mapping(cls, value: dict[str, Any]) -> "Roadmap":
         if not isinstance(value, dict):
             raise RoadmapError("roadmap must be an object")
-        if int(value.get("version", -1)) not in SUPPORTED_ROADMAP_SCHEMA_VERSIONS:
+        input_version = int(value.get("version", -1))
+        if input_version not in SUPPORTED_ROADMAP_INPUT_VERSIONS:
             raise RoadmapError("unsupported roadmap schema version")
         phases_raw = value.get("phases", [])
         tasks_raw = value.get("tasks", [])
@@ -537,7 +539,7 @@ class Roadmap:
             raise RoadmapError("phases and tasks must be arrays")
         return cls(
             roadmap_id=_nonempty(value.get("roadmap_id"), name="roadmap id"),
-            version=int(value["version"]),
+            version=ROADMAP_SCHEMA_VERSION,
             revision=int(value.get("revision", 0)),
             phases=tuple(RoadmapPhase.from_mapping(item) for item in phases_raw),
             tasks=tuple(RoadmapTask.from_mapping(item) for item in tasks_raw),

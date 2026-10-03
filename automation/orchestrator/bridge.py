@@ -3,18 +3,21 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from .config import CONFIG, ensure_runtime_directories
+from .config import CONFIG
 from .models import ChatOperation
-from .operation_state import OperationState
+from pasi.core.operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
 from scripts.pasi_timeout_policy import load_timeout_policy
@@ -39,7 +42,16 @@ def completion_markers_satisfied(response_text: object, markers: object) -> bool
     ]
     if not configured:
         return True
-    lines = [line.strip() for line in response_text.splitlines()]
+    lines: list[str] = []
+    in_fence = False
+    for raw_line in response_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or line.startswith("> ") or line == ">":
+            continue
+        lines.append(line)
     return any(
         any(line == marker or line.startswith(marker + ":") for line in lines)
         for marker in configured
@@ -67,10 +79,53 @@ MAX_TIMING_KEYS = frozenset({
 })
 BRIDGE_TOKEN_FILE = Path.home() / ".pasi" / "bridge-token"
 RUNNER_CAPABILITIES_PATH = Path.home() / ".pasi" / "runner" / "capabilities.json"
-RUNNER_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))).expanduser().resolve()
-RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
-RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
+RUNNER_RUNTIME_DIR = Path(
+    os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))
+).expanduser().resolve()
+# The runtime root is shared, but each supervised profile owns an isolated
+# subdirectory so terminal errors cannot overwrite another runner's state.
+RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"  # legacy compatibility only
+RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"  # legacy compatibility only
+RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+
+
+def runner_runtime_dir(profile: str) -> Path:
+    return (RUNNER_RUNTIME_DIR / profile).resolve()
+
+
+def runner_state_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "state.json"
+
+
+def runner_control_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "control.json"
+
+
+def runner_pid_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "runner.pid"
+def runner_python() -> str:
+    workspace_python = CONFIG.project_root / ".venv" / "bin" / "python"
+    if workspace_python.is_file() and os.access(workspace_python, os.X_OK):
+        return str(workspace_python)
+    return sys.executable
+
+
+RUNNER_PROFILES = {
+    "m1": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
+    "168h": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
+}
+
+
+def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically persist a small JSON control/state document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: CONTEXT_EXHAUSTED",
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
@@ -118,65 +173,528 @@ def load_runner_capabilities() -> dict[str, Any]:
         return {"available": False, "reason": "capability report invalid"}
     # The bridge exposes only machine-health metadata; secrets and command output are not persisted here.
     allowed = {"schema_version", "generated_at", "runner_name", "repository", "resources", "boundary", "runtime", "required_ok", "failures", "recommended_labels", "actions"}
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    return {
+        "available": True,
+        **{key: payload[key] for key in allowed if key in payload},
+        "execution_authorized": runner_execution_authorized(payload),
+    }
 
-def load_runner_state() -> dict[str, Any]:
+def runner_processes() -> list[dict[str, Any]]:
+    """Inspect live PASI runner processes instead of trusting stale PID files."""
+    profiles_by_script = {
+        "pasi_m1_cdp_chain.py": "m1",
+        "pasi_168h_acceptance.py": "168h",
+    }
+    legacy_scripts = {"pasi_168h_supervisor.sh", "pasi_overnight_engine_v2.py"}
+    processes: list[dict[str, Any]] = []
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return processes
+
+    workspace_root = str(CONFIG.project_root.resolve())
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            pid = int(entry.name)
+            if pid <= 1:
+                continue
+            raw = (entry / "cmdline").read_bytes()
+            cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "ignore").strip()
+        except (OSError, ValueError):
+            continue
+        if not cmdline:
+            continue
+
+        profile: str | None = None
+        script: str | None = None
+        for script_name, profile_name in profiles_by_script.items():
+            if script_name in cmdline:
+                profile = profile_name
+                script = script_name
+                break
+        if profile is None:
+            for script_name in legacy_scripts:
+                if script_name in cmdline:
+                    profile = "legacy"
+                    script = script_name
+                    break
+        if profile is None:
+            continue
+
+        processes.append({
+            "pid": pid,
+            "profile": profile,
+            "script": script,
+            "cmdline": cmdline,
+            "workspace": workspace_root in cmdline,
+            "recognized": profile in {"m1", "168h"} and workspace_root in cmdline,
+        })
+
+    processes.sort(key=lambda item: int(item["pid"]))
+    return processes
+
+
+def runner_process_info(profile: str | None = None) -> dict[str, Any] | None:
+    """Return a live runner process from the current Engineering Workspace."""
+    candidates = [
+        item for item in runner_processes()
+        if item.get("recognized") is True
+        and (profile is None or item.get("profile") == profile)
+    ]
+    return candidates[0] if candidates else None
+
+
+def runner_process_is_alive(profile: str | None = None) -> bool:
+    return runner_process_info(profile) is not None
+
+
+def _read_runner_state_file(profile: str) -> dict[str, Any]:
+    path = runner_state_path(profile)
     try:
-        if not RUNNER_STATE_PATH.is_file() or RUNNER_STATE_PATH.stat().st_size > 128_000:
-            return {"available": False, "reason": "runner state unavailable"}
-        payload = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
+        if not path.is_file() or path.stat().st_size > 128_000:
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"available": False, "reason": "runner state unreadable"}
-    if not isinstance(payload, dict):
-        return {"available": False, "reason": "runner state invalid"}
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _augment_runner_state(
+    profile: str,
+    payload: dict[str, Any],
+    processes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not payload:
+        return {"available": False, "runner_profile": profile, "reason": "runner state unavailable"}
+
     allowed = {
         "schema_version", "run_id", "started_at", "deadline_at", "worktree", "branch",
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
+        "execution_mode", "runner_profile", "runner_pid", "log_path", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
+        "current_operation_id", "current_operation_index", "current_operation_status",
+        "last_operation_id", "last_request_id", "updated_at", "completed_at", "request_ids",
     }
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    result: dict[str, Any] = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    process = runner_process_info(profile)
+    result["process_alive"] = process is not None
+    result["ready"] = process is not None and result.get("status") == "running"
+    result["runner_profile"] = profile
+    result["process"] = process
+    result["process_pid"] = process.get("pid") if process else None
+    result["process_profile"] = process.get("profile") if process else None
+    result["process_cmdline"] = process.get("cmdline") if process else None
+    result["runtime_state_path"] = str(runner_state_path(profile))
 
-def request_runner_control(action: str) -> dict[str, Any]:
-    if action not in {"stop", "retry_current"}:
+    status = str(result.get("status") or "")
+    if process is None and status == "starting":
+        result["status"] = "failed"
+        result["ready"] = False
+        result.setdefault("error", "runner exited before initialization completed")
+    elif process is None and status == "running":
+        result["status"] = "failed"
+        result["ready"] = False
+        result.setdefault("error", "runner process is no longer alive")
+    return result
+
+
+def load_runner_state(profile: str | None = None) -> dict[str, Any]:
+    processes = runner_processes()
+    profiles = ("m1", "168h")
+    if profile is not None:
+        normalized = _runner_profile(profile)
+        return _augment_runner_state(normalized, _read_runner_state_file(normalized), processes)
+
+    per_profile = {
+        current_profile: _augment_runner_state(
+            current_profile,
+            _read_runner_state_file(current_profile),
+            processes,
+        )
+        for current_profile in profiles
+    }
+    active = [
+        item for item in processes
+        if item.get("recognized") is True and item.get("profile") in profiles
+    ]
+    active_profile = active[0].get("profile") if active else None
+
+    if active_profile:
+        selected = dict(per_profile[active_profile])
+    else:
+        available = [state for state in per_profile.values() if state.get("available")]
+        selected = max(
+            available,
+            key=lambda state: str(state.get("last_updated_at") or state.get("started_at") or ""),
+            default={"available": False, "reason": "runner state unavailable"},
+        )
+
+    selected["profiles"] = per_profile
+    selected["active_profile"] = active_profile
+    selected["processes"] = processes
+    selected["bridge_process"] = {
+        "pid": os.getpid(),
+        "cmdline": " ".join(str(part) for part in sys.argv),
+        "profile": "bridge",
+        "workspace": True,
+        "recognized": True,
+    }
+    selected["available"] = any(state.get("available") for state in per_profile.values())
+    return selected
+
+
+def runner_diagnostics_payload(bridge_state: "BridgeState") -> dict[str, Any]:
+    """Build a sanitized live diagnostic snapshot for localhost/browser inspection."""
+    runner_state = load_runner_state()
+    browser_health = bridge_state.get_browser_health()
+    return {
+        "schema_version": "pasi-runner-diagnostics-v1",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "bridge_process": runner_state.get("bridge_process"),
+        "active_profile": runner_state.get("active_profile"),
+        "processes": runner_state.get("processes", []),
+        "profiles": runner_state.get("profiles", {}),
+        "browser_health": browser_health,
+    }
+
+
+def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
+    profile = str(
+        payload.get("runner_profile") or payload.get("active_profile") or ""
+    ).strip().casefold()
+    execution_mode = str(payload.get("execution_mode") or "").strip().casefold()
+    if not profile and execution_mode.startswith("supervised_"):
+        profile = execution_mode.removeprefix("supervised_")
+    if profile not in RUNNER_PROFILES:
+        return False
+    profile_state = (
+        payload.get("profiles", {}).get(profile)
+        if isinstance(payload.get("profiles"), Mapping)
+        else None
+    )
+    effective = profile_state if isinstance(profile_state, Mapping) else payload
+    return bool(
+        effective.get("status") == "running"
+        and str(effective.get("execution_mode") or "") == "supervised_" + profile
+        and runner_process_is_alive(profile)
+    )
+
+
+def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
+    """Stop a supervised runner and its children without stopping the bridge."""
+    try:
+        process_group = os.getpgid(pid)
+    except OSError as exc:
+        raise RuntimeError("runner process is no longer present") from exc
+
+    try:
+        if process_group == pid:
+            # _start_runner uses start_new_session=True, so the runner has an
+            # isolated process group. Terminating that group stops the runner
+            # and any subprocesses it spawned for the current task.
+            os.killpg(process_group, signal.SIGTERM)
+        else:
+            # Legacy runners may not have their own process group.
+            os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process signal denied") from exc
+
+    deadline = time.monotonic() + max(0.1, grace_seconds)
+    while time.monotonic() < deadline:
+        if not runner_process_is_alive():
+            return
+        time.sleep(0.05)
+
+    try:
+        if process_group == pid:
+            os.killpg(process_group, signal.SIGKILL)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process could not be force-stopped") from exc
+
+    if runner_process_is_alive():
+        raise RuntimeError("runner process did not stop after force termination")
+
+def _runner_pid(profile: str = "m1") -> int | None:
+    try:
+        raw_pid = runner_pid_path(profile).read_text(encoding="utf-8").strip()
+        pid = int(raw_pid)
+    except (OSError, ValueError):
+        return None
+    return pid if pid > 1 else None
+
+
+def _runner_profile(profile: object) -> str:
+    value = str(profile or "m1").strip().casefold()
+    if value not in RUNNER_PROFILES:
+        raise ValueError("unsupported runner profile")
+    return value
+
+
+def _github_token() -> str:
+    """Resolve a GitHub credential for supervised runners without storing it."""
+    configured = next(
+        (
+            os.environ.get(name, "").strip()
+            for name in (
+                "PASI_PROJECTS_TOKEN",
+                "PASI_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            )
+            if os.environ.get(name, "").strip()
+        ),
+        "",
+    )
+    if configured:
+        return configured
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token", "--hostname", "github.com"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        token = result.stdout.strip()
+        if token:
+            return token
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    for line in result.stdout.splitlines():
+        if line.startswith("password="):
+            return line.removeprefix("password=").strip()
+    return ""
+
+
+def _start_runner(profile: str) -> dict[str, Any]:
+    if runner_process_is_alive():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner already running"}
+
+    github_token = _github_token() if profile == "168h" else ""
+    if profile == "168h" and not github_token:
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
+
+    command = list(RUNNER_PROFILES[profile])
+    executable = Path(command[0])
+    script = Path(command[1])
+    if not executable.is_file():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner Python executable is unavailable"}
+    if not script.is_file():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is missing from the active PASI workspace"}
+    if not os.access(script, os.R_OK):
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is not readable"}
+
+    runtime_dir = runner_runtime_dir(profile)
+    state_path = runner_state_path(profile)
+    pid_path = runner_pid_path(profile)
+    try:
+        RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = RUNNER_LOG_DIR / ("runner-" + profile + ".log")
+        log_handle = log_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner log is not writable: " + str(exc)}
+
+    environment = os.environ.copy()
+    environment.setdefault("PYTHONUNBUFFERED", "1")
+    environment["PASI_RUNNER_PROFILE"] = profile
+    environment["PASI_RUNTIME_DIR"] = str(runtime_dir)
+    if profile == "168h":
+        environment["PASI_GITHUB_TOKEN"] = github_token
+        environment["PASI_PUSH"] = "1"
+
+    starting_state = {
+        "status": "starting",
+        "execution_mode": "supervised_" + profile,
+        "runner_profile": profile,
+        "log_path": str(log_path),
+        "runtime_state_path": str(state_path),
+        "runner_pid": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        atomic_write_json(state_path, starting_state)
+        process = subprocess.Popen(
+            command, cwd=CONFIG.project_root, env=environment,
+            stdin=subprocess.DEVNULL, stdout=log_handle, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({"status":"failed","error":"runner launch failed: "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
+    except Exception as exc:
+        log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({"status":"failed","error":"runner launch failed: "+type(exc).__name__+": "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
+
+    log_handle.close()
+    try:
+        current=json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(current,dict): current={}
+    except (OSError,json.JSONDecodeError):
+        current={}
+    if current.get("status") not in {"starting","running","failed","completed","paused","cancelled"}:
+        current=dict(starting_state)
+    current.update({"runner_profile":profile,"runner_pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)})
+    atomic_write_json(state_path,current)
+    try:
+        pid_path.write_text(str(process.pid)+"\n",encoding="utf-8")
+    except OSError:
+        pass
+    return {"accepted":True,"action":"start","profile":profile,"pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)}
+
+
+def request_runner_control(action: str, profile: object = None) -> dict[str, Any]:
+    normalized = str(action or "").strip().casefold()
+    if normalized not in {"start", "toggle", "stop", "retry_current"}:
         raise ValueError("unsupported runner control action")
-    if action == "stop":
-        try:
-            raw_pid = (RUNNER_STATE_PATH.parent / "runner.pid").read_text(encoding="utf-8").strip()
-            pid = int(raw_pid)
-        except (OSError, ValueError):
-            return {"accepted": False, "action": action, "reason": "runner pid unavailable"}
-        if pid <= 1:
-            return {"accepted": False, "action": action, "reason": "runner pid invalid"}
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
-        except OSError:
-            return {"accepted": False, "action": action, "reason": "runner process is no longer present"}
-        if "pasi_overnight_engine_v2.py" not in cmdline and "pasi_168h_supervisor.sh" not in cmdline:
-            return {"accepted": False, "action": action, "reason": "runner pid does not identify as PASI"}
-        try:
-            os.kill(pid, 15)
-        except ProcessLookupError:
-            return {"accepted": False, "action": action, "reason": "runner process already stopped"}
-        except PermissionError:
-            return {"accepted": False, "action": action, "reason": "runner process signal denied"}
-        return {"accepted": True, "action": action, "pid": pid}
 
-    current_state = load_runner_state()
+    selected_profile = _runner_profile(profile) if profile is not None else None
+    live_process = runner_process_info()
+
+    if normalized in {"start", "toggle"} and live_process is None:
+        return _start_runner(selected_profile or "m1")
+
+    if normalized == "start":
+        actual_profile = live_process.get("profile") if live_process else None
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "start",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is already running",
+            }
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": selected_profile or actual_profile,
+            "reason": "runner already running",
+        }
+
+    if normalized == "toggle" and live_process is not None:
+        normalized = "stop"
+
+    if normalized == "stop":
+        if live_process is None:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": "runner is not running",
+            }
+
+        pid = int(live_process["pid"])
+        actual_profile = live_process.get("profile")
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is the active runner",
+            }
+
+        state = load_runner_state(actual_profile or selected_profile or "m1")
+        state_path = runner_state_path(actual_profile or selected_profile or "m1")
+        pid_path = runner_pid_path(actual_profile or selected_profile or "m1")
+        stopping = dict(state) if state.get("available") else {}
+        stopping.update({
+            "status": "stopping",
+            "execution_mode": "manual",
+            "runner_pid": pid,
+            "runner_profile": actual_profile or stopping.get("runner_profile"),
+            "paused_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            atomic_write_json(state_path, stopping)
+            _terminate_runner_process(pid)
+        except (OSError, RuntimeError) as exc:
+            failed = dict(stopping)
+            failed.update({
+                "status": "failed",
+                "error": "runner stop failed: " + str(exc),
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            try:
+                atomic_write_json(state_path, failed)
+            except OSError:
+                pass
+            return {
+                "accepted": False,
+                "action": "stop",
+                "pid": pid,
+                "reason": failed["error"],
+            }
+
+        paused = dict(stopping)
+        paused["status"] = "paused"
+        paused["paused_at"] = datetime.now(timezone.utc).isoformat()
+        paused["process_alive"] = False
+        paused["ready"] = False
+        atomic_write_json(state_path, paused)
+        pid_candidates = [pid_path]
+        if actual_profile == "168h":
+            pid_candidates.append(
+                Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid"
+            )
+        for candidate in pid_candidates:
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "accepted": True,
+            "action": "stop",
+            "pid": pid,
+            "profile": actual_profile,
+            "status": "paused",
+        }
+
+    control_profile = selected_profile or (
+        live_process.get("profile") if live_process else None
+    ) or "m1"
+    current_state = load_runner_state(control_profile)
     current_task = str(current_state.get("current_task", "")).strip()
     if not current_state.get("available") or not current_task:
-        return {"accepted": False, "action": action, "reason": "no current runner task"}
-    RUNNER_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        return {"accepted": False, "action": normalized, "reason": "no current runner task"}
+    control_path = runner_control_path(control_profile)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
-        "action": action,
+        "action": normalized,
         "task_id": current_state.get("current_task_id", ""),
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
-    temporary = RUNNER_CONTROL_PATH.with_suffix(".json.tmp")
+    temporary = control_path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(RUNNER_CONTROL_PATH)
-    return {"accepted": True, "action": action, "task": current_task}
+    return {"accepted": True, "action": normalized, "task": current_task}
+
 
 class BridgeState:
     """
@@ -190,6 +708,9 @@ class BridgeState:
         self.state_manager = state_manager
         self.lock = threading.RLock()
         self.operation_changed = threading.Condition(self.lock)
+        self.browser_testing_changed = threading.Condition(self.lock)
+        self._browser_test_requests: dict[str, dict[str, Any]] = {}
+        self._browser_test_results: dict[str, dict[str, Any]] = {}
         self._queue_cache: list[dict[str, Any]] | None = None
         self._queue_cache_mtime_ns: int | None = None
 
@@ -381,6 +902,115 @@ class BridgeState:
 
         if changed:
             self._save_queue(queue)
+
+    def queue_browser_test_request(
+        self,
+        action: str,
+        tab_id: int | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        allowed = {"screenshot", "dom", "console_errors", "network"}
+        action = str(action or "").strip()
+        if action not in allowed:
+            raise ValueError("unsupported browser-test action")
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise ValueError("tab_id must be a positive integer or null")
+        params = dict(params or {})
+        if len(json.dumps(params, ensure_ascii=False, separators=(",", ":"))) > 20_000:
+            raise ValueError("browser-test params exceed the bounded request size")
+
+        if tab_id is None:
+            health = self.state_manager.load_browser_health()
+            health_data = health.get("data") if isinstance(health, Mapping) else {}
+            if not isinstance(health_data, Mapping) or not isinstance(health_data.get("tab_id"), int):
+                state = self.state_manager.load_browser_state()
+                state_data = state.get("data") if isinstance(state, Mapping) else {}
+                tab_id = state_data.get("tab_id") if isinstance(state_data, Mapping) else None
+            if not isinstance(tab_id, int) or tab_id < 1:
+                raise ValueError("no attached ChatGPT tab is available")
+
+        request_id = "bt-" + os.urandom(10).hex()
+        request = {
+            "request_id": request_id,
+            "action": action,
+            "tab_id": tab_id,
+            "params": params,
+            "created_at": time.time(),
+        }
+        with self.browser_testing_changed:
+            if len(self._browser_test_requests) >= 64:
+                oldest = min(self._browser_test_requests, key=lambda key: self._browser_test_requests[key]["created_at"])
+                self._browser_test_requests.pop(oldest, None)
+            self._browser_test_requests[request_id] = request
+            self.browser_testing_changed.notify_all()
+        return {"request_id": request_id, "tab_id": tab_id}
+
+    def wait_for_browser_test_request(
+        self,
+        tab_id: int,
+        timeout_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        if not isinstance(tab_id, int) or tab_id < 1:
+            raise ValueError("tab_id must be a positive integer")
+        timeout_ms = min(max(int(timeout_ms or 0), 0), 10_000)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        with self.browser_testing_changed:
+            while True:
+                candidates = sorted(
+                    (
+                        item for item in self._browser_test_requests.values()
+                        if item.get("tab_id") == tab_id
+                    ),
+                    key=lambda item: float(item.get("created_at", 0)),
+                )
+                if candidates:
+                    request = dict(candidates[0])
+                    self._browser_test_requests.pop(request["request_id"], None)
+                    return request
+                if timeout_ms <= 0:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.browser_testing_changed.wait(timeout=remaining)
+
+    def submit_browser_test_result(
+        self,
+        request_id: str,
+        tab_id: int,
+        ok: bool,
+        data: Mapping[str, Any] | None = None,
+        error: Mapping[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        with self.browser_testing_changed:
+            result = {
+                "request_id": request_id,
+                "tab_id": tab_id,
+                "ok": bool(ok),
+                "data": dict(data or {}) if ok else None,
+                "error": (
+                    dict(error) if isinstance(error, Mapping)
+                    else {"code": "BROWSER_TEST_FAILED", "message": str(error or "browser test failed")}
+                    if error is not None
+                    else None
+                ),
+                "completed_at": time.time(),
+            }
+            if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 12_000_000:
+                raise ValueError("browser-test result exceeds the bounded response size")
+            self._browser_test_results[request_id] = result
+            if len(self._browser_test_results) > 64:
+                oldest = min(self._browser_test_results, key=lambda key: self._browser_test_results[key]["completed_at"])
+                self._browser_test_results.pop(oldest, None)
+            self.browser_testing_changed.notify_all()
+            return {"accepted": True, "request_id": request_id}
+
+    def get_browser_test_result(self, request_id: str) -> dict[str, Any] | None:
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("request_id is required")
+        with self.browser_testing_changed:
+            result = self._browser_test_results.pop(request_id, None)
+            return dict(result) if isinstance(result, Mapping) else None
 
     @classmethod
     def _mark_claimed(
@@ -895,6 +1525,56 @@ class BridgeState:
             ):
                 return True
         return False
+
+    def cancel_operation(
+        self,
+        operation_id: str,
+        controller_id: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Cancel a nonterminal operation, fencing controller ownership when present."""
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return None
+        normalized_controller = (
+            controller_id.strip()
+            if isinstance(controller_id, str) and controller_id.strip()
+            else None
+        )
+        normalized_reason = (
+            reason[:MAX_ERROR_CHARS]
+            if isinstance(reason, str) and reason.strip()
+            else "operation cancelled"
+        )
+        with self.lock:
+            queue = self._load_queue()
+            for item in queue:
+                if item.get("operation_id") != operation_id:
+                    continue
+
+                current_status = str(item.get("status", ""))
+                owner = item.get("controller_id")
+                if owner is not None and owner != normalized_controller:
+                    raise ControllerOwnershipConflict(
+                        "operation is owned by a different controller"
+                    )
+                if current_status == "cancelled":
+                    return dict(item)
+                if current_status not in {"queued", "claimed", "generating"}:
+                    return None
+
+                validate_transition(current_status, "cancelled")
+                item["status"] = "cancelled"
+                item["error"] = normalized_reason
+                item["failure_reason"] = "cancelled"
+                item["updated_at"] = time.time()
+                if normalized_controller is not None:
+                    item["cancelled_by_controller_id"] = normalized_controller
+                if item.get("operation_type") == "prompt":
+                    item["response_processing_required"] = False
+                    item["response_processing_complete"] = False
+                self._save_queue(queue)
+                return dict(item)
+        return None
 
     def complete_operation(
         self,
@@ -1661,7 +2341,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path != "/health" and not self._request_is_authorized(require_token=True):
+        if path not in {"/health", "/runner/diagnostics"} and not self._request_is_authorized(require_token=True):
             self._send_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
             return
 
@@ -1686,6 +2366,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/runner/state":
             self._send_json(load_runner_state())
+            return
+
+        if path == "/runner/diagnostics":
+            # This is intentionally read-only and token-free: the bridge binds
+            # exclusively to 127.0.0.1, and no secrets/tokens are included.
+            self._send_json(runner_diagnostics_payload(self.bridge_state))
             return
 
         if path == "/browser/observation":
@@ -1724,6 +2410,30 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "observation": response
                 }
             )
+            return
+
+        if path == "/browser/testing/request":
+            values = parse_qs(parsed.query).get("tab_id", [])
+            if not values:
+                self._send_json({"error": "tab_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                tab_id = int(values[0])
+                wait_ms = min(max(int(parse_qs(parsed.query).get("wait_ms", ["0"])[0]), 0), 10_000)
+            except ValueError:
+                self._send_json({"error": "tab_id and wait_ms must be integers."}, HTTPStatus.BAD_REQUEST)
+                return
+            request = self.bridge_state.wait_for_browser_test_request(tab_id, wait_ms)
+            self._send_json({"request": request})
+            return
+
+        if path == "/browser/testing/result":
+            values = parse_qs(parsed.query).get("request_id", [])
+            request_id = values[0].strip() if values else ""
+            if not request_id or len(request_id) > 200:
+                self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({"result": self.bridge_state.get_browser_test_result(request_id)})
             return
 
         if path == "/operation":
@@ -1784,8 +2494,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             if wait_ms < 0 or wait_ms > 60_000:
                 self._send_json({"error": "wait_ms must be between 0 and 60000."}, HTTPStatus.BAD_REQUEST)
                 return
+
+            runner_state = load_runner_state()
+            if not runner_execution_authorized(runner_state):
+                self._send_json({"operation": None, "runner_ready": False})
+                return
+
             operation = self.bridge_state.wait_for_next_operation(controller_id, wait_ms)
-            self._send_json({"operation": operation})
+            self._send_json({"operation": operation, "runner_ready": True})
             return
 
         self._send_json(
@@ -1823,6 +2539,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            if path == "/browser/testing/request":
+                self._browser_testing_request(payload)
+                return
+
+            if path == "/browser/testing/result":
+                self._browser_testing_result(payload)
+                return
+
             if path == "/chat/claim":
                 self._claim(payload)
                 return
@@ -1836,7 +2560,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 if not isinstance(action, str):
                     self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(request_runner_control(action.strip().casefold()))
+                self._send_json(
+                    request_runner_control(
+                        action.strip().casefold(),
+                        payload.get("profile"),
+                    )
+                )
                 return
 
             if path == "/queue":
@@ -1859,6 +2588,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._failed(payload)
                 return
 
+            if path == "/chat/cancel":
+                self._cancel(payload)
+                return
+
             self._send_json(
                 {
                     "error": "Not found"
@@ -1873,13 +2606,74 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.CONFLICT,
             )
-        except Exception:
+        except Exception as exc:
+            detail = type(exc).__name__ + ": " + str(exc)
+            detail = detail.strip()[:500]
+            print("[Bridge] POST " + path + " failed: " + detail, file=sys.stderr, flush=True)
             self._send_json(
                 {
-                    "error": "Internal server error."
+                    "error": "Internal server error: " + detail
                 },
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )
+
+    def _browser_testing_request(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        action = payload.get("action")
+        tab_id = payload.get("tab_id")
+        params = payload.get("params")
+        if not isinstance(action, str) or not action.strip():
+            self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            self._send_json({"error": "tab_id must be a positive integer or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if params is not None and not isinstance(params, dict):
+            self._send_json({"error": "params must be an object."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.queue_browser_test_request(
+                action.strip(),
+                tab_id,
+                params,
+            )
+        )
+
+    def _browser_testing_result(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        request_id = payload.get("request_id")
+        tab_id = payload.get("tab_id")
+        ok = payload.get("ok")
+        data = payload.get("data")
+        error = payload.get("error")
+        if not isinstance(request_id, str) or not request_id.strip():
+            self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(tab_id, int) or tab_id < 1:
+            self._send_json({"error": "tab_id must be a positive integer."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(ok, bool):
+            self._send_json({"error": "ok must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
+        if data is not None and not isinstance(data, dict):
+            self._send_json({"error": "data must be an object or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if error is not None and not isinstance(error, (dict, str)):
+            self._send_json({"error": "error must be an object, string, or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.submit_browser_test_result(
+                request_id.strip(),
+                tab_id,
+                ok,
+                data,
+                error,
+            )
+        )
 
     def _claim(
         self,
@@ -2093,6 +2887,41 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 "operation": operation
             }
         )
+
+    def _cancel(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
+        reason = payload.get("reason")
+
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            self._send_json({"error": "operation_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if controller_id is not None and (
+            not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200
+        ):
+            self._send_json({"error": "controller_id must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+        if reason is not None and (
+            not isinstance(reason, str) or not reason.strip() or len(reason) > MAX_ERROR_CHARS
+        ):
+            self._send_json({"error": "reason must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        operation = self.bridge_state.cancel_operation(
+            operation_id=operation_id.strip(),
+            controller_id=controller_id.strip() if isinstance(controller_id, str) else None,
+            reason=reason,
+        )
+        if operation is None:
+            self._send_json(
+                {"error": "Operation is not cancellable."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+        self._send_json({"operation": operation})
 
     def _finished(
         self,
@@ -2484,18 +3313,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         recovery_context = payload.get("recovery_context")
         if recovery_context is not None:
-            recovery_context = self.bridge_state._normalize_recovery_context(
+            normalized_recovery_context = self.bridge_state._normalize_recovery_context(
                 recovery_context
             )
-            if recovery_context is None:
-                self._send_json(
-                    {
-                        "error":
-                            "recovery_context is invalid."
-                    },
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
+            if normalized_recovery_context is None:
+                # Network lifecycle observations already persist the request,
+                # classification, and reason as first-class CDP evidence.
+                # Older extension builds may also send those network fields in
+                # recovery_context; ignore that unsupported auxiliary payload
+                # rather than orphaning a terminal network failure in generating.
+                if failure_source == "network":
+                    recovery_context = None
+                else:
+                    self._send_json(
+                        {
+                            "error":
+                                "recovery_context is invalid."
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+            else:
+                recovery_context = normalized_recovery_context
 
         operation = (
             self.bridge_state.fail_operation(
@@ -2539,8 +3378,6 @@ class ChatGPTBridge:
         host: str = HOST,
         port: int = PORT,
     ):
-        ensure_runtime_directories()
-
         self.host = host
         self.port = port
 

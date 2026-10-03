@@ -1,6 +1,11 @@
 import pytest
 
-from automation.orchestrator.bridge import BridgeState, completion_markers_satisfied
+from automation.orchestrator.bridge import (
+    BridgeRequestHandler,
+    BridgeState,
+    InvalidOperationTransition,
+    completion_markers_satisfied,
+)
 from automation.orchestrator.state import StateManager
 
 def test_completion_markers_accept_exact_line():
@@ -16,6 +21,19 @@ def test_completion_markers_accept_colon_suffix():
         ["NETWORK_CORRELATION_OK_2026"],
     )
 
+
+def test_completion_markers_reject_fenced_marker_copy():
+    assert not completion_markers_satisfied(
+        "Previous answer:\n```text\nNETWORK_CORRELATION_OK_2026\n```",
+        ["NETWORK_CORRELATION_OK_2026"],
+    )
+
+
+def test_completion_markers_reject_quoted_marker_copy():
+    assert not completion_markers_satisfied(
+        "> NETWORK_CORRELATION_OK_2026",
+        ["NETWORK_CORRELATION_OK_2026"],
+    )
 
 def test_completion_markers_reject_stale_nonmatching_response():
     assert not completion_markers_satisfied(
@@ -320,6 +338,25 @@ def test_late_dom_response_cannot_replace_authoritative_cdp_response(tmp_path):
     assert stored["response_source"] == "cdp_fetch_stream"
 
 
+def test_transient_failure_from_queued_operation_rejects_queued_to_queued(tmp_path):
+    """Transient browser failures require an operation already in claimed/generating status."""
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+    )
+
+    with pytest.raises(InvalidOperationTransition, match=r"'queued' -> 'queued'"):
+        bridge.fail_operation(
+            operation.operation_id,
+            "PASI_CDP: network failure",
+        )
+
+    stored = bridge.get_operation(operation.operation_id, repair_response=False)
+    assert stored is not None
+    assert stored["status"] == "queued"
+
+
 def test_generic_cdp_network_failure_is_transient_and_late_authoritative_response_completes(tmp_path):
     bridge = BridgeState(StateManager(tmp_path / "ai"))
     operation = bridge.queue_operation(
@@ -454,3 +491,47 @@ def test_incomplete_cdp_response_never_becomes_authoritative(tmp_path):
     assert failed is not None
     assert failed["status"] == "queued"
     assert failed["retry_class"] == "response"
+
+
+def test_network_failure_with_legacy_network_recovery_context_is_retried(tmp_path):
+    bridge = BridgeState(StateManager(tmp_path / "ai"))
+    operation = bridge.queue_operation(
+        "prompt",
+        "expected",
+        completion_markers=["NETWORK_PATCH_OK_2026"],
+    )
+    claimed = bridge.claim_operation(operation.operation_id, "controller-cdp")
+    assert claimed is not None
+
+    captured = {}
+
+    handler = BridgeRequestHandler.__new__(BridgeRequestHandler)
+
+    class FakeServer:
+        bridge_state = bridge
+
+    handler.server = FakeServer()
+    handler._send_json = lambda payload, status=200: captured.update(
+        {"payload": payload, "status": status}
+    )
+
+    handler._failed(
+        {
+            "operation_id": operation.operation_id,
+            "controller_id": "controller-cdp",
+            "failure_source": "network",
+            "error": "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+            "recovery_context": {
+                "network_request_id": "req-legacy",
+                "network_classification": "response_correlation_failure",
+                "network_reason": "RESPONSE_MARKER_NOT_FOUND",
+            },
+        }
+    )
+
+    assert captured["status"] == 200
+    retried = captured["payload"]["operation"]
+    assert retried["status"] == "queued"
+    assert retried["retry_class"] == "response"
+    assert retried["retry_count"] == 1
+    assert retried["retry_counts"]["response"] == 1

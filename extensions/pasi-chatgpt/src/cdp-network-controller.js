@@ -10,6 +10,9 @@
   const MAX_RESPONSE_TEXT_CHARS = 120_000;
   const MAX_REPLAY_BODY_BYTES = 8 * 1024 * 1024;
   const DEFAULT_STALL_MS = 8_000;
+  const MAX_BROWSER_TEST_ITEMS = 100;
+  const MAX_BROWSER_TEST_TEXT_CHARS = 4_000;
+  const MAX_BROWSER_TEST_SCREENSHOT_BYTES = 8 * 1024 * 1024;
 
   function requestUrlIsGeneration(url) {
     try {
@@ -266,7 +269,17 @@
       ? markers.filter((marker) => typeof marker === 'string' && marker.trim()).map((marker) => marker.trim())
       : [];
     if (!configured.length) return true;
-    const lines = String(responseText).split(/\r?\n/).map((line) => line.trim());
+    const lines = [];
+    let inFence = false;
+    for (const rawLine of String(responseText).split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (/^(?:```|~~~)/.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence || line.startsWith('>')) continue;
+      lines.push(line);
+    }
     return configured.some((marker) => lines.some((line) => line === marker || line.startsWith(marker + ':')));
   }
 
@@ -277,7 +290,154 @@
     const stallMs = Number(options.stallMs) > 0 ? Number(options.stallMs) : DEFAULT_STALL_MS;
     const tabs = new Map();
     const requests = new Map();
+    const consoleErrors = new Map();
+    const networkEvents = new Map();
+    const networkRequests = new Map();
     let installed = false;
+
+    function pushBounded(map, tabId, value, limit = MAX_BROWSER_TEST_ITEMS) {
+      const list = map.get(tabId) || [];
+      list.push(value);
+      if (list.length > limit) list.splice(0, list.length - limit);
+      map.set(tabId, list);
+      return value;
+    }
+
+    function sanitizeNetworkUrl(url) {
+      try {
+        const parsed = new URL(String(url || ''), 'https://chatgpt.com');
+        return parsed.origin + parsed.pathname;
+      } catch (_) {
+        return String(url || '').slice(0, 2000);
+      }
+    }
+
+    function safeConsoleArgument(argument) {
+      if (argument == null) return null;
+      if (Object.prototype.hasOwnProperty.call(argument, 'value')) {
+        const value = argument.value;
+        return typeof value === 'string'
+          ? value.slice(0, MAX_BROWSER_TEST_TEXT_CHARS)
+          : typeof value === 'number' || typeof value === 'boolean'
+          ? value
+          : argument.type || null;
+      }
+      return String(argument.description || argument.unserializableValue || argument.type || '').slice(0, MAX_BROWSER_TEST_TEXT_CHARS);
+    }
+
+    function recordConsoleEvent(tabId, method, params = {}) {
+      if (!Number.isInteger(tabId)) return;
+      if (method === 'Runtime.consoleAPICalled') {
+        const type = String(params.type || '').toLowerCase();
+        if (type !== 'error' && type !== 'assert') return;
+        pushBounded(consoleErrors, tabId, {
+          kind: 'console_error',
+          type,
+          timestamp: Number(params.timestamp || 0) || null,
+          text: (Array.isArray(params.args) ? params.args : [])
+            .slice(0, 8)
+            .map(safeConsoleArgument)
+            .filter((value) => value != null),
+          stack_trace: params.stackTrace?.callFrames?.slice(0, 8).map((frame) => ({
+            function_name: String(frame.functionName || '').slice(0, 200),
+            url: sanitizeNetworkUrl(frame.url),
+            line_number: Number(frame.lineNumber || 0),
+            column_number: Number(frame.columnNumber || 0),
+          })) || [],
+        });
+        return;
+      }
+      if (method === 'Runtime.exceptionThrown') {
+        const details = params.exceptionDetails || {};
+        const exception = details.exception || {};
+        pushBounded(consoleErrors, tabId, {
+          kind: 'uncaught_exception',
+          timestamp: Number(details.timestamp || 0) || null,
+          text: String(details.text || exception.description || exception.value || 'Uncaught exception')
+            .slice(0, MAX_BROWSER_TEST_TEXT_CHARS),
+          url: sanitizeNetworkUrl(details.url || ''),
+          line_number: Number(details.lineNumber || 0),
+          column_number: Number(details.columnNumber || 0),
+          stack_trace: details.stackTrace?.callFrames?.slice(0, 8).map((frame) => ({
+            function_name: String(frame.functionName || '').slice(0, 200),
+            url: sanitizeNetworkUrl(frame.url),
+            line_number: Number(frame.lineNumber || 0),
+            column_number: Number(frame.columnNumber || 0),
+          })) || [],
+        });
+      }
+    }
+
+    function recordNetworkEvent(tabId, method, params = {}) {
+      if (!Number.isInteger(tabId)) return;
+      if (method === 'Network.requestWillBeSent') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        networkRequests.set(tabId + ':' + requestId, {
+          url: sanitizeNetworkUrl(params.request?.url),
+          method: String(params.request?.method || 'GET'),
+          resource_type: String(params.type || ''),
+          started_at: Number(params.timestamp || 0) || null,
+        });
+        pushBounded(networkEvents, tabId, {
+          kind: 'request',
+          request_id: requestId,
+          method: String(params.request?.method || 'GET'),
+          url: sanitizeNetworkUrl(params.request?.url),
+          resource_type: String(params.type || ''),
+          timestamp: Number(params.timestamp || 0) || null,
+        });
+        return;
+      }
+      if (method === 'Network.responseReceived') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        networkRequests.set(tabId + ':' + requestId, {...prior, response_url: sanitizeNetworkUrl(params.response?.url)});
+        pushBounded(networkEvents, tabId, {
+          kind: 'response',
+          request_id: requestId,
+          method: prior.method || null,
+          url: sanitizeNetworkUrl(params.response?.url || prior.url),
+          status: Number(params.response?.status || 0) || null,
+          mime_type: String(params.response?.mimeType || ''),
+          resource_type: prior.resource_type || String(params.type || ''),
+          timestamp: Number(params.timestamp || 0) || null,
+        });
+        return;
+      }
+      if (method === 'Network.loadingFinished') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        pushBounded(networkEvents, tabId, {
+          kind: 'finished',
+          request_id: requestId,
+          method: prior.method || null,
+          url: prior.response_url || prior.url || null,
+          resource_type: prior.resource_type || null,
+          timestamp: Number(params.timestamp || 0) || null,
+          encoded_data_length: Number(params.encodedDataLength || 0) || 0,
+        });
+        networkRequests.delete(tabId + ':' + requestId);
+        return;
+      }
+      if (method === 'Network.loadingFailed') {
+        const requestId = String(params.requestId || '');
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        pushBounded(networkEvents, tabId, {
+          kind: 'failed',
+          request_id: requestId,
+          method: prior.method || null,
+          url: prior.response_url || prior.url || null,
+          resource_type: prior.resource_type || null,
+          timestamp: Number(params.timestamp || 0) || null,
+          error_text: String(params.errorText || 'Network request failed').slice(0, 500),
+          canceled: params.canceled === true,
+        });
+        networkRequests.delete(tabId + ':' + requestId);
+      }
+    }
 
     function sendCommand(tabId, method, params = {}) {
       return new Promise((resolve, reject) => {
@@ -331,6 +491,9 @@
             }
           }
           await sendCommand(tabId, 'Accessibility.enable');
+          await sendCommand(tabId, 'Runtime.enable');
+          await sendCommand(tabId, 'Network.enable');
+          await sendCommand(tabId, 'Page.enable');
           await sendCommand(tabId, 'Fetch.enable', {
             patterns: GENERATION_ENDPOINTS.flatMap((urlPattern) => ([
               {urlPattern: '*' + urlPattern, requestStage: 'Request'},
@@ -355,11 +518,25 @@
       for (const [requestId, request] of requests.entries()) {
         if (request.tabId === tabId) requests.delete(requestId);
       }
+      for (const [requestId] of networkRequests.entries()) {
+        if (requestId.startsWith(String(tabId) + ':')) networkRequests.delete(requestId);
+      }
+      consoleErrors.delete(tabId);
+      networkEvents.delete(tabId);
       try {
         if (state.enabled) await sendCommand(tabId, 'Fetch.disable');
       } catch (_) {}
       try {
         await sendCommand(tabId, 'Accessibility.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Runtime.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Network.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Page.disable');
       } catch (_) {}
       try {
         if (typeof debuggerApi?.detach === 'function') {
@@ -444,7 +621,7 @@
         // searchbox/combobox or as a generic editable AX node. Editability
         // plus semantic context are stronger signals than the exact role.
         const name = axName(node).toLowerCase();
-        const semantic = /\\b(?:message|prompt|chat|ask)\\b/.test(name);
+        const semantic = /\b(?:message|prompt|chat|ask)\b/.test(name);
         const focused = axBooleanProperty(node, 'focused') === true;
         const supportedRole = editableRoles.has(role);
         const genericEditable = editable === true || multiline === true;
@@ -469,10 +646,15 @@
       if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
         throw new Error('CDP submit target unavailable: ACCESSIBLE_COMPOSER_HAS_NO_BACKEND_NODE');
       }
+      const selectedRole = axRole(best);
+      const selectedName = axName(best);
+      const selectedSemantic = /\b(?:message|prompt|chat|ask)\b/i.test(selectedName.toLowerCase());
       return {
         backendNodeId,
         kind: 'accessibility_textbox',
-        name: axName(best),
+        role: selectedRole,
+        name: selectedName,
+        semantic: selectedSemantic,
         currentText: axValue(best.value),
         focused: axBooleanProperty(best, 'focused') === true
       };
@@ -810,6 +992,69 @@
       throw new Error('PASI_NATIVE: prompt submission not acknowledged');
     }
 
+    function findSendButtonAXNode(nodes) {
+      const candidates = Array.isArray(nodes) ? nodes : [];
+      const roles = new Set(['button']);
+      let best = null;
+      let bestScore = -1;
+      for (const node of candidates) {
+        if (!node || node.ignored === true) continue;
+        const role = axRole(node);
+        if (!roles.has(role)) continue;
+        const disabled = axBooleanProperty(node, 'disabled');
+        if (disabled === true) continue;
+        const name = axName(node);
+        if (!/^(?:send|send message|send prompt|submit)$/i.test(name.trim())) continue;
+        const score = /^send(?: prompt| message)?$/i.test(name.trim()) ? 100 : 50;
+        if (score > bestScore) {
+          bestScore = score;
+          best = node;
+        }
+      }
+      return best;
+    }
+
+    async function clickAXNode(tabId, node) {
+      const backendNodeId = Number(node?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP UI control has no backend node');
+      }
+      const model = await sendCommand(tabId, 'DOM.getBoxModel', {backendNodeId});
+      const quad = model?.model?.border;
+      if (!Array.isArray(quad) || quad.length < 8) {
+        throw new Error('CDP UI control has no usable box model');
+      }
+      const values = quad.slice(0, 8).map(Number);
+      if (!values.every(Number.isFinite)) {
+        throw new Error('CDP UI control box model is invalid');
+      }
+      const x = (values[0] + values[2] + values[4] + values[6]) / 4;
+      const y = (values[1] + values[3] + values[5] + values[7]) / 4;
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x,
+        y,
+        button: 'none'
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x,
+        y,
+        button: 'left',
+        buttons: 1,
+        clickCount: 1
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x,
+        y,
+        button: 'left',
+        buttons: 0,
+        clickCount: 1
+      });
+      return {x, y};
+    }
+
     async function submitOperation(tabId, operationId, controllerId) {
       const state = tabs.get(tabId);
       if (!state?.binding) throw new Error('CDP submit requires an active operation binding');
@@ -826,12 +1071,53 @@
       const target = await focusEditableTarget(tabId);
       const currentText = String(target.currentText || '').trim();
       if (currentText && currentText !== prompt.trim()) {
-        throw new Error('CDP submit target contains unrelated draft text');
+        throw new Error(
+          'CDP submit target contains unrelated draft text: ' +
+          JSON.stringify({
+            role: target.role,
+            name: target.name,
+            semantic: target.semantic === true,
+            focused: target.focused === true,
+            current_text_length: currentText.length
+          })
+        );
       }
       const insertedAt = now();
       if (!currentText) {
         await sendCommand(tabId, 'Input.insertText', {text: prompt});
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
+
+      const nodes = await readAXTree(tabId);
+      const sendButton = findSendButtonAXNode(nodes);
+      if (sendButton) {
+        try {
+          await clickAXNode(tabId, sendButton);
+          const acknowledgement = await waitForSubmissionAcknowledgement(
+            tabId,
+            state.binding.operationId,
+            prompt,
+            1500,
+          );
+          return {
+            submitted: true,
+            acknowledged: true,
+            acknowledgementSource: acknowledgement.source,
+            operationId: state.binding.operationId,
+            controllerId: state.binding.controllerId,
+            submissionMethod: 'cdp_accessibility_send_button_mouse',
+            targetKind: target.kind,
+            submittedAtMs: submittedAt,
+            insertedAtMs: insertedAt,
+            sendControlActivatedAtMs: now()
+          };
+        } catch (error) {
+          // The AX send control existed, but its pointer path did not produce
+          // a submission. Fall through to native keyboard submission.
+        }
+      }
+
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.backendNodeId});
       await sendCommand(tabId, 'Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Enter',
@@ -846,23 +1132,34 @@
         windowsVirtualKeyCode: 13,
         nativeVirtualKeyCode: 13
       });
-      const acknowledgement = await waitForSubmissionAcknowledgement(
-        tabId,
-        state.binding.operationId,
-        prompt,
-      );
-      return {
-        submitted: true,
-        acknowledged: true,
-        acknowledgementSource: acknowledgement.source,
-        operationId: state.binding.operationId,
-        controllerId: state.binding.controllerId,
-        submissionMethod: 'cdp_input',
-        targetKind: target.kind,
-        submittedAtMs: submittedAt,
-        insertedAtMs: insertedAt,
-        enterDispatchedAtMs: now()
-      };
+
+      try {
+        const acknowledgement = await waitForSubmissionAcknowledgement(
+          tabId,
+          state.binding.operationId,
+          prompt,
+          3000,
+        );
+        return {
+          submitted: true,
+          acknowledged: true,
+          acknowledgementSource: acknowledgement.source,
+          operationId: state.binding.operationId,
+          controllerId: state.binding.controllerId,
+          submissionMethod: 'cdp_input',
+          targetKind: target.kind,
+          submittedAtMs: submittedAt,
+          insertedAtMs: insertedAt,
+          enterDispatchedAtMs: now()
+        };
+      } catch (error) {
+        const detail = sendButton
+          ? 'accessible send control was present but did not produce an acknowledged submission'
+          : 'no accessible send control was exposed';
+        throw new Error(
+          'PASI_NATIVE: prompt submission not acknowledged after CDP input; ' + detail
+        );
+      }
     }
 
     function bindOperation({tabId, operationId, controllerId, prompt, completionMarkers, chatUrl}) {
@@ -1072,8 +1369,12 @@
     }
 
     async function handlePaused(source, method, params) {
-      if (method !== 'Fetch.requestPaused') return;
       const tabId = source?.tabId;
+      if (Number.isInteger(tabId)) {
+        recordConsoleEvent(tabId, method, params);
+        recordNetworkEvent(tabId, method, params);
+      }
+      if (method !== 'Fetch.requestPaused') return;
       if (!Number.isInteger(tabId) || !params?.requestId) return;
       const request = params.request || {};
       const generation = request.method === 'POST' && requestUrlIsGeneration(request.url);
@@ -1197,6 +1498,224 @@
       }
     }
 
+    async function browserTestScreenshot(tabId) {
+      await attachTab(tabId);
+      const metrics = await sendCommand(tabId, 'Page.getLayoutMetrics');
+      const shot = await sendCommand(tabId, 'Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: false,
+      });
+      const base64 = String(shot?.data || '');
+      const byteLength = Math.floor((base64.length * 3) / 4);
+      if (!base64 || byteLength > MAX_BROWSER_TEST_SCREENSHOT_BYTES) {
+        throw new Error('browser screenshot is empty or exceeds the bounded size');
+      }
+      const viewport = metrics?.visualViewport || metrics?.layoutViewport || {};
+      return {
+        kind: 'screenshot',
+        tab_id: tabId,
+        mime_type: 'image/png',
+        width: Number(viewport.clientWidth || viewport.width || 1),
+        height: Number(viewport.clientHeight || viewport.height || 1),
+        byte_length: byteLength,
+        image_base64: base64,
+        captured_at: new Date().toISOString(),
+      };
+    }
+
+    function domSnapshotAttributes(flatAttributes) {
+      const attributes = {};
+      const values = Array.isArray(flatAttributes) ? flatAttributes : [];
+      for (let index = 0; index + 1 < values.length; index += 2) {
+        const name = String(values[index] || '');
+        const value = String(values[index + 1] || '');
+        if (!name) continue;
+        attributes[name] = value.slice(0, 1000);
+      }
+      return attributes;
+    }
+
+    function domSnapshotNodeMatches(nodeName, attributes, selector) {
+      const query = String(selector || 'body').trim();
+      if (!query || query === '*') return true;
+      const tagMatch = query.match(/^[a-zA-Z][\w-]*/);
+      let remainder = query;
+      if (tagMatch) {
+        if (String(nodeName || '').toLowerCase() !== tagMatch[0].toLowerCase()) return false;
+        remainder = remainder.slice(tagMatch[0].length);
+      }
+      const idMatch = remainder.match(/#([\w-]+)/);
+      if (idMatch && attributes.id !== idMatch[1]) return false;
+      const classMatches = [...remainder.matchAll(/\.([\w-]+)/g)].map((match) => match[1]);
+      if (classMatches.length) {
+        const classes = new Set(String(attributes.class || '').split(/\s+/).filter(Boolean));
+        if (classMatches.some((value) => !classes.has(value))) return false;
+      }
+      const attributeMatches = [...remainder.matchAll(/\[([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*["']([^"']*)["'])?\]/g)];
+      for (const match of attributeMatches) {
+        const name = String(match[1] || '');
+        if (!Object.prototype.hasOwnProperty.call(attributes, name)) return false;
+        if (match[2] != null && attributes[name] !== match[2]) return false;
+      }
+      return true;
+    }
+
+    function domSnapshotText(nodeIndex, nodes, childrenByParent, maxTextChars) {
+      const fragments = [];
+      const stack = [{index: nodeIndex, depth: 0}];
+      const visited = new Set();
+      while (stack.length && fragments.join('').length < maxTextChars) {
+        const current = stack.pop();
+        if (!current || current.depth > 8 || visited.has(current.index)) continue;
+        visited.add(current.index);
+        const node = nodes[current.index];
+        if (!node) continue;
+        if (Number(node.nodeType) === 3 || String(node.nodeName || '').toLowerCase() === '#text') {
+          if (typeof node.nodeValue === 'string' && node.nodeValue) fragments.push(node.nodeValue);
+          continue;
+        }
+        const children = childrenByParent.get(current.index) || [];
+        for (let index = Math.min(children.length, 64) - 1; index >= 0; index -= 1) {
+          stack.push({index: children[index], depth: current.depth + 1});
+        }
+      }
+      return fragments.join(' ').replace(/\s+/g, ' ').trim().slice(0, maxTextChars);
+    }
+
+    async function browserTestDom(tabId, params = {}) {
+      await attachTab(tabId);
+      const selector = typeof params.selector === 'string' && params.selector.trim()
+        ? params.selector.trim()
+        : 'body';
+      const maxElements = Math.min(Math.max(Number(params.max_elements) || 50, 1), 100);
+      const maxTextChars = Math.min(Math.max(Number(params.max_text_chars) || 500, 50), MAX_BROWSER_TEST_TEXT_CHARS);
+      if (selector.length > 500) throw new Error('DOM selector exceeds bound');
+      const snapshot = await sendCommand(tabId, 'DOMSnapshot.captureSnapshot', {
+        computedStyles: [],
+        includePaintOrder: false,
+        includeTextColorOpacities: false,
+      });
+      const document = Array.isArray(snapshot?.documents) ? snapshot.documents[0] : null;
+      const nodes = Array.isArray(document?.nodes?.nodeName)
+        ? document.nodes.nodeName.map((nodeName, index) => ({
+            nodeName,
+            nodeType: Array.isArray(document.nodes.nodeType) ? document.nodes.nodeType[index] : null,
+            nodeValue: Array.isArray(document.nodes.nodeValue) ? document.nodes.nodeValue[index] : '',
+            parentIndex: Array.isArray(document.nodes.parentIndex) ? document.nodes.parentIndex[index] : -1,
+            attributes: domSnapshotAttributes(
+              Array.isArray(document.nodes.attributes) && Array.isArray(document.nodes.attributes[index])
+                ? document.nodes.attributes[index]
+                : []
+            ),
+          }))
+        : [];
+      const childrenByParent = new Map();
+      for (let index = 0; index < nodes.length; index += 1) {
+        const parent = Number(nodes[index]?.parentIndex);
+        if (!Number.isInteger(parent) || parent < 0) continue;
+        const children = childrenByParent.get(parent) || [];
+        children.push(index);
+        childrenByParent.set(parent, children);
+      }
+      const matched = [];
+      const scanLimit = Math.min(nodes.length, 50_000);
+      for (let index = 0; index < scanLimit; index += 1) {
+        const node = nodes[index];
+        if (!node || Number(node.nodeType) !== 1) continue;
+        if (!domSnapshotNodeMatches(node.nodeName, node.attributes, selector)) continue;
+        matched.push(index);
+        if (matched.length >= maxElements) break;
+      }
+      const elements = matched.map((index) => {
+        const node = nodes[index];
+        const layoutIndex = Array.isArray(document?.layout?.nodeIndex)
+          ? document.layout.nodeIndex.indexOf(index)
+          : -1;
+        const bounds = layoutIndex >= 0 && Array.isArray(document?.layout?.bounds)
+          ? document.layout.bounds[layoutIndex] || null
+          : null;
+        return {
+          tag: String(node.nodeName || '').toLowerCase(),
+          id: node.attributes.id || '',
+          class_name: node.attributes.class || '',
+          role: node.attributes.role || null,
+          aria_label: node.attributes['aria-label'] || null,
+          title: node.attributes.title || null,
+          test_id: node.attributes['data-testid'] || null,
+          type: node.attributes.type || null,
+          name: node.attributes.name || null,
+          disabled: node.attributes.disabled != null || node.attributes['aria-disabled'] === 'true',
+          selected: node.attributes.selected != null || node.attributes['aria-selected'] === 'true',
+          visible: bounds ? Number(bounds[2]) > 0 && Number(bounds[3]) > 0 : null,
+          text: domSnapshotText(index, nodes, childrenByParent, maxTextChars),
+          bounds: Array.isArray(bounds) && bounds.length >= 4
+            ? {
+                x: Number(bounds[0]),
+                y: Number(bounds[1]),
+                width: Number(bounds[2]),
+                height: Number(bounds[3]),
+              }
+            : null,
+        };
+      });
+      return {
+        kind: 'dom',
+        tab_id: tabId,
+        url: String(document?.frame?.url || ''),
+        title: String(document?.frame?.name || ''),
+        ready_state: null,
+        selector,
+        matched_count: matched.length,
+        truncated: nodes.length > scanLimit || matched.length >= maxElements,
+        elements,
+        source: 'cdp_dom_snapshot',
+      };
+    }
+
+    function browserTestConsoleErrors(tabId, params = {}) {
+      const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
+      const errors = (consoleErrors.get(tabId) || []).slice(-limit);
+      return {
+        kind: 'console',
+        tab_id: tabId,
+        errors,
+        count: errors.length,
+      };
+    }
+
+    function browserTestNetwork(tabId, params = {}) {
+      const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
+      const urlContains = typeof params.url_contains === 'string' ? params.url_contains : '';
+      const resourceTypes = new Set(
+        Array.isArray(params.resource_types) ? params.resource_types.map((value) => String(value)) : []
+      );
+      const all = networkEvents.get(tabId) || [];
+      const filtered = all.filter((event) => {
+        if (urlContains && !String(event.url || '').includes(urlContains)) return false;
+        if (resourceTypes.size && !resourceTypes.has(String(event.resource_type || ''))) return false;
+        return true;
+      });
+      return {
+        kind: 'network',
+        tab_id: tabId,
+        events: filtered.slice(-limit),
+        count: Math.min(filtered.length, limit),
+        captured_since: all[0]?.timestamp || null,
+      };
+    }
+
+    async function runBrowserTest(tabId, action, params = {}) {
+      if (!Number.isInteger(tabId) || tabId < 1) throw new Error('tabId is required');
+      await attachTab(tabId);
+      const normalized = String(action || '').trim();
+      if (normalized === 'screenshot') return browserTestScreenshot(tabId);
+      if (normalized === 'dom') return browserTestDom(tabId, params);
+      if (normalized === 'console_errors') return browserTestConsoleErrors(tabId, params);
+      if (normalized === 'network') return browserTestNetwork(tabId, params);
+      throw new Error('Unsupported browser-test action');
+    }
+
     function install() {
       if (installed) return false;
       if (!debuggerApi?.onEvent?.addListener) throw new Error('chrome.debugger.onEvent is unavailable');
@@ -1224,6 +1743,11 @@
           for (const [requestId, request] of requests.entries()) {
             if (request.tabId === tabId) requests.delete(requestId);
           }
+          consoleErrors.delete(tabId);
+          networkEvents.delete(tabId);
+          for (const [requestId] of networkRequests.entries()) {
+            if (requestId.startsWith(String(tabId) + ':')) networkRequests.delete(requestId);
+          }
         });
       }
       installed = true;
@@ -1241,6 +1765,8 @@
       ensureReasoningMode,
       ensureGithubRepository,
       handlePaused,
+      runBrowserTest,
+      findComposerAXNode,
       currentBinding,
       isIdle,
       health() {
@@ -1259,6 +1785,11 @@
             operationId: request.operationId,
             controllerId: request.controllerId,
             assistantMessageId: request.assistantMessageId || null
+          })),
+          browserTesting: [...tabs.keys()].map((tabId) => ({
+            tabId,
+            consoleErrorCount: (consoleErrors.get(tabId) || []).length,
+            networkEventCount: (networkEvents.get(tabId) || []).length
           }))
         };
       }

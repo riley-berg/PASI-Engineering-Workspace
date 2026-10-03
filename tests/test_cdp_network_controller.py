@@ -109,6 +109,49 @@ assert.equal(cdp.authoritativeStreamComplete(ambiguousState), false);
     )
 
 
+
+def test_composer_ax_selection_recognizes_semantic_message_target() -> None:
+    run_node(
+        controller_loader()
+        + r"""
+const nodes = [
+  {
+    ignored: false,
+    role: {value: 'textbox'},
+    name: {value: 'Search'},
+    properties: [
+      {name: {value: 'editable'}, value: true},
+      {name: {value: 'multiline'}, value: false},
+      {name: {value: 'readonly'}, value: false},
+      {name: {value: 'focused'}, value: false}
+    ],
+    backendDOMNodeId: 41,
+    value: {value: ''}
+  },
+  {
+    ignored: false,
+    role: {value: 'textbox'},
+    name: {value: 'Message'},
+    properties: [
+      {name: {value: 'editable'}, value: true},
+      {name: {value: 'multiline'}, value: true},
+      {name: {value: 'readonly'}, value: false},
+      {name: {value: 'focused'}, value: false}
+    ],
+    backendDOMNodeId: 42,
+    value: {value: ''}
+  }
+];
+const controller = cdp.createController();
+const target = controller.findComposerAXNode(nodes);
+assert.equal(target.backendNodeId, 42);
+assert.equal(target.name, 'Message');
+assert.equal(target.semantic, true);
+assert.equal(target.role, 'textbox');
+assert.equal(target.currentText, '');
+"""
+    )
+
 def test_generation_request_is_correlated_once_per_operation() -> None:
     run_node(
         controller_loader()

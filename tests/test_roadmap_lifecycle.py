@@ -16,7 +16,7 @@ from pasi.core.roadmap_store import SQLiteRoadmapStore
 def make_roadmap() -> Roadmap:
     return Roadmap(
         roadmap_id="pasi-main",
-        version=2,
+        version=4,
         revision=0,
         phases=(
             RoadmapPhase(
@@ -88,7 +88,7 @@ def test_stale_revision_and_dependency_cycle_are_rejected():
     with pytest.raises(RoadmapError, match="task dependency cycle"):
         Roadmap(
             roadmap_id="cycle",
-            version=2,
+            version=4,
             revision=0,
             phases=(RoadmapPhase("P", "Phase", status=PhaseStatus.ACTIVE),),
             tasks=(
@@ -108,7 +108,7 @@ def test_missing_dependency_is_rejected():
     with pytest.raises(RoadmapError, match="missing tasks"):
         Roadmap(
             roadmap_id="missing",
-            version=2,
+            version=4,
             revision=0,
             phases=(RoadmapPhase("P", "Phase"),),
             tasks=(

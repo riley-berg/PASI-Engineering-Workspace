@@ -28,7 +28,7 @@
   "properties": {
     "operation_id": {"type": "string", "minLength": 1, "maxLength": 256},
     "operation_type": {"type": "string", "minLength": 1, "maxLength": 256},
-    "status": {"enum": ["queued", "claimed", "generating", "completed", "failed"]},
+    "status": {"enum": ["queued", "claimed", "generating", "completed", "failed", "cancelled"]},
     "schema_version": {"const": 2},
     "state_revision": {"type": "integer", "minimum": 0},
     "run_id": {"type": "string", "maxLength": 256},

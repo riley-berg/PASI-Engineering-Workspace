@@ -4,9 +4,82 @@ const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
 let STALE_MS = 45 * 1000;
 let operationDispatchTail = Promise.resolve();
+const supervisedExecutionWaiters = new Map();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 const cdpOperationTimings = new Map();
+const browserTestingWaiters = new Map();
+
+function cancelBrowserTestingWaiter(tabId) {
+  const waiter = browserTestingWaiters.get(String(tabId));
+  if (waiter) waiter.active = false;
+  browserTestingWaiters.delete(String(tabId));
+}
+
+function ensureBrowserTestingWaiter(tabId) {
+  if (typeof tabId !== 'number') return false;
+  const key = String(tabId);
+  const existing = browserTestingWaiters.get(key);
+  if (existing?.active) return true;
+  const state = {active: true};
+  browserTestingWaiters.set(key, state);
+
+  void (async () => {
+    while (state.active) {
+      let tab;
+      try {
+        tab = await chrome.tabs.get(tabId);
+      } catch (_) {
+        state.active = false;
+        break;
+      }
+      if (!isChatGPTUrl(tab?.url)) {
+        state.active = false;
+        break;
+      }
+
+      const response = await bridgeJson(
+        '/browser/testing/request?tab_id=' + encodeURIComponent(String(tabId)) + '&wait_ms=5000',
+        6500
+      );
+      if (!state.active) break;
+      const request = response?.request;
+      if (!request?.request_id) continue;
+
+      try {
+        const result = await cdpNetworkController.runBrowserTest(
+          tabId,
+          String(request.action || ''),
+          request.params && typeof request.params === 'object' ? request.params : {}
+        );
+        await bridgeFetch('/browser/testing/result', 'POST', {
+          request_id: String(request.request_id),
+          tab_id: tabId,
+          ok: true,
+          data: result
+        }, 10000);
+      } catch (error) {
+        await bridgeFetch('/browser/testing/result', 'POST', {
+          request_id: String(request.request_id),
+          tab_id: tabId,
+          ok: false,
+          error: {
+            code: 'BROWSER_TEST_FAILED',
+            message: String(error?.message || error).slice(0, 1000)
+          }
+        }, 10000);
+      }
+    }
+
+    if (browserTestingWaiters.get(key) === state) {
+      browserTestingWaiters.delete(key);
+    }
+  })().catch(() => {
+    if (browserTestingWaiters.get(key) === state) browserTestingWaiters.delete(key);
+  });
+
+  return true;
+}
 
 async function cdpNetworkObservation(event) {
   const terminal = ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(event?.eventType);
@@ -88,7 +161,7 @@ async function cdpNetworkObservation(event) {
         operationId,
         controllerId
       );
-      void waitForNextOperationForController(event.tabId, controllerId);
+      ensureSupervisedExecutionWaiter(event.tabId);
       return;
     }
 
@@ -108,11 +181,8 @@ async function cdpNetworkObservation(event) {
     controller_id: controllerId,
     failure_source: 'network',
     error: 'PASI_CDP: ' + String(event.reason || event.classification || 'NETWORK_FAILURE'),
-    recovery_context: {
-      network_request_id: String(event.requestId || '').slice(0, 200),
-      network_classification: String(event.classification || '').slice(0, 120),
-      network_reason: String(event.reason || '').slice(0, 200)
-    }
+    // Network request/classification/reason are already persisted through
+    // /browser/observation as authoritative CDP lifecycle evidence.
   }, 10000);
   cdpOperationTimings.delete(operationId);
   await cdpNetworkController?.unbindOperation?.(
@@ -120,15 +190,8 @@ async function cdpNetworkObservation(event) {
     operationId,
     controllerId
   );
+  ensureSupervisedExecutionWaiter(event.tabId);
 
-  // Explicit provider/context terminal states must not be immediately
-  // redispatched. Context exhaustion is surfaced to the runner, which
-  // creates the fresh conversation before submitting the task again.
-  const autoRetry = !new Set(['context_exhaustion', 'usage_limit', 'auth_failure'])
-    .has(String(event.classification || ''));
-  if (autoRetry) {
-    void dispatchNextOperationForController(event.tabId, controllerId);
-  }
 }
 const cdpNetworkController = globalThis.PASI_CDP_NETWORK?.createController?.({
   debuggerApi: chrome.debugger,
@@ -151,25 +214,101 @@ function serializeOperationDispatch(task) {
   return next;
 }
 
-async function waitForNextOperationForController(tabId, controllerId, waitMs = 60000) {
-  if (typeof tabId !== 'number' || !controllerId) return false;
+function runnerStateIsDispatchable(state) {
+  if (!state || state.available !== true) return false;
+  if (state.status !== 'running' || state.process_alive !== true || state.ready !== true) return false;
+  const profile = String(state.runner_profile || '');
+  if (profile !== 'm1' && profile !== '168h') return false;
+  return String(state.execution_mode || '') === 'supervised_' + profile;
+}
+
+async function waitForNextOperationForController(tabId, waitMs = 3000) {
+  if (typeof tabId !== 'number') return false;
   return serializeOperationDispatch(async () => {
-    const boundedWaitMs = Math.max(1000, Math.min(60000, Number(waitMs) || 60000));
+    const boundedWaitMs = Math.max(1000, Math.min(5000, Number(waitMs) || 3000));
+    let bridgeRetryMs = 250;
     while (true) {
-      if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
+      if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) {
+        // A stale/transient CDP request must not terminate the dispatcher.
+        // Wait until the controller is idle, then re-check runner authorization.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
+
+      const runnerState = await bridgeJson('/runner/state', 5000);
+      if (runnerState === null) {
+        await new Promise((resolve) => setTimeout(resolve, bridgeRetryMs));
+        bridgeRetryMs = Math.min(5000, bridgeRetryMs * 2);
+        continue;
+      }
+      bridgeRetryMs = 250;
+
+      // Keep the controller waiter dormant while no supervised runner is active.
+      // This lets an explicit Start wake dispatch immediately without relying on
+      // the periodic extension watchdog to create a new waiter.
+      if (!runnerStateIsDispatchable(runnerState)) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+
+      const runId = String(runnerState.run_id || '').trim();
+      if (!runId) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
+      const controllerId = controllerIdForTab(tabId, runId);
       const payload = await bridgeJson(
-        '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs))
+        '/next-operation?controller_id=' + encodeURIComponent(controllerId) + '&wait_ms=' + String(Math.round(boundedWaitMs)),
+        boundedWaitMs + 5000
       );
+      if (payload === null) {
+        await new Promise((resolve) => setTimeout(resolve, bridgeRetryMs));
+        bridgeRetryMs = Math.min(5000, bridgeRetryMs * 2);
+        continue;
+      }
+      bridgeRetryMs = 250;
       const operation = payload?.operation;
       if (operation?.operation_id) {
-        return dispatchOperationForController(tabId, controllerId, operation);
+        const dispatched = await dispatchOperationForController(tabId, controllerId, operation);
+        if (dispatched) {
+          // Keep this waiter alive for the complete supervised run. The bridge
+          // blocks the next claim while the current operation is claimed or
+          // generating, and releases it only after response processing is
+          // acknowledged. Keeping one waiter alive removes the first-response
+          // terminal-event rearm race that could strand M1 after operation 1.
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          continue;
+        }
+        // Keep the waiter alive after a transient tab/CDP dispatch failure.
+        // The bridge will redeliver a still-claimed operation after its
+        // controller lease expires, so a temporary navigation/debugger race
+        // cannot strand M1 at 0/20.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
       }
-      // A prompt can take longer than one bridge long-poll to finish being
-      // parsed, patched, tested, committed, and acknowledged. Continue waiting
-      // instead of silently dropping the handoff after the first 60s window.
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   });
+}
+
+function ensureSupervisedExecutionWaiter(tabId) {
+  if (typeof tabId !== 'number') return false;
+  const key = String(tabId);
+  if (supervisedExecutionWaiters.has(key)) return true;
+
+  const waiter = waitForNextOperationForController(tabId)
+    .catch((error) => {
+      console.warn('[PASI supervised worker]', String(error?.message || error));
+      return false;
+    })
+    .finally(() => {
+      if (supervisedExecutionWaiters.get(key) === waiter) {
+        supervisedExecutionWaiters.delete(key);
+      }
+    });
+
+  supervisedExecutionWaiters.set(key, waiter);
+  return true;
 }
 
 async function waitForTabNavigation(tabId, timeoutMs = 20000) {
@@ -247,7 +386,6 @@ async function executePromptOperation(tabId, controllerId, operation) {
       String(operation.operation_id),
       String(controllerId)
     );
-    void dispatchNextOperationForController(tabId, controllerId);
     return false;
   }
 }
@@ -270,16 +408,9 @@ async function executeAttachGithubOperation(tabId, controllerId, operation) {
       response_text: '',
       response_text_available: false,
       ack_only: true,
-      claim_next: true
+      claim_next: false
     }, 10000);
     if (!completion.ok) throw new Error('PASI_NATIVE: GitHub attachment completion rejected');
-    try {
-      const payload = JSON.parse(completion.text);
-      const next = payload?.next_operation;
-      if (next?.operation_id) {
-        void serializeOperationDispatch(() => dispatchOperationForController(tabId, controllerId, next));
-      }
-    } catch (_) {}
     return true;
   } catch (error) {
     await bridgeFetch('/chat/failed', 'POST', {
@@ -322,22 +453,13 @@ async function executeNewChatOperation(tabId, controllerId, operation) {
       response_text: '',
       response_text_available: false,
       ack_only: true,
-      claim_next: true
+      claim_next: false
     }, 10000);
     if (!completion.ok) {
       throw new Error(
         'PASI_NATIVE: new chat completion failed: HTTP ' + String(completion.status || 0)
       );
     }
-    try {
-      const payload = JSON.parse(completion.text);
-      const next = payload?.next_operation;
-      if (next?.operation_id) {
-        void serializeOperationDispatch(() =>
-          dispatchOperationForController(tabId, controllerId, next)
-        );
-      }
-    } catch (_) {}
     return true;
   } catch (error) {
     const failure = String(error?.message || error).slice(0, 500);
@@ -392,21 +514,12 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
         response_text: '',
         response_text_available: false,
         ack_only: true,
-        claim_next: true
+        claim_next: false
       }, 10000);
       if (!completion.ok) {
         throw new Error('PASI_NATIVE: reasoning completion rejected');
       }
 
-      try {
-        const completedPayload = JSON.parse(completion.text);
-        const next = completedPayload?.next_operation;
-        if (next?.operation_id) {
-          void serializeOperationDispatch(() =>
-            dispatchOperationForController(tabId, controllerId, next)
-          );
-        }
-      } catch (_) {}
       return true;
     } catch (error) {
       await bridgeFetch('/chat/failed', 'POST', {
@@ -429,19 +542,6 @@ async function dispatchOperationForController(tabId, controllerId, operation) {
 }
 
 
-async function dispatchNextOperationForController(tabId, controllerId) {
-  if (typeof tabId !== 'number' || !controllerId) return false;
-  return serializeOperationDispatch(async () => {
-    if (cdpNetworkController?.isIdle && !cdpNetworkController.isIdle(tabId)) return false;
-    const payload = await bridgeJson(
-      '/next-operation?controller_id=' + encodeURIComponent(controllerId)
-    );
-    const operation = payload?.operation;
-    if (!operation || !operation.operation_id) return false;
-    return dispatchOperationForController(tabId, controllerId, operation);
-  });
-}
-
 const BRIDGE_ROUTES = new Set([
   'GET /health',
   'GET /status',
@@ -452,7 +552,8 @@ const BRIDGE_ROUTES = new Set([
   'GET /browser/health',
   'GET /browser/state',
   'GET /browser/response',
-    'POST /browser/observation',
+  'POST /browser/testing/result',
+  'POST /browser/observation',
   'POST /queue',
   'POST /chat/claim',
   'POST /chat/heartbeat',
@@ -461,8 +562,9 @@ const BRIDGE_ROUTES = new Set([
   'POST /chat/cancel',
   'GET /next-operation'
 ]);
+const BRIDGE_BROWSER_TEST_REQUEST_RE = /^\/browser\/testing\/request\?tab_id=[0-9]{1,10}&wait_ms=[0-9]{1,5}$/;
 const BRIDGE_OPERATION_RE = /^\/operation\?operation_id=[^&]{1,200}$/;
-const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}$/;
+const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}(?:&wait_ms=[0-9]{1,5})?$/;
 
 async function bridgeToken(forceRefresh = false) {
   if (!forceRefresh && cachedBridgeToken) return cachedBridgeToken;
@@ -489,7 +591,8 @@ function allowedBridgeRequest(method, path) {
   const value = String(path || '');
   if (normalized === 'GET' && (
     BRIDGE_OPERATION_RE.test(value) ||
-    BRIDGE_NEXT_OPERATION_RE.test(value)
+    BRIDGE_NEXT_OPERATION_RE.test(value) ||
+    BRIDGE_BROWSER_TEST_REQUEST_RE.test(value)
   )) return true;
   return BRIDGE_ROUTES.has(`${normalized} ${value}`);
 }
@@ -532,8 +635,8 @@ async function bridgeFetch(path, method = 'GET', body = null, timeoutMs = 5000) 
   }
 }
 
-async function bridgeJson(path) {
-  const response = await bridgeFetch(path);
+async function bridgeJson(path, timeoutMs = 10000) {
+  const response = await bridgeFetch(path, 'GET', null, timeoutMs);
   if (!response.ok) return null;
   try {
     return JSON.parse(response.text);
@@ -541,6 +644,44 @@ async function bridgeJson(path) {
     return null;
   }
 }
+
+chrome.commands?.onCommand?.addListener((command) => {
+  if (command !== 'pasi-toggle-runner') return;
+  void (async () => {
+    const state = await bridgeJson('/runner/state');
+    const active = state?.status === 'starting' || state?.status === 'running' || state?.status === 'stopping';
+    const profile = state?.runner_profile === '168h' || state?.execution_mode === 'supervised_168h'
+      ? '168h'
+      : 'm1';
+    const action = active ? 'stop' : 'start';
+
+    const result = await bridgeFetch('/runner/control', 'POST', {
+      action,
+      profile
+    }, 10000);
+
+    let detail = '';
+    try {
+      detail = JSON.parse(result.text || '{}')?.error || '';
+    } catch (_) {}
+
+    if (result.ok) {
+      const body = JSON.parse(result.text || '{}');
+      await attachExistingChatTabs();
+      try {
+        await chrome.action.setBadgeText({text: body.action === 'stop' ? 'PAUSE' : 'RUN'});
+        await chrome.action.setBadgeBackgroundColor({color: body.action === 'stop' ? '#6b7280' : '#059669'});
+      } catch (_) {}
+      return;
+    }
+
+    try {
+      await chrome.action.setBadgeText({text: 'ERR'});
+      await chrome.action.setBadgeBackgroundColor({color: '#b91c1c'});
+      await chrome.action.setTitle({title: detail || (result.status ? 'PASI runner control failed (HTTP ' + String(result.status) + ')' : 'PASI bridge unreachable')});
+    } catch (_) {}
+  })();
+});;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'pasi-control-center-bridge-request') {
@@ -562,7 +703,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return undefined;
     }
 
-    bridgeFetch(path, method, message.body ?? null, 5000).then(sendResponse);
+    bridgeFetch(path, method, message.body ?? null, 5000).then(async (response) => {
+      if (response?.ok && method === 'POST' && path === '/runner/control') {
+        let body = {};
+        try {
+          body = JSON.parse(response.text || '{}');
+        } catch (_) {}
+        // A popup Start action must explicitly wake/re-arm the ChatGPT
+        // dispatcher. MV3 service workers can be suspended after a period of
+        // inactivity, so relying on an old in-memory waiter is not sufficient.
+        if (body?.accepted === true && body?.action === 'start') {
+          await attachExistingChatTabs();
+        }
+      }
+      sendResponse(response);
+    });
     return true;
   }
 
@@ -597,8 +752,11 @@ function isChatGPTUrl(url) {
   return /^https:\/\/(?:www\.)?chatgpt\.com(?::\d+)?\//.test(String(url || ''));
 }
 
-function controllerIdForTab(tabId) {
-  return 'cdp-tab:' + String(tabId);
+function controllerIdForTab(tabId, runId = '') {
+  const normalizedRunId = String(runId || '').trim();
+  return normalizedRunId
+    ? 'cdp-tab:' + String(tabId) + ':run:' + normalizedRunId
+    : 'cdp-tab:' + String(tabId);
 }
 
 async function reportWorkerHealth(tab) {
@@ -612,24 +770,36 @@ async function reportWorkerHealth(tab) {
       data: {
         kind: 'chatgpt_health',
         controller_version: 'cdp-worker-v1',
+        extension_version: chrome.runtime.getManifest().version,
         chat_url: String(tab.url || ''),
+        tab_id: tabId,
         active_operation_id: binding?.operationId || null,
         page_visible: tab.active === true,
         native_controller: true,
-        network_authority: true
+        network_authority: true,
+        extension_service_worker: {
+          state: 'running',
+          heartbeat_at: new Date().toISOString(),
+        },
+        dispatcher_waiter_active: supervisedExecutionWaiters.has(String(tabId)),
+        dispatcher_waiter_tab_id: supervisedExecutionWaiters.has(String(tabId)) ? tabId : null,
+        network_controller: 'cdp_fetch',
+        controller_id: binding?.controllerId || null,
       }
     }
   }, 5000);
 }
 
-async function attachAndDispatchTab(tab) {
+async function attachAndObserveTab(tab) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return false;
   if (!cdpNetworkController?.attachTab) return false;
   try {
     await cdpNetworkController.attachTab(tabId);
+    ensureSupervisedExecutionWaiter(tabId);
     await reportWorkerHealth(tab);
-    return await dispatchNextOperationForController(tabId, controllerIdForTab(tabId));
+    ensureBrowserTestingWaiter(tabId);
+    return true;
   } catch (_) {
     return false;
   }
@@ -641,11 +811,11 @@ async function attachExistingChatTabs() {
   });
   const active = tabs.find((tab) => tab.active && typeof tab.id === 'number');
   if (active) {
-    await attachAndDispatchTab(active);
+    await attachAndObserveTab(active);
     return;
   }
   for (const tab of tabs) {
-    if (await attachAndDispatchTab(tab)) return;
+    if (await attachAndObserveTab(tab)) return;
   }
 }
 
@@ -656,7 +826,7 @@ async function inspect() {
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
   if (tabs[0]) {
-    await attachAndDispatchTab(tabs[0]);
+    await attachAndObserveTab(tabs[0]);
     return;
   }
   await attachExistingChatTabs();
@@ -700,30 +870,24 @@ void attachExistingChatTabs();
 
 if (chrome.tabs?.onRemoved) {
   chrome.tabs.onRemoved.addListener((tabId) => {
+    cancelBrowserTestingWaiter(tabId);
     void cdpNetworkController?.detachTab?.(tabId);
   });
 }
 if (chrome.tabs?.onActivated) {
   chrome.tabs.onActivated.addListener((activeInfo) => {
     void chrome.tabs.get(activeInfo.tabId)
-      .then((tab) => attachAndDispatchTab(tab))
+      .then((tab) => attachAndObserveTab(tab))
       .catch(() => undefined);
   });
 }
 if (chrome.tabs?.onUpdated) {
   chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo?.status === 'complete' && isChatGPTUrl(tab?.url)) {
-      void attachAndDispatchTab(tab);
+      void attachAndObserveTab(tab);
     }
   });
 }
-
-if (chrome.sidePanel?.setPanelBehavior) {
-  chrome.sidePanel
-    .setPanelBehavior({ openPanelOnActionClick: true })
-    .catch((error) => console.warn('[PASI side panel]', error));
-}
-
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM) inspect();

@@ -1,3 +1,5 @@
+import { getJson } from "./request.js";
+
 const API_BASE = typeof window !== "undefined" ? window.location.origin : "";
 
 export function normalizeRoadmapSummary(payload) {
@@ -11,7 +13,6 @@ export function normalizePlannerMemory(memories) {
   return Array.isArray(memories) ? memories.map((item) => ({ memory_id:item.memory_id||"", scope:item.scope||"", kind:item.kind||"", content:item.content||"", provenance_refs:Array.isArray(item.provenance_refs)?item.provenance_refs:[], confidence:Number(item.confidence||0), status:item.status||"active", revision:Number(item.revision||0) })) : [];
 }
 
-async function getJson(url, options={}) { const response=await fetch(url,{headers:{Accept:"application/json",...(options.headers||{})},...options}); const payload=await response.json().catch(()=>({})); if(!response.ok) throw new Error(payload.error||"Request failed: "+response.status); return payload; }
 function qs(selector){return document.querySelector(selector);}
 function clear(node){node.replaceChildren();}
 function setPlannerQuery(roadmapId,taskId=""){const url=new URL(location.href);if(roadmapId)url.searchParams.set("roadmap_id",roadmapId);else url.searchParams.delete("roadmap_id");if(taskId)url.searchParams.set("task_id",taskId);else url.searchParams.delete("task_id");history.replaceState({},"",url);}

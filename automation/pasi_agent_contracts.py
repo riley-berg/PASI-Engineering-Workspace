@@ -930,7 +930,7 @@ class PasiAgentObservationService:
                     {
                         "gate_id": "m1-browser",
                         "name": "ChatGPT browser/CDP authority available",
-                        "status": "passed" if runner.get("chat_url") and runner.get("process_alive") else "failed" if status == "failed" else "pending",
+                        "status": "passed" if runner.get("chat_url") and (runner.get("process_alive") or status == "completed") else "failed" if status == "failed" else "pending",
                         "observed_at": runner.get("last_updated_at") or runner.get("started_at"),
                         "evidence_refs": ["browser:chatgpt_health"],
                         "details": {"chat_url": runner.get("chat_url")},

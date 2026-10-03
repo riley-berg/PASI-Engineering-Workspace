@@ -1,9 +1,10 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const test = require("node:test");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import {fileURLToPath} from "node:url";
 
-const root = path.resolve(__dirname, "..");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ext = path.join(root, "extensions", "pasi-human-tester");
 const manifest = JSON.parse(fs.readFileSync(path.join(ext, "manifest.json"), "utf8"));
 const service = fs.readFileSync(path.join(ext, "src", "service-worker.js"), "utf8");

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 import re
@@ -42,7 +43,11 @@ def utcnow() -> datetime:
 
 
 def token() -> str:
-    return os.environ.get("PASI_GITHUB_TOKEN", "").strip() or os.environ.get("GITHUB_TOKEN", "").strip()
+    for name in ("PASI_PROJECTS_TOKEN", "PASI_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def github(url: str, *, method: str = "GET", body: str | None = None) -> dict:
@@ -92,11 +97,97 @@ def emit(event: dict) -> None:
         handle.flush()
 
 
-def write_state(payload: dict) -> None:
-    path = state_dir() / "state.json"
+def runtime_state_dir() -> Path:
+    # Match the bridge's profile-isolated runtime location even when the
+    # environment does not explicitly provide PASI_RUNTIME_DIR.
+    root = Path(
+        os.environ.get(
+            "PASI_RUNTIME_DIR",
+            str(Path.home() / ".pasi" / "overnight"),
+        )
+    ).expanduser().resolve()
+    profile = os.environ.get("PASI_RUNNER_PROFILE", "168h").strip().casefold() or "168h"
+    if profile not in {"m1", "168h"}:
+        profile = "168h"
+    return root / profile
+
+
+def atomic_write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def write_state(payload: dict) -> None:
+    payload = dict(payload)
+    if payload.get("status") == "running":
+        payload.setdefault("execution_mode", "supervised_168h")
+    else:
+        payload.setdefault("execution_mode", "manual")
+
+    atomic_write_json(state_dir() / "state.json", payload)
+
+    # The bridge reads the live runner state from PASI_RUNTIME_DIR. Keep that
+    # view synchronized while retaining the historical acceptance state path.
+    runtime_path = runtime_state_dir() / "state.json"
+    if runtime_path != (state_dir() / "state.json").resolve():
+        atomic_write_json(runtime_path, payload)
+
+
+def write_runner_pid() -> Path:
+    path = state_dir() / "runner.pid"
+    path.write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    runtime_path = runtime_state_dir() / "runner.pid"
+    if runtime_path != path.resolve():
+        runtime_path.parent.mkdir(parents=True, exist_ok=True)
+        runtime_path.write_text(str(os.getpid()) + "\n", encoding="utf-8")
+    return path
+
+
+def clear_runner_pid() -> None:
+    for path in (state_dir() / "runner.pid", runtime_state_dir() / "runner.pid"):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def record_initialization_failure(
+    run_id: str,
+    worktree: Path,
+    branch: str,
+    phase: str,
+    exc: BaseException,
+) -> None:
+    error = f"{type(exc).__name__}: {exc}"[:2000]
+    try:
+        emit({
+            "event": "run_failed",
+            "at": utcnow().isoformat(),
+            "run_id": run_id,
+            "phase": phase,
+            "branch": branch,
+            "worktree": str(worktree),
+            "error": error,
+        })
+    except OSError:
+        pass
+    try:
+        write_state({
+            "run_id": run_id,
+            "branch": branch,
+            "worktree": str(worktree),
+            "status": "failed",
+            "execution_mode": "supervised_168h",
+            "phase": f"{phase}_failed",
+            "error": error,
+            "failed_at": utcnow().isoformat(),
+            "runner_pid": os.getpid(),
+        })
+    except OSError:
+        pass
+    print(f"PASI 168h initialization failed: {error}", file=sys.stderr, flush=True)
 
 
 def git(cwd: Path, *args: str, timeout: float = 60.0, check: bool = True) -> str:
@@ -250,10 +341,39 @@ def main() -> int:
 
     root = Path.cwd().resolve()
     run_id = f"ew-168h-{uuid.uuid4().hex}"
+    atexit.register(clear_runner_pid)
     worktree = args.worktree.expanduser().resolve()
-    ensure_worktree(root, worktree, args.branch)
-    head = git(worktree, "rev-parse", "HEAD")
-    phases = schedule()
+    initial_started_at = utcnow().isoformat()
+    try:
+        write_runner_pid()
+        write_state({
+            "run_id": run_id,
+            "repo": REPO,
+            "branch": args.branch,
+            "worktree": str(worktree),
+            "started_at": initial_started_at,
+            "status": "starting",
+            "execution_mode": "supervised_168h",
+            "phase": "initializing_worktree",
+            "runner_pid": os.getpid(),
+        })
+        ensure_worktree(root, worktree, args.branch)
+        head = git(worktree, "rev-parse", "HEAD")
+        write_state({
+            "run_id": run_id,
+            "repo": REPO,
+            "branch": args.branch,
+            "worktree": str(worktree),
+            "started_at": initial_started_at,
+            "status": "starting",
+            "execution_mode": "supervised_168h",
+            "phase": "loading_schedule",
+            "runner_pid": os.getpid(),
+        })
+        phases = schedule()
+    except Exception as exc:
+        record_initialization_failure(run_id, worktree, args.branch, "initialization", exc)
+        return 1
 
     emit({
         "event": "run_started" if not args.smoke else "smoke_started",
@@ -268,6 +388,7 @@ def main() -> int:
     })
 
     if args.smoke:
+        clear_runner_pid()
         discovered = all_tasks()
         pending = [task for task in discovered if not task.checked]
         print(f"READY: {len(phases)} phases, {len(discovered)} tasks discovered, {len(pending)} unchecked")
@@ -280,13 +401,26 @@ def main() -> int:
         "repo": REPO,
         "branch": args.branch,
         "worktree": str(worktree),
-        "started_at": utcnow().isoformat(),
+        "started_at": initial_started_at,
         "deadline_at": deadline.isoformat(),
         "status": "running",
+        "execution_mode": "supervised_168h",
+        "phase": "ready_for_task_dispatch",
+        "runner_pid": os.getpid(),
     })
 
     while utcnow() < deadline:
-        pending = [task for task in all_tasks() if not task.checked]
+        try:
+            pending = [task for task in all_tasks() if not task.checked]
+        except Exception as exc:
+            record_initialization_failure(
+                run_id,
+                worktree,
+                args.branch,
+                "task_discovery",
+                exc,
+            )
+            return 1
         if not pending:
             write_state({
                 "run_id": run_id, "repo": REPO, "branch": args.branch,

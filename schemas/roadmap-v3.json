@@ -3,7 +3,7 @@
   "$id": "https://pasi.local/schemas/roadmap-v3.json",
   "title": "PASI roadmap v3",
   "type": "object",
-  "required": ["roadmap_id","version","revision","phases","tasks","canonical_sha256"],
+  "required": ["roadmap_id","version","phases","tasks"],
   "properties": {
     "roadmap_id":{"type":"string","minLength":1,"maxLength":256},
     "version":{"const":3},
@@ -12,7 +12,7 @@
       "type":"array",
       "items":{
         "type":"object",
-        "required":["id","title","depends_on","status","revision"],
+        "required":["id","title"],
         "properties":{
           "id":{"type":"string","minLength":1},
           "title":{"type":"string","minLength":1},
@@ -27,7 +27,7 @@
       "type":"array",
       "items":{
         "type":"object",
-        "required":["id","title","phase_id","depends_on","acceptance_requirements","evidence_requirements","parent_task_id","status","revision"],
+        "required":["id","title","phase_id","acceptance_requirements","evidence_requirements"],
         "properties":{
           "id":{"type":"string","minLength":1},
           "title":{"type":"string","minLength":1},

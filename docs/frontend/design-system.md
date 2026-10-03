@@ -6,7 +6,7 @@ The web client is a vanilla JavaScript application. This document defines the vi
 
 ## Current architecture
 
-`web/styles.css` remains the compatibility baseline. Existing hardening/polish files are intentionally retained while their active rules are migrated. `web/design-system.css` is the canonical token/component foundation and is loaded immediately before `web/ui-completion.css`, which owns the current navigation/calculation completion components.
+`web/app.css` is the canonical stylesheet entrypoint and token/component foundation for the current dashboard. Legacy stylesheet references should be treated as historical documentation unless a live file and selector trace proves otherwise.
 
 Do not delete or merge legacy files solely by filename. Before removal, trace selectors and behavior, migrate active rules to the canonical layer, run the frontend contract/browser checks, and verify the affected views.
 
@@ -72,8 +72,8 @@ Use these patterns for new UI:
 
 ## Consolidation roadmap
 
-1. Keep `styles.css` as compatibility baseline while migrating selectors into semantic components.
-2. Move duplicate tokens/colors/spacing from polish layers into `design-system.css`.
+1. Keep `app.css` as the canonical compatibility and component baseline while refining semantic components.
+2. Keep duplicate tokens/colors/spacing out of new feature-specific CSS; consolidate them into `app.css` when ownership is clear.
 3. Replace repeated page/card/input declarations with canonical component classes.
 4. Fold stable interaction behavior into focused modules rather than adding another global patch file.
 5. Delete a legacy CSS/JS layer only after selector/event tracing and the full browser/API contract suite pass.

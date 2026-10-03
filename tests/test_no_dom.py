@@ -10,21 +10,19 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
 
     extension = root / "extensions" / "pasi-chatgpt"
     manifest = extension / "manifest.json"
-    content = extension / "src" / "content.js"
 
     assert manifest.is_file()
-    assert content.is_file()
 
     data = json.loads(manifest.read_text(encoding="utf-8"))
     assert data["manifest_version"] == 3
     assert data["name"] == "PASI ChatGPT Handoff"
     assert data["background"]["service_worker"] == "src/background.js"
+    assert not (extension / "src" / "legacy").exists()
+    assert not (extension / "src" / "recovery.js").exists()
+    assert not (extension / "src" / "chatgpt.js").exists()
     readme = extension.joinpath("README.md").read_text(encoding="utf-8")
     assert "Tampermonkey" in readme
     assert "does not depend on Tampermonkey or Greasemonkey" in readme
-    content_text = content.read_text(encoding="utf-8")
-    assert "CONTROLLER_VERSION = '2.4.11'" in content_text
-    assert "PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1'" in content_text
 
 
 def test_computer_use_package_imports_without_historical_modules():
@@ -118,3 +116,20 @@ def test_p0_4_worktree_and_runtime_paths_are_canonical():
     assert 'test_env["PYTHONPATH"]' in executor
     assert "PASI_ENGINEERING_EXTENSION_ROOT" in launcher
     assert "extensions/pasi-chatgpt" in launcher
+
+
+def test_extension_entrypoints_exclude_retired_page_protocol_and_clipboard_shim():
+    root = Path(__file__).resolve().parents[1]
+    extension = root / "extensions" / "pasi-chatgpt"
+    manifest = json.loads((extension / "manifest.json").read_text(encoding="utf-8"))
+
+    manifest_scripts = [
+        script
+        for entry in manifest.get("content_scripts", [])
+        for script in entry.get("js", [])
+    ]
+
+    assert "src/protocol.js" not in manifest_scripts
+    assert "src/copy-api.js" not in manifest_scripts
+    assert not (extension / "src" / "protocol.js").exists()
+    assert not (extension / "src" / "copy-api.js").exists()

@@ -3,25 +3,70 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import signal
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from .config import CONFIG, ensure_runtime_directories
+from .config import CONFIG
 from .models import ChatOperation
+from pasi.core.operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
+from .runner_registry import (
+    RunnerRegistryError,
+    create_revision,
+    create_runner,
+    validate_revision,
+    get_runner,
+    list_user_runners,
+    promote_revision,
+    registry_snapshot,
+    rollback_runner,
+)
 from scripts.pasi_timeout_policy import load_timeout_policy
 
 
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_RESPONSE_TEXT_CHARS = 120_000
+
+class ControllerOwnershipConflict(InvalidOperationTransition):
+    """Raised when a stale controller instance mutates another instance's operation."""
+
+def completion_markers_satisfied(response_text: object, markers: object) -> bool:
+    if not isinstance(response_text, str) or not response_text.strip():
+        return False
+    if not isinstance(markers, list):
+        return True
+    configured = [
+        marker.strip()
+        for marker in markers
+        if isinstance(marker, str) and marker.strip()
+    ]
+    if not configured:
+        return True
+    lines: list[str] = []
+    in_fence = False
+    for raw_line in response_text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("```") or line.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence or line.startswith("> ") or line == ">":
+            continue
+        lines.append(line)
+    return any(
+        any(line == marker or line.startswith(marker + ":") for line in lines)
+        for marker in configured
+    )
 MAX_TRANSIENT_FAILURE_RETRIES = 3
 TIMEOUT_POLICY = load_timeout_policy()
 CLAIM_LEASE_SECONDS = TIMEOUT_POLICY["bridge_claim_lease_seconds"]
@@ -36,6 +81,7 @@ MAX_TIMING_KEYS = frozenset({
     "ack_at_ms",
     "generation_start_ms",
     "completed_at_ms",
+    "response_processed_at_ms",
     "completion_to_prompt_injected_ms",
     "response_completed_to_prompt_injected_ms",
     "user_messages_added",
@@ -44,11 +90,114 @@ MAX_TIMING_KEYS = frozenset({
 })
 BRIDGE_TOKEN_FILE = Path.home() / ".pasi" / "bridge-token"
 RUNNER_CAPABILITIES_PATH = Path.home() / ".pasi" / "runner" / "capabilities.json"
-RUNNER_RUNTIME_DIR = Path(os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))).expanduser().resolve()
-RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
-RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
+RUNNER_RUNTIME_DIR = Path(
+    os.environ.get("PASI_RUNTIME_DIR", str(Path.home() / ".pasi" / "overnight"))
+).expanduser().resolve()
+# The runtime root is shared, but each supervised profile owns an isolated
+# subdirectory so terminal errors cannot overwrite another runner's state.
+RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"  # legacy compatibility only
+RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"  # legacy compatibility only
+RUNNER_LOG_DIR = CONFIG.ai_dir / "logs"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
+RUNNER_START_PROBE_SECONDS = 1.5
+RUNNER_START_PROBE_INTERVAL_SECONDS = 0.1
+
+
+def runner_runtime_dir(profile: str) -> Path:
+    return (RUNNER_RUNTIME_DIR / profile).resolve()
+
+
+def runner_state_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "state.json"
+
+
+def runner_control_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "control.json"
+
+
+def runner_pid_path(profile: str) -> Path:
+    return runner_runtime_dir(profile) / "runner.pid"
+def runner_python() -> str:
+    workspace_python = CONFIG.project_root / ".venv" / "bin" / "python"
+    if workspace_python.is_file() and os.access(workspace_python, os.X_OK):
+        return str(workspace_python)
+    return sys.executable
+
+
+RUNNER_PROFILES = {
+    "m1": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_m1_cdp_chain.py")),
+    "168h": (runner_python(), str(CONFIG.project_root / "scripts" / "pasi_168h_acceptance.py"), "--hours", "168"),
+}
+
+
+def runner_registry_entries() -> list[dict[str, Any]]:
+    entries = [
+        {
+            "id": "m1",
+            "name": "20-Operation Acceptance",
+            "source": "builtin",
+            "stable_version": 1,
+            "candidate_version": None,
+            "entrypoint": "scripts/pasi_m1_cdp_chain.py",
+        },
+        {
+            "id": "168h",
+            "name": "168-Hour Long-Run Acceptance",
+            "source": "builtin",
+            "stable_version": 1,
+            "candidate_version": None,
+            "entrypoint": "scripts/pasi_168h_acceptance.py",
+        },
+    ]
+    for runner in list_user_runners():
+        stable = runner.get("stable") if isinstance(runner, Mapping) else None
+        candidate = runner.get("candidate") if isinstance(runner, Mapping) else None
+        entries.append({
+            "id": str(runner.get("id") or ""),
+            "name": str(runner.get("name") or runner.get("id") or ""),
+            "source": str(runner.get("source") or "user"),
+            "stable_version": stable.get("version") if isinstance(stable, Mapping) else None,
+            "candidate_version": candidate.get("version") if isinstance(candidate, Mapping) else None,
+            "entrypoint": stable.get("entrypoint") if isinstance(stable, Mapping) else None,
+        })
+    return entries
+
+
+def all_runner_profiles() -> tuple[str, ...]:
+    return tuple(entry["id"] for entry in runner_registry_entries() if entry.get("id"))
+
+
+def runner_command(profile: str) -> list[str]:
+    if profile in RUNNER_PROFILES:
+        return list(RUNNER_PROFILES[profile])
+    definition = get_runner(profile)
+    if not isinstance(definition, Mapping):
+        raise ValueError("unsupported runner profile")
+    stable = definition.get("stable")
+    if not isinstance(stable, Mapping):
+        raise ValueError("runner has no stable revision")
+    entrypoint = str(stable.get("entrypoint") or "").strip()
+    args = stable.get("args") if isinstance(stable.get("args"), list) else []
+    return [runner_python(), str((CONFIG.project_root / entrypoint).resolve()), *[str(arg) for arg in args]]
+
+
+def atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically persist a small JSON control/state document."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(dict(payload), ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
+    "PASI_CDP: CONTEXT_EXHAUSTED",
+    "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
+    "PASI_CDP: NETWORK_RESPONSE_INCOMPLETE",
+    "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+    "PASI_CDP: network failure",
+    "PASI_CDP: CDP_DEBUGGER_DETACHED",
+    "PASI_CDP: NETWORK_STREAM_DISCONNECTED",
     "Could not find ChatGPT composer.",
     "Composer disappeared before submission.",
     "Could not find ChatGPT send button.",
@@ -61,6 +210,8 @@ _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI: browser page reloaded during operation",
     "PASI_NATIVE: bridge completion failed",
     "CHAT_EXHAUSTED:",
+    "PASI_NATIVE: controller dispatch unavailable",
+    "PASI_NATIVE: CDP submit target unavailable:",
     "PASI_NATIVE: new chat did not reach a verified ready state",
     "PASI_NATIVE: new chat control did not change conversation identity",
     "PASI_NATIVE: prompt submission could not be verified after bounded attempts",
@@ -86,65 +237,613 @@ def load_runner_capabilities() -> dict[str, Any]:
         return {"available": False, "reason": "capability report invalid"}
     # The bridge exposes only machine-health metadata; secrets and command output are not persisted here.
     allowed = {"schema_version", "generated_at", "runner_name", "repository", "resources", "boundary", "runtime", "required_ok", "failures", "recommended_labels", "actions"}
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    return {
+        "available": True,
+        **{key: payload[key] for key in allowed if key in payload},
+        "execution_authorized": runner_execution_authorized(payload),
+    }
 
-def load_runner_state() -> dict[str, Any]:
+def runner_processes() -> list[dict[str, Any]]:
+    """Inspect live PASI runner processes instead of trusting stale PID files."""
+    profiles_by_script = {
+        str(Path(command[1]).name): profile
+        for profile, command in RUNNER_PROFILES.items()
+    }
+    for definition in list_user_runners():
+        stable = definition.get("stable")
+        if isinstance(stable, Mapping) and stable.get("entrypoint"):
+            profiles_by_script[Path(str(stable["entrypoint"])).name] = str(definition["id"])
+    legacy_scripts = {"pasi_168h_supervisor.sh", "pasi_overnight_engine_v2.py"}
+    processes: list[dict[str, Any]] = []
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return processes
+
+    workspace_root = str(CONFIG.project_root.resolve())
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            pid = int(entry.name)
+            if pid <= 1:
+                continue
+            raw = (entry / "cmdline").read_bytes()
+            cmdline = raw.replace(b"\x00", b" ").decode("utf-8", "ignore").strip()
+        except (OSError, ValueError):
+            continue
+        if not cmdline:
+            continue
+
+        profile: str | None = None
+        script: str | None = None
+        for script_name, profile_name in profiles_by_script.items():
+            if script_name in cmdline:
+                profile = profile_name
+                script = script_name
+                break
+        if profile is None:
+            for script_name in legacy_scripts:
+                if script_name in cmdline:
+                    profile = "legacy"
+                    script = script_name
+                    break
+        if profile is None:
+            continue
+
+        processes.append({
+            "pid": pid,
+            "profile": profile,
+            "script": script,
+            "cmdline": cmdline,
+            "workspace": workspace_root in cmdline,
+            "recognized": profile in all_runner_profiles() and workspace_root in cmdline,
+        })
+
+    processes.sort(key=lambda item: int(item["pid"]))
+    return processes
+
+
+def runner_process_info(profile: str | None = None) -> dict[str, Any] | None:
+    """Return a live runner process from the current Engineering Workspace."""
+    candidates = [
+        item for item in runner_processes()
+        if item.get("recognized") is True
+        and (profile is None or item.get("profile") == profile)
+    ]
+    return candidates[0] if candidates else None
+
+
+def runner_process_is_alive(profile: str | None = None) -> bool:
+    return runner_process_info(profile) is not None
+
+
+def _read_runner_state_file(profile: str) -> dict[str, Any]:
+    path = runner_state_path(profile)
     try:
-        if not RUNNER_STATE_PATH.is_file() or RUNNER_STATE_PATH.stat().st_size > 128_000:
-            return {"available": False, "reason": "runner state unavailable"}
-        payload = json.loads(RUNNER_STATE_PATH.read_text(encoding="utf-8"))
+        if not path.is_file() or path.stat().st_size > 128_000:
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"available": False, "reason": "runner state unreadable"}
-    if not isinstance(payload, dict):
-        return {"available": False, "reason": "runner state invalid"}
+        return {}
+    return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _augment_runner_state(
+    profile: str,
+    payload: dict[str, Any],
+    processes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not payload:
+        return {"available": False, "runner_profile": profile, "reason": "runner state unavailable"}
+
     allowed = {
         "schema_version", "run_id", "started_at", "deadline_at", "worktree", "branch",
         "phase", "current_task", "current_task_id", "requested_task", "task_number", "completed_tasks",
         "failed_tasks", "current_attempt", "task_retry_cycle", "same_failure_cycles",
         "last_provider", "last_result", "next_task", "stop_reason", "recent_tasks",
+        "execution_mode", "runner_profile", "runner_pid", "log_path", "status", "error", "failed_at", "paused_at", "cancelled_at", "last_updated_at", "target_operations", "completed_operations", "chat_url",
+        "current_operation_id", "current_operation_index", "current_operation_status",
+        "last_operation_id", "last_request_id", "updated_at", "completed_at", "request_ids",
     }
-    return {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    result: dict[str, Any] = {"available": True, **{key: payload[key] for key in allowed if key in payload}}
+    process = runner_process_info(profile)
+    result["process_alive"] = process is not None
+    result["ready"] = process is not None and result.get("status") == "running"
+    result["runner_profile"] = profile
+    result["process"] = process
+    result["process_pid"] = process.get("pid") if process else None
+    result["process_profile"] = process.get("profile") if process else None
+    result["process_cmdline"] = process.get("cmdline") if process else None
+    result["runtime_state_path"] = str(runner_state_path(profile))
 
-def request_runner_control(action: str) -> dict[str, Any]:
-    if action not in {"stop", "retry_current"}:
+    status = str(result.get("status") or "")
+    result["evidence"] = {
+        "state_file_present": True,
+        "live_process_present": process is not None,
+        "live_process_profile": process.get("profile") if process else None,
+        "live_process_matches_profile": (
+            process is not None and process.get("profile") == profile
+        ),
+        "status": status or "unknown",
+        "failure_confirmed": False,
+    }
+
+    if process is not None:
+        if status in {"starting", "running", "stopping"}:
+            result["state_consistency"] = "consistent"
+            result["diagnostic_warning"] = None
+            result["error"] = None
+            result.pop("failed_at", None)
+            result["evidence"]["failure_confirmed"] = False
+        elif status in {"failed", "completed", "roadmap_complete", "deadline_reached", "paused", "cancelled"}:
+            result["state_consistency"] = "live_process_terminal_state"
+            result["diagnostic_warning"] = (
+                "runner process is alive while persisted state is " + (status or "unknown")
+            )
+            result["evidence"]["failure_confirmed"] = status == "failed"
+        else:
+            result["state_consistency"] = "live_process_unknown_state"
+            result["diagnostic_warning"] = "runner process is alive with an unrecognized persisted state"
+    elif status == "starting":
+        result["status"] = "failed"
+        result["ready"] = False
+        result["state_consistency"] = "persisted_starting_without_process"
+        result["diagnostic_warning"] = "runner startup state remains persisted but no live runner process was detected"
+        result["error"] = "runner exited before initialization completed"
+        result["evidence"]["failure_confirmed"] = True
+    elif status == "running":
+        result["status"] = "failed"
+        result["ready"] = False
+        result["state_consistency"] = "persisted_running_without_process"
+        result["diagnostic_warning"] = "runner state says running but no live runner process was detected"
+        result["error"] = "runner process is no longer alive"
+        result["evidence"]["failure_confirmed"] = True
+    elif status == "failed":
+        result["evidence"]["failure_confirmed"] = True
+        result["state_consistency"] = "persisted_terminal_state"
+        result["diagnostic_warning"] = None
+    else:
+        result["state_consistency"] = "consistent"
+        result["diagnostic_warning"] = None
+    return result
+
+
+def load_runner_state(profile: str | None = None) -> dict[str, Any]:
+    processes = runner_processes()
+    profiles = all_runner_profiles()
+    if profile is not None:
+        normalized = _runner_profile(profile)
+        return _augment_runner_state(normalized, _read_runner_state_file(normalized), processes)
+
+    per_profile = {
+        current_profile: _augment_runner_state(
+            current_profile,
+            _read_runner_state_file(current_profile),
+            processes,
+        )
+        for current_profile in profiles
+    }
+    active = [
+        item for item in processes
+        if item.get("recognized") is True and item.get("profile") in profiles
+    ]
+    active_profile = active[0].get("profile") if active else None
+
+    if active_profile:
+        selected = dict(per_profile[active_profile])
+    else:
+        available = [state for state in per_profile.values() if state.get("available")]
+        selected = max(
+            available,
+            key=lambda state: str(state.get("last_updated_at") or state.get("started_at") or ""),
+            default={"available": False, "reason": "runner state unavailable"},
+        )
+
+    selected["profiles"] = per_profile
+    selected["active_profile"] = active_profile
+    selected["processes"] = processes
+    selected["bridge_process"] = {
+        "pid": os.getpid(),
+        "cmdline": " ".join(str(part) for part in sys.argv),
+        "profile": "bridge",
+        "workspace": True,
+        "recognized": True,
+    }
+    selected["available"] = any(state.get("available") for state in per_profile.values())
+    return selected
+
+
+def runner_diagnostics_payload(bridge_state: "BridgeState") -> dict[str, Any]:
+    """Build a sanitized live diagnostic snapshot for localhost/browser inspection."""
+    runner_state = load_runner_state()
+    browser_health = bridge_state.get_browser_health()
+    return {
+        "schema_version": "pasi-runner-diagnostics-v1",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "bridge_process": runner_state.get("bridge_process"),
+        "active_profile": runner_state.get("active_profile"),
+        "processes": runner_state.get("processes", []),
+        "profiles": runner_state.get("profiles", {}),
+        "browser_health": browser_health,
+    }
+
+
+def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
+    profile = str(
+        payload.get("runner_profile") or payload.get("active_profile") or ""
+    ).strip().casefold()
+    execution_mode = str(payload.get("execution_mode") or "").strip().casefold()
+    if not profile and execution_mode.startswith("supervised_"):
+        profile = execution_mode.removeprefix("supervised_")
+    if profile not in set(all_runner_profiles()):
+        return False
+    profile_state = (
+        payload.get("profiles", {}).get(profile)
+        if isinstance(payload.get("profiles"), Mapping)
+        else None
+    )
+    effective = profile_state if isinstance(profile_state, Mapping) else payload
+    return bool(
+        effective.get("status") == "running"
+        and str(effective.get("execution_mode") or "") == "supervised_" + profile
+        and runner_process_is_alive(profile)
+    )
+
+
+def _terminate_runner_process(pid: int, grace_seconds: float = 2.0) -> None:
+    """Stop a supervised runner and its children without stopping the bridge."""
+    try:
+        process_group = os.getpgid(pid)
+    except OSError as exc:
+        raise RuntimeError("runner process is no longer present") from exc
+
+    try:
+        if process_group == pid:
+            # _start_runner uses start_new_session=True, so the runner has an
+            # isolated process group. Terminating that group stops the runner
+            # and any subprocesses it spawned for the current task.
+            os.killpg(process_group, signal.SIGTERM)
+        else:
+            # Legacy runners may not have their own process group.
+            os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process signal denied") from exc
+
+    deadline = time.monotonic() + max(0.1, grace_seconds)
+    while time.monotonic() < deadline:
+        if not runner_process_is_alive():
+            return
+        time.sleep(0.05)
+
+    try:
+        if process_group == pid:
+            os.killpg(process_group, signal.SIGKILL)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except PermissionError as exc:
+        raise RuntimeError("runner process could not be force-stopped") from exc
+
+    if runner_process_is_alive():
+        raise RuntimeError("runner process did not stop after force termination")
+
+def _runner_pid(profile: str = "m1") -> int | None:
+    try:
+        raw_pid = runner_pid_path(profile).read_text(encoding="utf-8").strip()
+        pid = int(raw_pid)
+    except (OSError, ValueError):
+        return None
+    return pid if pid > 1 else None
+
+
+def _runner_profile(profile: object) -> str:
+    value = str(profile or "m1").strip().casefold()
+    if value not in set(all_runner_profiles()):
+        raise ValueError("unsupported runner profile")
+    return value
+
+
+def _github_token() -> str:
+    """Resolve a GitHub credential for supervised runners without storing it."""
+    configured = next(
+        (
+            os.environ.get(name, "").strip()
+            for name in (
+                "PASI_PROJECTS_TOKEN",
+                "PASI_GITHUB_TOKEN",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+            )
+            if os.environ.get(name, "").strip()
+        ),
+        "",
+    )
+    if configured:
+        return configured
+
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "token", "--hostname", "github.com"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        token = result.stdout.strip()
+        if token:
+            return token
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    for line in result.stdout.splitlines():
+        if line.startswith("password="):
+            return line.removeprefix("password=").strip()
+    return ""
+
+
+def _start_runner(profile: str) -> dict[str, Any]:
+    if runner_process_is_alive():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner already running"}
+
+    github_token = _github_token() if profile == "168h" else ""
+    if profile == "168h" and not github_token:
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "GitHub token is unavailable"}
+
+    command = runner_command(profile)
+    executable = Path(command[0])
+    script = Path(command[1])
+    if not executable.is_file():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner Python executable is unavailable"}
+    if not script.is_file():
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is missing from the active PASI workspace"}
+    if not os.access(script, os.R_OK):
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner script is not readable"}
+
+    runtime_dir = runner_runtime_dir(profile)
+    state_path = runner_state_path(profile)
+    pid_path = runner_pid_path(profile)
+    try:
+        RUNNER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = RUNNER_LOG_DIR / ("runner-" + profile + ".log")
+        log_handle = log_path.open("a", encoding="utf-8")
+    except OSError as exc:
+        return {"accepted": False, "action": "start", "profile": profile, "reason": "runner log is not writable: " + str(exc)}
+
+    environment = os.environ.copy()
+    environment.setdefault("PYTHONUNBUFFERED", "1")
+    environment["PASI_RUNNER_PROFILE"] = profile
+    environment["PASI_RUNTIME_DIR"] = str(runtime_dir)
+    if profile == "168h":
+        environment["PASI_GITHUB_TOKEN"] = github_token
+        environment["PASI_PUSH"] = "1"
+
+    starting_state = {
+        "status": "starting",
+        "execution_mode": "supervised_" + profile,
+        "runner_profile": profile,
+        "log_path": str(log_path),
+        "runtime_state_path": str(state_path),
+        "runner_pid": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        atomic_write_json(state_path, starting_state)
+        process = subprocess.Popen(
+            command, cwd=CONFIG.project_root, env=environment,
+            stdin=subprocess.DEVNULL, stdout=log_handle, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({"status":"failed","error":"runner launch failed: "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
+    except Exception as exc:
+        log_handle.close()
+        failed_state = dict(starting_state)
+        failed_state.update({"status":"failed","error":"runner launch failed: "+type(exc).__name__+": "+str(exc),"failed_at":datetime.now(timezone.utc).isoformat()})
+        atomic_write_json(state_path, failed_state)
+        return {"accepted":False,"action":"start","profile":profile,"reason":failed_state["error"]}
+
+    log_handle.close()
+    try:
+        current=json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(current,dict): current={}
+    except (OSError,json.JSONDecodeError):
+        current={}
+    if current.get("status") not in {"starting","running","failed","completed","paused","cancelled"}:
+        current=dict(starting_state)
+    current.update({"runner_profile":profile,"runner_pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)})
+    atomic_write_json(state_path,current)
+    try:
+        pid_path.write_text(str(process.pid)+"\n",encoding="utf-8")
+    except OSError:
+        pass
+    # Give the supervised process a short startup probe. A successful Popen() only
+    # proves that the child was created; it does not prove that the 168h supervisor
+    # survived argument validation, worktree initialization, or schedule loading.
+    poll = getattr(process, "poll", None)
+    if callable(poll):
+        deadline = time.monotonic() + RUNNER_START_PROBE_SECONDS
+        while time.monotonic() < deadline:
+            return_code = poll()
+            if return_code is not None:
+                try:
+                    current = json.loads(state_path.read_text(encoding="utf-8"))
+                    if not isinstance(current, dict):
+                        current = {}
+                except (OSError, json.JSONDecodeError):
+                    current = {}
+                failure = dict(current) if current else dict(starting_state)
+                failure_error = str(
+                    failure.get("error")
+                    or f"runner exited during startup with exit code {return_code}"
+                ).strip()
+                failure.update({
+                    "status": "failed",
+                    "runner_profile": profile,
+                    "runner_pid": process.pid,
+                    "log_path": str(log_path),
+                    "runtime_state_path": str(state_path),
+                    "error": failure_error,
+                    "failed_at": datetime.now(timezone.utc).isoformat(),
+                })
+                atomic_write_json(state_path, failure)
+                return {
+                    "accepted": False,
+                    "action": "start",
+                    "profile": profile,
+                    "reason": failure_error,
+                    "pid": process.pid,
+                    "log_path": str(log_path),
+                    "runtime_state_path": str(state_path),
+                }
+            time.sleep(RUNNER_START_PROBE_INTERVAL_SECONDS)
+
+    return {"accepted":True,"action":"start","profile":profile,"pid":process.pid,"log_path":str(log_path),"runtime_state_path":str(state_path)}
+
+
+def request_runner_control(action: str, profile: object = None) -> dict[str, Any]:
+    normalized = str(action or "").strip().casefold()
+    if normalized not in {"start", "toggle", "stop", "retry_current"}:
         raise ValueError("unsupported runner control action")
-    if action == "stop":
-        try:
-            raw_pid = (RUNNER_STATE_PATH.parent / "runner.pid").read_text(encoding="utf-8").strip()
-            pid = int(raw_pid)
-        except (OSError, ValueError):
-            return {"accepted": False, "action": action, "reason": "runner pid unavailable"}
-        if pid <= 1:
-            return {"accepted": False, "action": action, "reason": "runner pid invalid"}
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "ignore")
-        except OSError:
-            return {"accepted": False, "action": action, "reason": "runner process is no longer present"}
-        if "pasi_overnight_engine_v2.py" not in cmdline and "pasi_168h_supervisor.sh" not in cmdline:
-            return {"accepted": False, "action": action, "reason": "runner pid does not identify as PASI"}
-        try:
-            os.kill(pid, 15)
-        except ProcessLookupError:
-            return {"accepted": False, "action": action, "reason": "runner process already stopped"}
-        except PermissionError:
-            return {"accepted": False, "action": action, "reason": "runner process signal denied"}
-        return {"accepted": True, "action": action, "pid": pid}
 
-    current_state = load_runner_state()
+    selected_profile = _runner_profile(profile) if profile is not None else None
+    live_process = runner_process_info()
+
+    if normalized in {"start", "toggle"} and live_process is None:
+        return _start_runner(selected_profile or "m1")
+
+    if normalized == "start":
+        actual_profile = live_process.get("profile") if live_process else None
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "start",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is already running",
+            }
+        return {
+            "accepted": False,
+            "action": "start",
+            "profile": selected_profile or actual_profile,
+            "reason": "runner already running",
+        }
+
+    if normalized == "toggle" and live_process is not None:
+        normalized = "stop"
+
+    if normalized == "stop":
+        if live_process is None:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": "runner is not running",
+            }
+
+        pid = int(live_process["pid"])
+        actual_profile = live_process.get("profile")
+        if selected_profile and actual_profile and selected_profile != actual_profile:
+            return {
+                "accepted": False,
+                "action": "stop",
+                "profile": selected_profile,
+                "reason": actual_profile.upper() + " runner is the active runner",
+            }
+
+        state = load_runner_state(actual_profile or selected_profile or "m1")
+        state_path = runner_state_path(actual_profile or selected_profile or "m1")
+        pid_path = runner_pid_path(actual_profile or selected_profile or "m1")
+        stopping = dict(state) if state.get("available") else {}
+        stopping.update({
+            "status": "stopping",
+            "execution_mode": "manual",
+            "runner_pid": pid,
+            "runner_profile": actual_profile or stopping.get("runner_profile"),
+            "paused_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            atomic_write_json(state_path, stopping)
+            _terminate_runner_process(pid)
+        except (OSError, RuntimeError) as exc:
+            failed = dict(stopping)
+            failed.update({
+                "status": "failed",
+                "error": "runner stop failed: " + str(exc),
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            try:
+                atomic_write_json(state_path, failed)
+            except OSError:
+                pass
+            return {
+                "accepted": False,
+                "action": "stop",
+                "pid": pid,
+                "reason": failed["error"],
+            }
+
+        paused = dict(stopping)
+        paused["status"] = "paused"
+        paused["paused_at"] = datetime.now(timezone.utc).isoformat()
+        paused["process_alive"] = False
+        paused["ready"] = False
+        atomic_write_json(state_path, paused)
+        pid_candidates = [pid_path]
+        if actual_profile == "168h":
+            pid_candidates.append(
+                Path.home() / ".pasi" / "engineering-workspace-168h" / "runner.pid"
+            )
+        for candidate in pid_candidates:
+            try:
+                candidate.unlink()
+            except FileNotFoundError:
+                pass
+        return {
+            "accepted": True,
+            "action": "stop",
+            "pid": pid,
+            "profile": actual_profile,
+            "status": "paused",
+        }
+
+    control_profile = selected_profile or (
+        live_process.get("profile") if live_process else None
+    ) or "m1"
+    current_state = load_runner_state(control_profile)
     current_task = str(current_state.get("current_task", "")).strip()
     if not current_state.get("available") or not current_task:
-        return {"accepted": False, "action": action, "reason": "no current runner task"}
-    RUNNER_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        return {"accepted": False, "action": normalized, "reason": "no current runner task"}
+    control_path = runner_control_path(control_profile)
+    control_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
-        "action": action,
+        "action": normalized,
         "task_id": current_state.get("current_task_id", ""),
         "requested_at": datetime.now(timezone.utc).isoformat(),
     }
-    temporary = RUNNER_CONTROL_PATH.with_suffix(".json.tmp")
+    temporary = control_path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
     temporary.replace(RUNNER_CONTROL_PATH)
-    return {"accepted": True, "action": action, "task": current_task}
+    return {"accepted": True, "action": normalized, "task": current_task}
+
 
 class BridgeState:
     """
@@ -158,6 +857,9 @@ class BridgeState:
         self.state_manager = state_manager
         self.lock = threading.RLock()
         self.operation_changed = threading.Condition(self.lock)
+        self.browser_testing_changed = threading.Condition(self.lock)
+        self._browser_test_requests: dict[str, dict[str, Any]] = {}
+        self._browser_test_results: dict[str, dict[str, Any]] = {}
         self._queue_cache: list[dict[str, Any]] | None = None
         self._queue_cache_mtime_ns: int | None = None
 
@@ -182,6 +884,15 @@ class BridgeState:
         return queue
 
     def _save_queue(self, queue: list[dict[str, Any]]) -> None:
+        # The nested operation_state is a derived canonical view of the same
+        # queue item. Refresh it on every durable queue write so it cannot
+        # remain at the initial "queued" status after claim/generation/completion.
+        for item in queue:
+            try:
+                item["operation_state"] = OperationState.from_chat_operation(item).to_dict()
+            except Exception:
+                item.pop("operation_state", None)
+
         has_inline_terminal_responses = False
         for item in queue:
             if item.get("status") not in TERMINAL_QUEUE_STATUSES:
@@ -341,22 +1052,154 @@ class BridgeState:
         if changed:
             self._save_queue(queue)
 
+    def queue_browser_test_request(
+        self,
+        action: str,
+        tab_id: int | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        allowed = {
+            "screenshot",
+            "page_state",
+            "dom",
+            "accessibility",
+            "console_errors",
+            "network",
+            "click",
+            "fill",
+            "press_key",
+            "scroll",
+        }
+        action = str(action or "").strip()
+        if action not in allowed:
+            raise ValueError("unsupported browser-test action")
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise ValueError("tab_id must be a positive integer or null")
+        params = dict(params or {})
+        if len(json.dumps(params, ensure_ascii=False, separators=(",", ":"))) > 20_000:
+            raise ValueError("browser-test params exceed the bounded request size")
+
+        if tab_id is None:
+            health = self.state_manager.load_browser_health()
+            health_data = health.get("data") if isinstance(health, Mapping) else {}
+            if not isinstance(health_data, Mapping) or not isinstance(health_data.get("tab_id"), int):
+                state = self.state_manager.load_browser_state()
+                state_data = state.get("data") if isinstance(state, Mapping) else {}
+                tab_id = state_data.get("tab_id") if isinstance(state_data, Mapping) else None
+            if not isinstance(tab_id, int) or tab_id < 1:
+                raise ValueError("no attached ChatGPT tab is available")
+
+        request_id = "bt-" + os.urandom(10).hex()
+        request = {
+            "request_id": request_id,
+            "action": action,
+            "tab_id": tab_id,
+            "params": params,
+            "created_at": time.time(),
+        }
+        with self.browser_testing_changed:
+            if len(self._browser_test_requests) >= 64:
+                oldest = min(self._browser_test_requests, key=lambda key: self._browser_test_requests[key]["created_at"])
+                self._browser_test_requests.pop(oldest, None)
+            self._browser_test_requests[request_id] = request
+            self.browser_testing_changed.notify_all()
+        return {"request_id": request_id, "tab_id": tab_id}
+
+    def wait_for_browser_test_request(
+        self,
+        tab_id: int,
+        timeout_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        if not isinstance(tab_id, int) or tab_id < 1:
+            raise ValueError("tab_id must be a positive integer")
+        timeout_ms = min(max(int(timeout_ms or 0), 0), 10_000)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        with self.browser_testing_changed:
+            while True:
+                candidates = sorted(
+                    (
+                        item for item in self._browser_test_requests.values()
+                        if item.get("tab_id") == tab_id
+                    ),
+                    key=lambda item: float(item.get("created_at", 0)),
+                )
+                if candidates:
+                    request = dict(candidates[0])
+                    self._browser_test_requests.pop(request["request_id"], None)
+                    return request
+                if timeout_ms <= 0:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.browser_testing_changed.wait(timeout=remaining)
+
+    def submit_browser_test_result(
+        self,
+        request_id: str,
+        tab_id: int,
+        ok: bool,
+        data: Mapping[str, Any] | None = None,
+        error: Mapping[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        with self.browser_testing_changed:
+            result = {
+                "request_id": request_id,
+                "tab_id": tab_id,
+                "ok": bool(ok),
+                "data": dict(data or {}) if ok else None,
+                "error": (
+                    dict(error) if isinstance(error, Mapping)
+                    else {"code": "BROWSER_TEST_FAILED", "message": str(error or "browser test failed")}
+                    if error is not None
+                    else None
+                ),
+                "completed_at": time.time(),
+            }
+            if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 12_000_000:
+                raise ValueError("browser-test result exceeds the bounded response size")
+            self._browser_test_results[request_id] = result
+            if len(self._browser_test_results) > 64:
+                oldest = min(self._browser_test_results, key=lambda key: self._browser_test_results[key]["completed_at"])
+                self._browser_test_results.pop(oldest, None)
+            self.browser_testing_changed.notify_all()
+            return {"accepted": True, "request_id": request_id}
+
+    def get_browser_test_result(self, request_id: str) -> dict[str, Any] | None:
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("request_id is required")
+        with self.browser_testing_changed:
+            result = self._browser_test_results.pop(request_id, None)
+            return dict(result) if isinstance(result, Mapping) else None
+
     @classmethod
-    def _mark_claimed(cls, item: dict[str, Any]) -> dict[str, Any]:
+    def _mark_claimed(
+        cls,
+        item: dict[str, Any],
+        controller_id: str | None = None,
+    ) -> dict[str, Any]:
         now = time.time()
         validate_transition(str(item.get("status", "")), "claimed")
         item["status"] = "claimed"
         item["claimed_at"] = now
         item["updated_at"] = now
+        if controller_id is None:
+            item.pop("controller_id", None)
+        else:
+            item["controller_id"] = controller_id
         return item
 
     def claim_operation(
         self,
         operation_id: str,
+        controller_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
+
+            if self._response_processing_pending_for_controller(queue, controller_id):
+                return None
 
             for item in queue:
                 if item.get("operation_id") != operation_id:
@@ -364,22 +1207,120 @@ class BridgeState:
                 if item.get("status") != "queued":
                     return None
 
-                claimed = self._mark_claimed(item)
+                predecessor = self._latest_completed_prompt_for_controller(
+                    queue,
+                    controller_id,
+                )
+                if predecessor is not None:
+                    predecessor_operation_id, predecessor_completed_at_ms = predecessor
+                    item["predecessor_operation_id"] = predecessor_operation_id
+                    item["predecessor_completed_at_ms"] = predecessor_completed_at_ms
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
         return None
 
-    def claim_next_operation(self) -> dict[str, Any] | None:
+    def wait_for_next_operation(
+        self,
+        controller_id: str | None = None,
+        timeout_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        """Wait for a queued operation that is safe to dispatch to a controller."""
+        if timeout_ms < 0:
+            timeout_ms = 0
+        timeout_seconds = min(timeout_ms, 60_000) / 1000.0
+        deadline = time.monotonic() + timeout_seconds
+        with self.operation_changed:
+            while True:
+                operation = self.claim_next_operation(controller_id)
+                if operation is not None:
+                    return operation
+                if timeout_seconds <= 0:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.operation_changed.wait(timeout=remaining)
+
+    @staticmethod
+    def _latest_completed_prompt_for_controller(
+        queue: list[dict[str, Any]],
+        controller_id: str | None,
+    ) -> tuple[str, int] | None:
+        if not controller_id:
+            return None
+
+        latest: tuple[str, int] | None = None
+        for candidate in queue:
+            if (
+                candidate.get("status") != "completed"
+                or candidate.get("operation_type") != "prompt"
+                or candidate.get("controller_id") != controller_id
+            ):
+                continue
+            operation_id = candidate.get("operation_id")
+            timing = candidate.get("timing")
+            completed_at_ms = timing.get("completed_at_ms") if isinstance(timing, dict) else None
+            if (
+                not isinstance(operation_id, str)
+                or not operation_id.strip()
+                or isinstance(completed_at_ms, bool)
+                or not isinstance(completed_at_ms, (int, float))
+                or completed_at_ms < 0
+            ):
+                continue
+            value = int(completed_at_ms)
+            if latest is None or value > latest[1]:
+                latest = (operation_id, value)
+        return latest
+
+    def claim_next_operation(
+        self,
+        controller_id: str | None = None,
+    ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
+
+            if self._response_processing_pending_for_controller(queue, controller_id):
+                return None
+
+            # A completion acknowledgement may durably claim the next
+            # operation before the worker has delivered it. Allow the same
+            # controller to redeliver that claimed-but-not-started operation
+            # after a service-worker restart or dispatch failure. Once CDP emits
+            # STARTED, the item becomes generating and this path is closed.
+            now = time.time()
+            for item in queue:
+                if (
+                    item.get("status") == "claimed"
+                    and item.get("controller_id") == controller_id
+                    and not item.get("network_request_id")
+                    and not item.get("network_lifecycle_event")
+                    and now - float(item.get("claimed_at", 0) or 0) >= 5
+                ):
+                    return dict(item)
+
+            # Queue dispatch is strictly serial. A controller-ready signal may
+            # arrive while the current operation is active. Never advance to a
+            # second operation until the current one is durably completed.
+            if any(item.get("status") in {"claimed", "generating"} for item in queue):
+                return None
 
             for item in queue:
                 if item.get("status") != "queued":
                     continue
 
-                claimed = self._mark_claimed(item)
+                predecessor = self._latest_completed_prompt_for_controller(
+                    queue,
+                    controller_id,
+                )
+                if predecessor is not None:
+                    predecessor_operation_id, predecessor_completed_at_ms = predecessor
+                    item["predecessor_operation_id"] = predecessor_operation_id
+                    item["predecessor_completed_at_ms"] = predecessor_completed_at_ms
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
@@ -432,6 +1373,7 @@ class BridgeState:
         response_text: str | None = None,
         response_text_available: bool = False,
         timing: object = None,
+        controller_id: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Complete one operation and claim exactly one next operation in one durable queue write."""
         with self.lock:
@@ -445,6 +1387,37 @@ class BridgeState:
             if current is None:
                 return None, None
 
+            if (
+                current.get("operation_type") == "prompt"
+                and current.get("network_response_authoritative") is True
+                and current.get("response_text_available") is True
+                and isinstance(current.get("response_text"), str)
+                and current.get("response_text").strip()
+            ):
+                response_text = current.get("response_text")
+                response_text_available = True
+
+            if controller_id is not None:
+                owner = current.get("controller_id")
+                if owner is not None and owner != controller_id:
+                    raise ControllerOwnershipConflict(
+                        "Operation is owned by a different controller instance."
+                    )
+                current["controller_id"] = controller_id
+
+            if current.get("operation_type") == "prompt":
+                if not completion_markers_satisfied(
+                    response_text,
+                    current.get("completion_markers"),
+                ):
+                    raise ValueError(
+                        "Prompt completion response does not satisfy the operation completion markers."
+                    )
+                if current.get("network_response_authoritative") is not True:
+                    raise ValueError(
+                        "Prompt completion requires authoritative CDP response evidence."
+                    )
+
             if current.get("status") == "completed":
                 chained = self.get_chained_operation(operation_id)
                 return self._hydrate_terminal_response(dict(current)), chained
@@ -452,6 +1425,9 @@ class BridgeState:
             current_status = str(current.get("status", ""))
             validate_transition(current_status, "completed")
             current["status"] = "completed"
+            if current.get("operation_type") == "prompt":
+                current["response_processing_required"] = True
+                current["response_processing_complete"] = False
 
             if chat_url is not None:
                 current["chat_url"] = chat_url
@@ -468,12 +1444,17 @@ class BridgeState:
                 current["timing"] = normalized_timing
 
             chained = None
-            for item in queue:
-                if item is current or item.get("status") != "queued":
-                    continue
-                chained = dict(self._mark_claimed(item))
-                current["next_operation_id"] = item.get("operation_id")
-                break
+            allow_chained_claim = (
+                current.get("operation_type") != "prompt"
+                or current.get("response_processing_complete") is True
+            )
+            if allow_chained_claim:
+                for item in queue:
+                    if item is current or item.get("status") != "queued":
+                        continue
+                    chained = dict(self._mark_claimed(item, controller_id))
+                    current["next_operation_id"] = item.get("operation_id")
+                    break
 
             self._save_queue(queue)
             return dict(current), chained
@@ -513,7 +1494,7 @@ class BridgeState:
         if any(key not in MAX_TIMING_KEYS for key in value):
             return None
         result: dict[str, Any] = {}
-        for key in ("injected_at_ms", "ack_at_ms", "generation_start_ms", "completed_at_ms"):
+        for key in ("injected_at_ms", "ack_at_ms", "generation_start_ms", "completed_at_ms", "response_processed_at_ms"):
             if key not in value:
                 continue
             raw = value[key]
@@ -551,6 +1532,10 @@ class BridgeState:
             if previous is not None and numeric < previous:
                 return None
             previous = numeric
+        processed_at = result.get("response_processed_at_ms")
+        if processed_at is not None:
+            if "completed_at_ms" in result and float(processed_at) < float(result["completed_at_ms"]):
+                return None
         if result.get("ack_verified") is True and "ack_at_ms" not in result:
             return None
         return result
@@ -623,8 +1608,11 @@ class BridgeState:
                     else current
                 )
                 if item.get("response_text_available") is True and isinstance(authoritative, str) and authoritative.strip():
-                    item["response_text"] = authoritative
-                    item["response_text_available"] = True
+                    return dict(item)
+                if not completion_markers_satisfied(
+                    bounded_response,
+                    item.get("completion_markers"),
+                ):
                     return dict(item)
                 item["response_text"] = bounded_response
                 item["response_text_available"] = True
@@ -632,6 +1620,118 @@ class BridgeState:
                     item["chat_url"] = chat_url
                 item["response_source"] = "completion_ack"
                 item["response_observed_at"] = time.time()
+                self._save_queue(queue)
+                return dict(item)
+        return None
+
+    def mark_response_processed(
+        self,
+        operation_id: str,
+        controller_id: str,
+    ) -> dict[str, Any] | None:
+        """Durably release the next-operation barrier after runner response processing."""
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return None
+        if not isinstance(controller_id, str) or not controller_id.strip():
+            return None
+        with self.lock:
+            queue = self._load_queue()
+            for item in queue:
+                if item.get("operation_id") != operation_id:
+                    continue
+                if item.get("operation_type") != "prompt" or item.get("status") != "completed":
+                    return None
+                owner = item.get("controller_id")
+                if owner != controller_id.strip():
+                    return None
+                stored_response = self.state_manager.load_terminal_response(operation_id)
+                response_text = stored_response if isinstance(stored_response, str) else item.get("response_text")
+                if item.get("response_text_available") is not True or not isinstance(response_text, str) or not response_text.strip():
+                    return None
+                if item.get("network_response_authoritative") is not True:
+                    return None
+
+                timing = dict(item.get("timing") or {})
+                processed_at_ms = int(time.time() * 1000)
+                completed_at_ms = timing.get("completed_at_ms")
+                if isinstance(completed_at_ms, (int, float)) and not isinstance(completed_at_ms, bool):
+                    processed_at_ms = max(processed_at_ms, int(completed_at_ms))
+                timing["response_processed_at_ms"] = processed_at_ms
+                normalized = self.normalize_timing(timing)
+                if normalized is None:
+                    return None
+                item["timing"] = normalized
+                item["response_processing_required"] = True
+                item["response_processing_complete"] = True
+                item["updated_at"] = time.time()
+                self._save_queue(queue)
+                return dict(item)
+        return None
+
+    @staticmethod
+    def _response_processing_pending_for_controller(
+        queue: list[dict[str, Any]],
+        controller_id: str | None,
+    ) -> bool:
+        if not controller_id:
+            return False
+        for item in queue:
+            if (
+                item.get("status") == "completed"
+                and item.get("operation_type") == "prompt"
+                and item.get("controller_id") == controller_id
+                and item.get("response_processing_required") is True
+                and item.get("response_processing_complete") is not True
+            ):
+                return True
+        return False
+
+    def cancel_operation(
+        self,
+        operation_id: str,
+        controller_id: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Cancel a nonterminal operation, fencing controller ownership when present."""
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            return None
+        normalized_controller = (
+            controller_id.strip()
+            if isinstance(controller_id, str) and controller_id.strip()
+            else None
+        )
+        normalized_reason = (
+            reason[:MAX_ERROR_CHARS]
+            if isinstance(reason, str) and reason.strip()
+            else "operation cancelled"
+        )
+        with self.lock:
+            queue = self._load_queue()
+            for item in queue:
+                if item.get("operation_id") != operation_id:
+                    continue
+
+                current_status = str(item.get("status", ""))
+                owner = item.get("controller_id")
+                if owner is not None and owner != normalized_controller:
+                    raise ControllerOwnershipConflict(
+                        "operation is owned by a different controller"
+                    )
+                if current_status == "cancelled":
+                    return dict(item)
+                if current_status not in {"queued", "claimed", "generating"}:
+                    return None
+
+                validate_transition(current_status, "cancelled")
+                item["status"] = "cancelled"
+                item["error"] = normalized_reason
+                item["failure_reason"] = "cancelled"
+                item["updated_at"] = time.time()
+                if normalized_controller is not None:
+                    item["cancelled_by_controller_id"] = normalized_controller
+                if item.get("operation_type") == "prompt":
+                    item["response_processing_required"] = False
+                    item["response_processing_complete"] = False
                 self._save_queue(queue)
                 return dict(item)
         return None
@@ -700,6 +1800,11 @@ class BridgeState:
         data = observation.get("data")
         kind = data.get("kind") if isinstance(data, dict) else None
 
+        if schema_version == "pasi-network-cdp-v1" and kind in {
+            "chatgpt_network_lifecycle",
+            "chatgpt_network_response",
+        }:
+            return 120
         if schema_version == "pasi-native-chromium-v2" and kind in {
             "chatgpt_health",
             "chatgpt_state",
@@ -721,7 +1826,7 @@ class BridgeState:
             data = observation.get("data")
             if isinstance(data, dict):
                 kind = data.get("kind")
-                if kind == "chatgpt_response":
+                if kind in {"chatgpt_response", "chatgpt_network_response"}:
                     timing = data.get("timing")
                     active_operation_id = data.get("active_operation_id")
                     if isinstance(active_operation_id, str) and timing is not None:
@@ -830,23 +1935,16 @@ class BridgeState:
         observation: dict[str, Any],
     ) -> None:
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict):
+            return
+
+        kind = data.get("kind")
+        if kind not in {"chatgpt_response", "chatgpt_network_response", "chatgpt_network_lifecycle"}:
             return
 
         operation_id = data.get("active_operation_id")
-        response_text = data.get("response_text")
-        response_text_available = data.get("response_text_available")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return
-        if not isinstance(response_text, str) or len(response_text) > MAX_RESPONSE_TEXT_CHARS:
-            return
-        # Nonblank response text is the persisted evidence. A stale controller
-        # may report the legacy availability flag incorrectly, but that flag
-        # must not discard an already-bound response. Blank text remains
-        # fail-closed.
-        if not response_text.strip():
-            return
-        response_text_available = True
 
         queue = self._load_queue()
         for item in queue:
@@ -854,26 +1952,85 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
-            stored_response = self.state_manager.load_terminal_response(operation_id)
-            current_response = item.get("response_text")
-            if (
-                isinstance(stored_response, str)
-                and stored_response.strip()
-            ) or (
-                item.get("response_text_available") is True
-                and isinstance(current_response, str)
-                and current_response.strip()
-            ):
-                return
 
-            item["response_text"] = response_text
-            item["response_text_available"] = True
-            chat_url = data.get("chat_url")
-            if isinstance(chat_url, str):
-                item["chat_url"] = chat_url
-            item["response_source"] = "browser_observation"
-            item["response_observed_at"] = observation.get("captured_at", time.time())
-            self._save_queue(queue)
+            network_source = data.get("network_source")
+            controller_id = data.get("controller_id")
+            if network_source == "cdp_fetch":
+                if (
+                    isinstance(controller_id, str)
+                    and controller_id.strip()
+                    and item.get("controller_id") != controller_id.strip()
+                ):
+                    return
+                event_type = str(data.get("event_type") or "")
+                item["network_source"] = "cdp_fetch"
+                if isinstance(controller_id, str) and controller_id.strip():
+                    item["network_controller_id"] = controller_id.strip()
+                request_id = data.get("request_id")
+                if isinstance(request_id, str) and request_id:
+                    item["network_request_id"] = request_id[:200]
+                if event_type == "STARTED":
+                    if item.get("status") == "claimed":
+                        validate_transition("claimed", "generating")
+                        item["status"] = "generating"
+                    item["network_lifecycle_event"] = event_type
+                elif event_type in {"COMPLETED", "INTERRUPTED", "FAILED"}:
+                    item["network_terminal_event"] = event_type
+                elif event_type:
+                    # Lifecycle events such as STARTED are not terminal
+                    # evidence. Keep them separate so response polling cannot
+                    # misclassify an in-flight generation as a failure.
+                    item["network_lifecycle_event"] = event_type
+                    item.pop("network_terminal_event", None)
+                    item.pop("network_terminal_reason", None)
+                    item.pop("network_classification", None)
+                    item.pop("network_failure_source", None)
+                reason = data.get("reason")
+                classification = data.get("classification")
+                if isinstance(reason, str) and reason:
+                    item["network_terminal_reason"] = reason[:200]
+                if isinstance(classification, str) and classification:
+                    item["network_classification"] = classification[:120]
+                if event_type in {"INTERRUPTED", "FAILED"}:
+                    item["network_failure_source"] = "cdp"
+
+            response_text = data.get("response_text")
+            cdp_response_complete = (
+                network_source != "cdp_fetch"
+                or (
+                    str(data.get("event_type") or "") == "COMPLETED"
+                    and data.get("stream_complete") is True
+                )
+            )
+            response_verified = (
+                cdp_response_complete
+                and isinstance(response_text, str)
+                and len(response_text) <= MAX_RESPONSE_TEXT_CHARS
+                and bool(response_text.strip())
+                and completion_markers_satisfied(
+                    response_text,
+                    item.get("completion_markers"),
+                )
+            )
+            if response_verified:
+                item["response_text"] = response_text
+                item["response_text_available"] = True
+                item["response_source"] = (
+                    "cdp_fetch_stream"
+                    if network_source == "cdp_fetch"
+                    else "browser_observation"
+                )
+                item["response_observed_at"] = observation.get("captured_at", time.time())
+                if network_source == "cdp_fetch":
+                    item["network_response_authoritative"] = True
+                    assistant_message_id = data.get("assistant_message_id")
+                    if isinstance(assistant_message_id, str) and assistant_message_id:
+                        item["network_assistant_message_id"] = assistant_message_id[:200]
+                chat_url = data.get("chat_url") or data.get("request_url")
+                if isinstance(chat_url, str) and chat_url:
+                    item["chat_url"] = chat_url
+            if network_source == "cdp_fetch" or kind == "chatgpt_response":
+                self._save_queue(queue)
             return
 
     def _repair_response_from_browser_observation(
@@ -885,6 +2042,7 @@ class BridgeState:
         operation_id = item.get("operation_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return False
+
         stored_response = self.state_manager.load_terminal_response(operation_id)
         if isinstance(stored_response, str) and stored_response.strip():
             return False
@@ -899,40 +2057,64 @@ class BridgeState:
         observation = self.state_manager.load_browser_response()
         if not isinstance(observation, dict):
             return False
-
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict) or data.get("kind") not in {"chatgpt_response", "chatgpt_network_response"}:
             return False
         if data.get("active_operation_id") != item.get("operation_id"):
             return False
 
+        network_source = data.get("network_source")
+        if network_source == "cdp_fetch" and not (
+            str(data.get("event_type") or "") == "COMPLETED"
+            and data.get("stream_complete") is True
+        ):
+            return False
+
         response_text = data.get("response_text")
-        # Nonblank, operation-bound response text is the evidence. Do not let
-        # a stale controller availability flag hide already-captured text.
         if (
             not isinstance(response_text, str)
             or len(response_text) > MAX_RESPONSE_TEXT_CHARS
             or not response_text.strip()
+            or not completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            )
         ):
             return False
 
         item["response_text"] = response_text
         item["response_text_available"] = True
-        chat_url = data.get("chat_url")
+        chat_url = data.get("chat_url") or data.get("request_url")
         if isinstance(chat_url, str):
             item["chat_url"] = chat_url
-        item["response_source"] = "browser_observation"
-        item["response_observed_at"] = observation.get(
-            "captured_at",
-            time.time(),
+        item["response_source"] = (
+            "cdp_fetch_stream"
+            if data.get("network_source") == "cdp_fetch"
+            else "browser_observation"
         )
+        item["network_response_authoritative"] = data.get("network_source") == "cdp_fetch"
+        item["response_observed_at"] = observation.get("captured_at", time.time())
         return True
 
     @staticmethod
     def _retry_class(error: str) -> str:
-        if error.startswith("CHAT_EXHAUSTED:") or error.startswith("PASI_NATIVE: context recovery exhausted:"):
+        if (
+            error.startswith("CHAT_EXHAUSTED:")
+            or error.startswith("PASI_NATIVE: context recovery exhausted:")
+            or error.startswith("PASI_CDP: CONTEXT_EXHAUSTED")
+        ):
             return "context"
-        if error.startswith("PASI_NATIVE: ChatGPT generation timed out") or error.startswith("PASI_NATIVE: response text unavailable"):
+        if (
+            error.startswith("PASI_NATIVE: ChatGPT generation timed out")
+            or error.startswith("PASI_NATIVE: response text unavailable")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_INCOMPLETE")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
+            or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
+            or error.startswith("PASI_CDP: network failure")
+            or error.startswith("PASI_CDP: NETWORK_STREAM_DISCONNECTED")
+            or error.startswith("PASI_CDP: CDP_DEBUGGER_DETACHED")
+        ):
             return "response"
         return "controller"
 
@@ -958,14 +2140,46 @@ class BridgeState:
                 retry_class = self._retry_class(error)
                 count = int(retry_counts.get(retry_class, 0) or 0)
 
+                if retry_class == "context":
+                    if count >= RETRY_BUDGETS[retry_class]:
+                        validate_transition(current_status, "failed")
+                        item["status"] = "failed"
+                        item["error"] = error[:MAX_ERROR_CHARS]
+                        item["failure_reason"] = "context_retry_exhausted"
+                        item["retry_class"] = "context"
+                        item["retry_counts"] = dict(retry_counts)
+                        item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                        item["updated_at"] = time.time()
+                        self._save_queue(queue)
+                        return dict(item)
+
+                    retry_counts = dict(retry_counts)
+                    retry_counts["context"] = count + 1
+                    item["status"] = "failed"
+                    item["error"] = (
+                        "CHAT_EXHAUSTED: explicit network context exhaustion; "
+                        "the runner must prepare a fresh ChatGPT conversation before retrying the task."
+                    )
+                    item["failure_reason"] = "context_exhausted"
+                    item["retry_class"] = "context"
+                    item["retry_counts"] = retry_counts
+                    item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                    item["updated_at"] = time.time()
+                    self._save_queue(queue)
+                    return dict(item)
+
                 if (
                     item.get("operation_type") == "prompt"
+                    and item.get("network_response_authoritative") is True
                     and item.get("response_text_available") is True
                     and isinstance(item.get("response_text"), str)
                     and bool(str(item.get("response_text")).strip())
                 ):
                     validate_transition(current_status, "completed")
                     item["status"] = "completed"
+                    if item.get("operation_type") == "prompt":
+                        item["response_processing_required"] = True
+                        item["response_processing_complete"] = False
                     item["completion_recovery_reason"] = "browser_response_observation_after_transient_failure"
                     item["recovery_error"] = error[:MAX_ERROR_CHARS]
                     item["updated_at"] = time.time()
@@ -1070,6 +2284,10 @@ class BridgeState:
                 validate_transition(current_status, status)
                 item["status"] = status
 
+                if status == "completed" and item.get("operation_type") == "prompt":
+                    item["response_processing_required"] = True
+                    item["response_processing_complete"] = False
+
                 if chat_url is not None:
                     item["chat_url"] = chat_url
 
@@ -1124,6 +2342,14 @@ def _bridge_access_log_should_emit(message: str) -> bool:
     except (ValueError, IndexError):
         return True
     return not (0 < status_code < 400)
+
+
+def runner_registry_payload() -> dict[str, Any]:
+    active = runner_process_info()
+    snapshot = registry_snapshot()
+    snapshot["builtins"] = runner_registry_entries()[:2]
+    snapshot["active_profile"] = active.get("profile") if active else None
+    return snapshot
 
 
 class BridgeRequestHandler(BaseHTTPRequestHandler):
@@ -1283,7 +2509,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path != "/health" and not self._request_is_authorized(require_token=True):
+        if path not in {"/health", "/runner/diagnostics"} and not self._request_is_authorized(require_token=True):
             self._send_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
             return
 
@@ -1308,6 +2534,16 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/runner/state":
             self._send_json(load_runner_state())
+            return
+
+        if path == "/runner/registry":
+            self._send_json(runner_registry_payload())
+            return
+
+        if path == "/runner/diagnostics":
+            # This is intentionally read-only and token-free: the bridge binds
+            # exclusively to 127.0.0.1, and no secrets/tokens are included.
+            self._send_json(runner_diagnostics_payload(self.bridge_state))
             return
 
         if path == "/browser/observation":
@@ -1346,6 +2582,30 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                     "observation": response
                 }
             )
+            return
+
+        if path == "/browser/testing/request":
+            values = parse_qs(parsed.query).get("tab_id", [])
+            if not values:
+                self._send_json({"error": "tab_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                tab_id = int(values[0])
+                wait_ms = min(max(int(parse_qs(parsed.query).get("wait_ms", ["0"])[0]), 0), 10_000)
+            except ValueError:
+                self._send_json({"error": "tab_id and wait_ms must be integers."}, HTTPStatus.BAD_REQUEST)
+                return
+            request = self.bridge_state.wait_for_browser_test_request(tab_id, wait_ms)
+            self._send_json({"request": request})
+            return
+
+        if path == "/browser/testing/result":
+            values = parse_qs(parsed.query).get("request_id", [])
+            request_id = values[0].strip() if values else ""
+            if not request_id or len(request_id) > 200:
+                self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({"result": self.bridge_state.get_browser_test_result(request_id)})
             return
 
         if path == "/operation":
@@ -1392,8 +2652,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/next-operation":
-            operation = self.bridge_state.claim_next_operation()
-            self._send_json({"operation": operation})
+            controller_ids = parse_qs(parsed.query).get("controller_id", [])
+            wait_values = parse_qs(parsed.query).get("wait_ms", [])
+            controller_id = controller_ids[0].strip() if controller_ids else ""
+            if not controller_id or len(controller_id) > 200:
+                self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                wait_ms = int(wait_values[0]) if wait_values else 0
+            except (TypeError, ValueError):
+                self._send_json({"error": "wait_ms must be an integer."}, HTTPStatus.BAD_REQUEST)
+                return
+            if wait_ms < 0 or wait_ms > 60_000:
+                self._send_json({"error": "wait_ms must be between 0 and 60000."}, HTTPStatus.BAD_REQUEST)
+                return
+
+            runner_state = load_runner_state()
+            if not runner_execution_authorized(runner_state):
+                self._send_json({"operation": None, "runner_ready": False})
+                return
+
+            operation = self.bridge_state.wait_for_next_operation(controller_id, wait_ms)
+            self._send_json({"operation": operation, "runner_ready": True})
             return
 
         self._send_json(
@@ -1431,6 +2711,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            if path == "/browser/testing/request":
+                self._browser_testing_request(payload)
+                return
+
+            if path == "/browser/testing/result":
+                self._browser_testing_result(payload)
+                return
+
             if path == "/chat/claim":
                 self._claim(payload)
                 return
@@ -1439,12 +2727,78 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._browser_observation(payload)
                 return
 
+            if path == "/runner/registry/create":
+                runner_id = payload.get("id")
+                name = payload.get("name")
+                entrypoint = payload.get("entrypoint")
+                args = payload.get("args")
+                source = str(payload.get("source") or "user")
+                self._send_json({
+                    "ok": True,
+                    "runner": create_runner(
+                        runner_id,
+                        name,
+                        entrypoint,
+                        args,
+                        source=source,
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/revision":
+                self._send_json({
+                    "ok": True,
+                    "revision": create_revision(
+                        payload.get("id"),
+                        payload.get("entrypoint"),
+                        payload.get("args"),
+                        source=str(payload.get("source") or "automation"),
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/validate":
+                self._send_json({
+                    "ok": True,
+                    "revision": validate_revision(
+                        payload.get("id"),
+                        payload.get("version"),
+                        payload.get("evidence"),
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/promote":
+                self._send_json({
+                    "ok": True,
+                    "runner": promote_revision(
+                        payload.get("id"),
+                        payload.get("version"),
+                        project_root=CONFIG.project_root,
+                    ),
+                })
+                return
+
+            if path == "/runner/registry/rollback":
+                self._send_json({
+                    "ok": True,
+                    "runner": rollback_runner(payload.get("id")),
+                })
+                return
+
             if path == "/runner/control":
                 action = payload.get("action")
                 if not isinstance(action, str):
                     self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(request_runner_control(action.strip().casefold()))
+                self._send_json(
+                    request_runner_control(
+                        action.strip().casefold(),
+                        payload.get("profile"),
+                    )
+                )
                 return
 
             if path == "/queue":
@@ -1459,8 +2813,16 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 self._finished(payload)
                 return
 
+            if path == "/chat/processed":
+                self._processed(payload)
+                return
+
             if path == "/chat/failed":
                 self._failed(payload)
+                return
+
+            if path == "/chat/cancel":
+                self._cancel(payload)
                 return
 
             self._send_json(
@@ -1470,34 +2832,99 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
 
-        except InvalidOperationTransition as exc:
+        except (InvalidOperationTransition, RunnerRegistryError, ValueError) as exc:
             self._send_json(
                 {
                     "error": str(exc)
                 },
                 HTTPStatus.CONFLICT,
             )
-        except Exception:
+        except Exception as exc:
+            detail = type(exc).__name__ + ": " + str(exc)
+            detail = detail.strip()[:500]
+            print("[Bridge] POST " + path + " failed: " + detail, file=sys.stderr, flush=True)
             self._send_json(
                 {
-                    "error": "Internal server error."
+                    "error": "Internal server error: " + detail
                 },
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )
+
+    def _browser_testing_request(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        action = payload.get("action")
+        tab_id = payload.get("tab_id")
+        params = payload.get("params")
+        if not isinstance(action, str) or not action.strip():
+            self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            self._send_json({"error": "tab_id must be a positive integer or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if params is not None and not isinstance(params, dict):
+            self._send_json({"error": "params must be an object."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.queue_browser_test_request(
+                action.strip(),
+                tab_id,
+                params,
+            )
+        )
+
+    def _browser_testing_result(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        request_id = payload.get("request_id")
+        tab_id = payload.get("tab_id")
+        ok = payload.get("ok")
+        data = payload.get("data")
+        error = payload.get("error")
+        if not isinstance(request_id, str) or not request_id.strip():
+            self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(tab_id, int) or tab_id < 1:
+            self._send_json({"error": "tab_id must be a positive integer."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(ok, bool):
+            self._send_json({"error": "ok must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
+        if data is not None and not isinstance(data, dict):
+            self._send_json({"error": "data must be an object or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if error is not None and not isinstance(error, (dict, str)):
+            self._send_json({"error": "error must be an object, string, or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.submit_browser_test_result(
+                request_id.strip(),
+                tab_id,
+                ok,
+                data,
+                error,
+            )
+        )
 
     def _claim(
         self,
         payload: dict[str, Any],
     ) -> None:
         operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             self._send_json(
                 {"error": "operation_id is required."},
                 HTTPStatus.BAD_REQUEST,
             )
             return
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
 
-        operation = self.bridge_state.claim_operation(operation_id)
+        operation = self.bridge_state.claim_operation(operation_id, controller_id.strip())
         if operation is None:
             self._send_json(
                 {"error": "Operation is not queued."},
@@ -1694,6 +3121,41 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             }
         )
 
+    def _cancel(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
+        reason = payload.get("reason")
+
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            self._send_json({"error": "operation_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if controller_id is not None and (
+            not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200
+        ):
+            self._send_json({"error": "controller_id must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+        if reason is not None and (
+            not isinstance(reason, str) or not reason.strip() or len(reason) > MAX_ERROR_CHARS
+        ):
+            self._send_json({"error": "reason must be a bounded string."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        operation = self.bridge_state.cancel_operation(
+            operation_id=operation_id.strip(),
+            controller_id=controller_id.strip() if isinstance(controller_id, str) else None,
+            reason=reason,
+        )
+        if operation is None:
+            self._send_json(
+                {"error": "Operation is not cancellable."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+        self._send_json({"operation": operation})
+
     def _finished(
         self,
         payload: dict[str, Any],
@@ -1714,6 +3176,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             "response_text_available",
             False,
         )
+        controller_id = payload.get("controller_id")
         ack_only = payload.get("ack_only", False)
         timing = payload.get("timing")
 
@@ -1728,6 +3191,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
             return
 
         if chat_url is not None and not isinstance(
@@ -1779,6 +3246,17 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        claim_next = payload.get("claim_next", True)
+        if not isinstance(claim_next, bool):
+            self._send_json(
+                {
+                    "error":
+                        "claim_next must be a boolean."
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         if response_text is not None and len(response_text) > MAX_RESPONSE_TEXT_CHARS:
             self._send_json(
                 {
@@ -1816,6 +3294,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
             return
+        if existing_operation.get("controller_id") != controller_id.strip():
+            self._send_json(
+                {"error": "Operation is owned by a different controller instance."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+
+        if (
+            existing_operation.get("network_response_authoritative") is True
+            and existing_operation.get("response_text_available") is True
+            and isinstance(existing_operation.get("response_text"), str)
+            and existing_operation.get("response_text").strip()
+        ):
+            response_text = existing_operation.get("response_text")
+            response_text_available = True
 
         incoming_response_verified = (
             response_text_available is True
@@ -1855,15 +3348,29 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if existing_operation.get("operation_type") == "prompt":
+            completion_markers = existing_operation.get("completion_markers")
             persisted_response_verified = (
                 existing_operation.get("response_text_available") is True
                 and isinstance(existing_operation.get("response_text"), str)
                 and bool(str(existing_operation.get("response_text")).strip())
             )
+            candidate_response = (
+                response_text
+                if incoming_response_verified
+                else existing_operation.get("response_text")
+            )
             if not incoming_response_verified and not persisted_response_verified:
                 self._send_json(
                     {
                         "error": "Prompt completion requires verified nonblank response_text."
+                    },
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            if not completion_markers_satisfied(candidate_response, completion_markers):
+                self._send_json(
+                    {
+                        "error": "Prompt completion response does not satisfy the operation completion markers."
                     },
                     HTTPStatus.CONFLICT,
                 )
@@ -1884,13 +3391,24 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             response_text_available = True
 
         try:
-            operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
-                operation_id=operation_id,
-                chat_url=chat_url,
-                response_text=response_text,
-                response_text_available=response_text_available,
-                timing=normalized_timing,
-            )
+            if claim_next:
+                operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                    controller_id=controller_id.strip(),
+                )
+            else:
+                operation = self.bridge_state.complete_operation(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                )
+                chained_operation = None
         except InvalidOperationTransition:
             # Completion acknowledgements are retried by the browser controller.
             # Once an operation is durably completed, return its persisted state
@@ -1925,6 +3443,38 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 }
             )
 
+    def _processed(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            self._send_json({"error": "operation_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        operation = self.bridge_state.mark_response_processed(
+            operation_id,
+            controller_id.strip(),
+        )
+        if operation is None:
+            self._send_json(
+                {"error": "Response processing acknowledgement rejected."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+
+        self._send_json({
+            "ok": True,
+            "operation_id": operation_id,
+            "status": operation.get("status"),
+            "response_processing_complete": operation.get("response_processing_complete") is True,
+            "timing": operation.get("timing") or {},
+        })
+
     def _failed(
         self,
         payload: dict[str, Any],
@@ -1932,6 +3482,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         operation_id = payload.get(
             "operation_id"
         )
+
+        controller_id = payload.get("controller_id")
+        failure_source = payload.get("failure_source", "dom_fallback")
+
 
         error = payload.get(
             "error"
@@ -1950,6 +3504,33 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        current = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if current is None:
+            self._send_json({"error": "Operation not found."}, HTTPStatus.NOT_FOUND)
+            return
+        if current.get("controller_id") != controller_id.strip():
+            self._send_json({"error": "Operation is owned by a different controller instance."}, HTTPStatus.CONFLICT)
+            return
+
+        current_network = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if (
+            failure_source == "dom_fallback"
+            and isinstance(current_network, dict)
+            and current_network.get("network_terminal_event")
+        ):
+            self._send_json(
+                {
+                    "operation": current_network,
+                    "suppressed": True,
+                    "reason": "network_authority_already_recorded"
+                }
+            )
+            return
+
         if not isinstance(
             error,
             str,
@@ -1965,18 +3546,28 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         recovery_context = payload.get("recovery_context")
         if recovery_context is not None:
-            recovery_context = self.bridge_state._normalize_recovery_context(
+            normalized_recovery_context = self.bridge_state._normalize_recovery_context(
                 recovery_context
             )
-            if recovery_context is None:
-                self._send_json(
-                    {
-                        "error":
-                            "recovery_context is invalid."
-                    },
-                    HTTPStatus.BAD_REQUEST,
-                )
-                return
+            if normalized_recovery_context is None:
+                # Network lifecycle observations already persist the request,
+                # classification, and reason as first-class CDP evidence.
+                # Older extension builds may also send those network fields in
+                # recovery_context; ignore that unsupported auxiliary payload
+                # rather than orphaning a terminal network failure in generating.
+                if failure_source == "network":
+                    recovery_context = None
+                else:
+                    self._send_json(
+                        {
+                            "error":
+                                "recovery_context is invalid."
+                        },
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+            else:
+                recovery_context = normalized_recovery_context
 
         operation = (
             self.bridge_state.fail_operation(
@@ -2020,8 +3611,6 @@ class ChatGPTBridge:
         host: str = HOST,
         port: int = PORT,
     ):
-        ensure_runtime_directories()
-
         self.host = host
         self.port = port
 

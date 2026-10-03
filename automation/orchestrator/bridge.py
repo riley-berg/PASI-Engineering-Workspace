@@ -2323,6 +2323,14 @@ def _bridge_access_log_should_emit(message: str) -> bool:
     return not (0 < status_code < 400)
 
 
+def runner_registry_payload() -> dict[str, Any]:
+    active = runner_process_info()
+    snapshot = registry_snapshot()
+    snapshot["builtins"] = runner_registry_entries()[:2]
+    snapshot["active_profile"] = active.get("profile") if active else None
+    return snapshot
+
+
 class BridgeRequestHandler(BaseHTTPRequestHandler):
     """
     Small localhost HTTP API consumed by the native MV3
@@ -2425,14 +2433,6 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         self._set_headers(status, content_length=len(body))
 
         self.wfile.write(body)
-
-def runner_registry_payload() -> dict[str, Any]:
-    active = runner_process_info()
-    snapshot = registry_snapshot()
-    snapshot["builtins"] = runner_registry_entries()[:2]
-    snapshot["active_profile"] = active.get("profile") if active else None
-    return snapshot
-
 
     def _read_json(self) -> dict[str, Any]:
         raw_length = self.headers.get(

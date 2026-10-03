@@ -258,6 +258,12 @@ test("popup preserves bridge errors when runner state cannot be read", () => {
   assert.match(popupJs, /Runner state unavailable:/);
 });
 
+test("popup preserves bridge transport errors instead of collapsing them to HTTP unknown", () => {
+  assert.match(popupJs, /response\.error/);
+  assert.match(popupJs, /Bridge request failed: .*response\.error/);
+  assert.doesNotMatch(popupJs, /HTTP unknown/);
+});
+
 test("popup refuses to call a runner ready when post-start state is unavailable", () => {
   assert.match(
     popupJs,

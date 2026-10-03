@@ -246,14 +246,19 @@
       const currentStatus = String(state?.current_operation_status || "");
       const currentId = String(state?.current_operation_id || "");
       const runnerName = profileMeta.title;
-      const startupPhases = {
-        startup: profileId === "m1" ? "Starting M1 runner." : "Starting " + runnerName + " runner.",
-        health_check: "Checking bridge and browser health.",
-        browser_diagnostics: "Reading the active ChatGPT browser state.",
-        ready_for_first_operation: profileId === "m1"
-          ? "Ready for the first M1 operation."
-          : "Ready for the first operation."
-      };
+      const startupPhases = profileId === "m1"
+        ? {
+            startup: "Starting M1 runner.",
+            health_check: "Checking bridge and browser health.",
+            browser_diagnostics: "Reading the active ChatGPT browser state.",
+            ready_for_first_operation: "Ready for the first M1 operation."
+          }
+        : {
+            startup: "Starting " + runnerName + " runner.",
+            health_check: "Checking bridge and browser health.",
+            browser_diagnostics: "Reading the active ChatGPT browser state.",
+            ready_for_first_operation: "Ready for the first operation."
+          };
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
       const hasProgress = Number.isFinite(completed) && Number.isFinite(target) && target > 0;
@@ -991,7 +996,8 @@
       currentUrl.hidden = true;
       if (!currentUrl.parentElement) document.body.append(currentUrl);
 
-      renderRunnerDashboard(runnerState, runnerSupported, runnerRegistry);
+      runnerState._runnerRegistry = runnerRegistry;
+      renderRunnerDashboard(runnerState, runnerSupported);
       await renderRunnerRegistry(runnerRegistry);
       await renderUserscripts(activeResult);
 

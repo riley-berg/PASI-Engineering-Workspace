@@ -59,12 +59,6 @@ function fakeDebugger() {
           }],
         });
       }
-      if (method === 'DOM.getDocument') {
-        return callback({root: {nodeId: 1}});
-      }
-      if (method === 'DOM.querySelector') {
-        return callback({nodeId: 42});
-      }
       if (method === 'DOM.getBoxModel') {
         return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
       }
@@ -177,7 +171,7 @@ test('CDP controller keeps prompt bindings exclusive and exposes idle state', as
   assert.equal(controller.isIdle(31), true);
 });
 
-test('bounded browser interactions use native CDP input and selectors', async () => {
+test('bounded browser interactions use native CDP input and accessibility targets', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
   debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
@@ -227,7 +221,10 @@ test('bounded browser interactions use native CDP input and selectors', async ()
   assert.equal(scrolled.success, true);
 
   assert.ok(debuggerApi.commands.some((command) =>
-    command.method === 'DOM.querySelector' && command.params.selector === '#start'
+    command.method === 'Accessibility.getFullAXTree'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'DOM.getBoxModel' && command.params.backendNodeId === 42
   ));
   assert.ok(debuggerApi.commands.some((command) =>
     command.method === 'Input.dispatchMouseEvent' && command.params.type === 'mousePressed'

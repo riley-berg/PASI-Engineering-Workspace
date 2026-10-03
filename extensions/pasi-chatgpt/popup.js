@@ -247,10 +247,12 @@
       const currentId = String(state?.current_operation_id || "");
       const runnerName = profileMeta.title;
       const startupPhases = {
-        startup: "Starting " + runnerName + " runner.",
+        startup: profileId === "m1" ? "Starting M1 runner." : "Starting " + runnerName + " runner.",
         health_check: "Checking bridge and browser health.",
         browser_diagnostics: "Reading the active ChatGPT browser state.",
-        ready_for_first_operation: "Ready for the first operation."
+        ready_for_first_operation: profileId === "m1"
+          ? "Ready for the first M1 operation."
+          : "Ready for the first operation."
       };
       const completed = Number(state.completed_operations);
       const target = Number(state.target_operations);
@@ -439,7 +441,8 @@
     return lines.join("\n");
   }
 
-  function createRunnerCard(profileId, state, aggregateState = state, registryEntry = null) {
+  function createRunnerCard(profileId, state, aggregateState = state) {
+    const registryEntry = aggregateState?._registryEntry || null;
     const profile = runnerProfileMeta(profileId, state, registryEntry);
     const card = document.createElement("section");
     card.className = "runner-card";
@@ -569,7 +572,8 @@
     requestAnimationFrame(restore);
   }
 
-  function renderRunnerDashboard(state, visible, registry = null) {
+  function renderRunnerDashboard(state, visible) {
+    const registry = state?._runnerRegistry || null;
     const root = $("runnerCards");
     const scrollTop = (document.scrollingElement || document.documentElement)?.scrollTop || window.scrollY || 0;
     const openDiagnostics = new Map(
@@ -609,8 +613,7 @@
       const card = createRunnerCard(
         profileId,
         profileState,
-        {...state, _anotherRunnerActive: anotherRunnerActive},
-        registryEntry
+        {...state, _anotherRunnerActive: anotherRunnerActive, _registryEntry: registryEntry}
       );
       const diagnostic = card.querySelector(".runner-diagnostics");
       if (diagnostic) {

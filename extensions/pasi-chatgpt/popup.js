@@ -624,8 +624,6 @@
 
     if (!visible) {
       root.replaceChildren();
-      $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
-      $("connectionBadge").classList.remove("active");
       restorePopupScroll(scrollTop);
       return;
     }

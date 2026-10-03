@@ -255,6 +255,7 @@ class HumanTestTrustEvaluator:
 
         source_ids = tuple(run.run_id for run in successful[-50:])
         draft = {
+            "schema_version": TRUST_SCHEMA_VERSION,
             "status": TrustStatus.TRUSTED.value if trusted else TrustStatus.PENDING.value,
             "issued_at": utc_now(),
             "policy": {

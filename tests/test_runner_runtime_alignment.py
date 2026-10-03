@@ -84,6 +84,34 @@ def test_runner_start_uses_profile_isolated_runtime(monkeypatch, tmp_path):
     assert bridge.runner_state_path("m1") != bridge.runner_state_path("168h")
 
 
+def test_runner_diagnostics_endpoint_is_token_free(monkeypatch):
+    captured = []
+
+    class FakeServer:
+        bridge_state = object()
+        server_address = ("127.0.0.1", bridge.PORT)
+
+    handler = object.__new__(bridge.BridgeRequestHandler)
+    handler.path = "/runner/diagnostics"
+    handler.server = FakeServer()
+    handler._send_json = lambda payload, status=bridge.HTTPStatus.OK: captured.append((payload, status))
+
+    monkeypatch.setattr(
+        bridge,
+        "runner_diagnostics_payload",
+        lambda state: {"schema_version": "pasi-runner-diagnostics-v1"},
+    )
+
+    bridge.BridgeRequestHandler.do_GET(handler)
+
+    assert captured == [
+        (
+            {"schema_version": "pasi-runner-diagnostics-v1"},
+            bridge.HTTPStatus.OK,
+        )
+    ]
+
+
 def test_runner_diagnostics_payload_contains_live_process_and_profile_state(monkeypatch):
     class FakeBridgeState:
         def get_browser_health(self):

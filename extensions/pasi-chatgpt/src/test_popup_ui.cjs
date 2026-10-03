@@ -118,7 +118,7 @@ test("popup connection badge reflects bridge reachability, not runner availabili
   assert.match(popupJs, /function renderBridgeBadge\(health\)/);
   assert.match(popupJs, /connected \? "Connected" : "Bridge unavailable"/);
   assert.match(popupJs, /PASI bridge is responding on 127\.0\.0\.1:8765\./);
-  assert.doesNotMatch(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
+  assert.doesNotMatch(popupJs, /state\?\.available \? "Connected" : "Disconnected"/);
   assert.match(backgroundJs, /new Set\(\['\/health', '\/status'/);
   assert.match(popupJs, /state\.status === "starting"/);
   assert.match(popupJs, /state\.status === "stopping"/);
@@ -258,10 +258,12 @@ test("runner start requires ready state before claiming the runner is ready", ()
   assert.doesNotMatch(popupJs, /runner started\./);
 });
 
-test("popup preserves bridge errors when runner state cannot be read", () => {
+test("popup preserves bridge errors without assigning them to a runner", () => {
   assert.match(popupJs, /const message = String\(error\?\.message \|\| error/);
   assert.match(popupJs, /available: false,[\s\S]*reason: message/);
-  assert.match(popupJs, /Runner state unavailable:/);
+  assert.match(popupJs, /async function getBridgeHealth\(\)/);
+  assert.match(popupJs, /Bridge unavailable/);
+  assert.doesNotMatch(popupJs, /Runner state unavailable: /);
 });
 
 test("popup preserves bridge transport errors instead of collapsing them to HTTP unknown", () => {

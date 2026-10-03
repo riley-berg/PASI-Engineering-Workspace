@@ -121,10 +121,59 @@
     };
   }
 
+  function selectManagedTab(tabs, managedTabId, context = {}) {
+    const candidates = Array.isArray(tabs) ? tabs : [];
+    const busyTabIds = toSet(context.busyTabIds);
+    const trackedId = Number.isInteger(managedTabId) ? managedTabId : null;
+    const tracked = trackedId == null
+      ? null
+      : candidates.find((tab) => tab?.id === trackedId) || null;
+
+    if (tracked) {
+      if (busyTabIds.has(tracked.id)) {
+        return {
+          policy_version: POLICY_VERSION,
+          mode: "reuse_busy",
+          selected_tab_id: tracked.id,
+          reused_existing: true,
+          reason: "managed_tab_busy",
+          candidates: [],
+        };
+      }
+      return {
+        policy_version: POLICY_VERSION,
+        mode: "reuse",
+        selected_tab_id: tracked.id,
+        reused_existing: true,
+        reason: "managed_tab_reuse",
+        candidates: [],
+      };
+    }
+
+    const reusable = selectReusableTab(candidates, context);
+    if (reusable.selected_tab_id != null) {
+      return {
+        ...reusable,
+        mode: "adopt_existing",
+        reason: "adopt_safe_existing_tab",
+      };
+    }
+
+    return {
+      policy_version: POLICY_VERSION,
+      mode: "create",
+      selected_tab_id: null,
+      reused_existing: false,
+      reason: "create_managed_tab",
+      candidates: reusable.candidates,
+    };
+  }
+
   globalThis.PASI_TAB_SELECTION_POLICY = Object.freeze({
     POLICY_VERSION,
     isSupportedChatGPTTab,
     classifyTab,
     selectReusableTab,
+    selectManagedTab,
   });
 })();

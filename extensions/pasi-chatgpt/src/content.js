@@ -12,7 +12,6 @@
   const DOM_POLL_MS = TIMEOUT_POLICY.domPollMs || 100;
   const CLICK_SETTLE_MS = TIMEOUT_POLICY.clickSettleMs || 250;
   const THINKING_VERIFY_MS = TIMEOUT_POLICY.thinkingVerifyMs || 3000;
-  const RESPONSE_SETTLE_MS = TIMEOUT_POLICY.responseSettleMs || 10;
   const PREVIOUS_RESPONSE_WAIT_MS = 5 * 60 * 1000;
   const GENERATION_START_WAIT_MS = 30 * 1000;
   const MAX_RESPONSE_TEXT_CHARS = 120_000;
@@ -56,6 +55,169 @@
   let lastCompletionAckAtMs = 0;
   let activeRecoveryState = null;
 
+  let networkInterceptorReady = false;
+  let networkInterceptorVersion = null;
+  const networkStartedWaiters = new Map();
+  const networkTerminalWaiters = new Map();
+  const networkGenerationStates = new Map();
+
+  function postNetworkControllerCommand(command, operationId = null) {
+    try {
+      window.postMessage({
+        source: 'pasi-network-controller',
+        target: 'pasi-network-interceptor',
+        command: String(command || ''),
+        operation_id: operationId == null ? null : String(operationId)
+      }, location.origin);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function networkTimeoutPromise(timeoutMs, message) {
+    return new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+  }
+
+  async function ensureNetworkInterceptorReady(timeoutMs = 2000) {
+    if (networkInterceptorReady) return true;
+    const started = Date.now();
+    postNetworkControllerCommand('ping');
+    while (!networkInterceptorReady && Date.now() - started < timeoutMs) {
+      await sleep(10);
+      postNetworkControllerCommand('ping');
+    }
+    if (!networkInterceptorReady) {
+      throw new Error('PASI_NETWORK: interceptor is not installed or responsive');
+    }
+    return true;
+  }
+
+  function resolveNetworkWaiter(map, operationId, value) {
+    const waiter = map.get(operationId);
+    if (!waiter) return;
+    map.delete(operationId);
+    try { waiter(value); } catch (_) {}
+  }
+
+  function rejectNetworkWaiter(map, operationId, error) {
+    const waiter = map.get(operationId);
+    if (!waiter) return;
+    map.delete(operationId);
+    try { error ? waiter(Promise.reject(error)) : waiter(null); } catch (_) {}
+  }
+
+  function handleNetworkInterceptorMessage(event) {
+    if (event?.source !== window) return;
+    const data = event?.data;
+    if (!data || data.source !== 'pasi-network-interceptor') return;
+    if (data.version !== 'pasi-network-v1') return;
+
+    if (data.kind === 'ready') {
+      networkInterceptorReady = true;
+      networkInterceptorVersion = String(data.interceptor_version || data.version || '');
+      return;
+    }
+    if (data.kind !== 'event') return;
+
+    const operationId = typeof data.operation_id === 'string' ? data.operation_id : '';
+    if (!operationId) return;
+
+    const state = String(data.state || '');
+    networkGenerationStates.set(operationId, data);
+
+    if (state === 'request' || state === 'started') {
+      if (state === 'started' || data.generation_candidate === true) {
+        resolveNetworkWaiter(networkStartedWaiters, operationId, data);
+      }
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state,
+        request_id: data.request_id || null,
+        url: String(data.url || '').slice(0, 2000),
+        http_status: Number(data.http_status || 0),
+        captured_at: data.captured_at || new Date().toISOString(),
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+      return;
+    }
+
+    if (state === 'stalled') {
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state: 'stalled',
+        request_id: data.request_id || null,
+        reason: data.reason || 'no_stream_progress',
+        last_progress_at_ms: Number(data.last_progress_at_ms || 0),
+        stalled_at_ms: Number(data.stalled_at_ms || Date.now()),
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+      return;
+    }
+
+    if (['completed', 'interrupted', 'context_exhausted', 'usage_limited', 'auth_required', 'provider_error', 'unknown_failure'].includes(state)) {
+      resolveNetworkWaiter(networkTerminalWaiters, operationId, data);
+      setTimeout(() => {
+        if (networkGenerationStates.get(operationId) === data) networkGenerationStates.delete(operationId);
+      }, 1000);
+      void reportObservation('chatgpt_network_generation', {
+        operation_id: operationId,
+        state,
+        reason: data.reason || null,
+        request_id: data.request_id || null,
+        response_text_available: data.response_text_available === true,
+        response_text_chars: typeof data.response_text === 'string' ? data.response_text.length : 0,
+        conversation_id: data.conversation_id || null,
+        request_started_at_ms: Number(data.request_started_at_ms || 0) || null,
+        response_observed_at_ms: Number(data.response_observed_at_ms || 0) || null,
+        completed_at_ms: Number(data.completed_at_ms || 0) || null,
+        interceptor_version: networkInterceptorVersion,
+        native_controller: true
+      });
+    }
+  }
+
+  window.addEventListener('message', handleNetworkInterceptorMessage);
+
+  async function armNetworkGeneration(operationId) {
+    const id = String(operationId || '').trim();
+    if (!id) throw new Error('PASI_NETWORK: operation id is required to arm the interceptor');
+
+    await ensureNetworkInterceptorReady();
+
+    let startedResolve;
+    let terminalResolve;
+    const startedPromise = new Promise((resolve) => { startedResolve = resolve; });
+    const terminalPromise = new Promise((resolve) => { terminalResolve = resolve; });
+    networkStartedWaiters.set(id, startedResolve);
+    networkTerminalWaiters.set(id, terminalResolve);
+
+    postNetworkControllerCommand('arm', id);
+
+    return {
+      startedPromise: Promise.race([
+        startedPromise,
+        networkTimeoutPromise(GENERATION_START_WAIT_MS, 'PASI_NETWORK: generation request was not observed after bounded submission window')
+      ]),
+      terminalPromise: Promise.race([
+        terminalPromise,
+        networkTimeoutPromise(TIMEOUTS.generation, 'PASI_NETWORK: ChatGPT generation timed out at transport layer')
+      ])
+    };
+  }
+
+  function disarmNetworkGeneration(operationId) {
+    const id = String(operationId || '').trim();
+    if (!id) return;
+    networkStartedWaiters.delete(id);
+    networkTerminalWaiters.delete(id);
+    postNetworkControllerCommand('disarm', id);
+  }
+
   function scheduleImmediateOperation(operation) {
     if (immediateOperationQueued || extensionContextInvalidated || !operation?.operation_id) return;
     immediateOperationQueued = true;
@@ -65,43 +227,6 @@
         void processOperation(operation);
       }
     });
-  }
-
-  function armM0RecoveryProbe(operation) {
-    if (operation?.m0_recovery_probe !== true) return;
-    const key = 'pasi:m0-recovery-probe:' + String(operation.operation_id || '');
-    try {
-      if (sessionStorage.getItem(key) === 'fired') return;
-    } catch (_) {}
-
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (extensionContextInvalidated || activeOperationId !== operation.operation_id) {
-        clearInterval(timer);
-        return;
-      }
-      if (Date.now() - started > TIMEOUTS.generation) {
-        clearInterval(timer);
-        return;
-      }
-      if (!generating()) return;
-      try {
-        if (sessionStorage.getItem(key) === 'fired') {
-          clearInterval(timer);
-          return;
-        }
-      } catch (_) {}
-
-      const trigger = globalThis.PASI_RECOVERY_PROBE?.triggerConnectionLoss;
-      if (typeof trigger !== 'function') return;
-
-      try {
-        sessionStorage.setItem(key, 'fired');
-      } catch (_) {}
-
-      clearInterval(timer);
-      void trigger(operation.operation_id, 'm0_controlled_live_probe');
-    }, 250);
   }
 
   function scheduleImmediatePoll() {
@@ -587,50 +712,6 @@
     return count;
   }
 
-  function snapshotAssistantMessages() {
-    const nodes = assistantMessages();
-    return {
-      keys: new Set(nodes.map((node) => node.getAttribute?.('data-message-id')).filter(Boolean)),
-      nodes: new WeakSet(nodes),
-      count: nodes.length
-    };
-  }
-
-  function assistantNodeIsNew(node, snapshot) {
-    if (!node || !snapshot) return false;
-    const key = node.getAttribute?.('data-message-id');
-    if (key && snapshot.keys.has(key)) return false;
-    return !snapshot.nodes.has(node);
-  }
-
-  function nodeFollows(earlier, later) {
-    if (!earlier || !later || typeof earlier.compareDocumentPosition !== 'function') return false;
-    return Boolean(earlier.compareDocumentPosition(later) & 4);
-  }
-
-  function userMessageMatchesPrompt(node, prompt) {
-    const text = normalize(messageText(node));
-    const { head, tail } = promptFingerprints(prompt);
-    return Boolean((head && text.includes(head)) || (tail && text.includes(tail)));
-  }
-
-  function assistantResponseEvidence(snapshot, prompt) {
-    if (!snapshot || typeof prompt !== 'string' || !prompt.trim()) return '';
-    const matchedUsers = userMessages().filter((node) => userMessageMatchesPrompt(node, prompt));
-    if (!matchedUsers.length) return '';
-
-    const nodes = assistantMessages();
-    for (let index = nodes.length - 1; index >= 0; index -= 1) {
-      const node = nodes[index];
-      if (!assistantNodeIsNew(node, snapshot)) continue;
-      if (!matchedUsers.some((user) => nodeFollows(user, node))) continue;
-      const text = extractAssistant(node);
-      if (!text) continue;
-      return text;
-    }
-    return '';
-  }
-
   function captureUiDiagnostics() {
     const buttons = Array.from(document.querySelectorAll('button, [role="button"]'))
       .filter(visible).slice(0, 30)
@@ -752,8 +833,28 @@
         lastKnownChatUrl = currentUrl;
       }
 
-      // One detector pass per heartbeat. Repeated DOM scans here are
-      // unnecessary and can compete with the prompt/response hot path.
+      // During an active network generation, do not run any DOM detector,
+      // composer query, or reasoning selector scan. The network interceptor is
+      // the authoritative lifecycle/transport signal on this hot path.
+      if (processing && networkInterceptorReady) {
+        await reportObservation('chatgpt_health', {
+          chat_url: currentUrl,
+          provider_usage_limited: null,
+          auth_required: null,
+          conversation_context_exhausted: null,
+          thinking_enabled: null,
+          thinking_capability: reasoningMode === 'unavailable' ? 'unavailable' : 'network_active',
+          page_visible: null,
+          composer_present: null,
+          native_controller: true,
+          runtime_error_telemetry: true,
+          network_interceptor: 'healthy',
+          network_interceptor_version: networkInterceptorVersion,
+          active_operation_id: activeOperationId
+        }, 2000);
+        return;
+      }
+
       const detected = detectorState();
       const exhausted = detected.context_exhausted === true;
       const limited = !exhausted && detected.usage_limited === true;
@@ -774,6 +875,8 @@
         composer_present: composerPresent,
         native_controller: true,
         runtime_error_telemetry: true,
+        network_interceptor: networkInterceptorReady ? 'healthy' : 'unavailable',
+        network_interceptor_version: networkInterceptorVersion,
         active_operation_id: activeOperationId
       }, 2000);
 
@@ -1303,14 +1406,17 @@
 
 
   async function submitPrompt(expected, options = {}) {
+    const networkStartedPromise = options.networkStartedPromise || null;
     const fastPath = options.fastPath === true;
     const handoffBox = options.readyBox && options.readyBox.isConnected === true
       ? options.readyBox
       : null;
+    const networkSubmission = Boolean(networkStartedPromise);
     const snapshot = snapshotUserMessages();
     const { head, tail } = promptFingerprints(expected);
     const newMessageState = () => classifyNewUserMessages(userMessages(), snapshot, head, tail, messageText);
     const accepted = () => {
+      if (networkSubmission) return null;
       const state = newMessageState();
       if (state === 'match') return 'verified';
       if (state === 'new_unmatched' && generating()) return 'new_message_generating';
@@ -1319,7 +1425,7 @@
 
     const strategies = [
       async (box, button) => {
-        if (generating()) return false;
+        if (!networkSubmission && generating()) return false;
         const form = (button || box).closest?.('form') || box.closest?.('form') || null;
         if (!form || typeof form.requestSubmit !== 'function') return false;
         try {
@@ -1332,12 +1438,12 @@
         }
       },
       async (_box, button) => {
-        if (generating() || !button || disabled(button)) return false;
+        if ((!networkSubmission && generating()) || !button || disabled(button)) return false;
         nativeMouseActivate(button);
         return true;
       },
       async (box) => {
-        if (generating() || !composerContainsPrompt(box, expected)) return false;
+        if ((!networkSubmission && generating()) || !composerContainsPrompt(box, expected)) return false;
         dispatchEnter(box);
         return true;
       }
@@ -1359,19 +1465,16 @@
       };
 
       if (fastPath) {
-        const detected = detectorState();
-        if (detected.auth_required === true) throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
-        if (detected.context_exhausted === true) throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
-        if (detected.context_exhausted !== true && detected.usage_limited === true) {
-          throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
-        }
         if (reasoningMode !== 'thinking' && reasoningMode !== 'unavailable') await ensureThinkingBestEffort();
       } else {
         await ensurePromptSubmissionReady();
       }
       const box = handoffBox || composer();
       const composerEmptied = !box || !composerContainsPrompt(box, expected);
-      if ((attempt > 1 && composerEmptied) || generating() || newMessageState()) {
+      const alreadySubmitted =
+        !networkSubmission &&
+        (generating() || newMessageState());
+      if ((attempt > 1 && composerEmptied) || alreadySubmitted) {
         via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
         const finalVia = via || 'sent_unverified';
         return {
@@ -1422,6 +1525,21 @@
       const fired = await strategies[attempt - 1](readyBox, button);
       if (!fired) continue;
 
+      if (networkStartedPromise) {
+        return {
+          via: 'network_armed',
+          attempt,
+          verified: false,
+          timing: {
+            injected_at_ms: injectedAtMs,
+            ack_at_ms: Date.now(),
+            user_messages_added: null,
+            ack_verified: false,
+            submission_via: 'network_armed'
+          }
+        };
+      }
+
       via = await waitUntil(accepted, SUBMISSION_ACK_MS, DOM_POLL_MS);
       const finalVia = via || 'sent_unverified';
       return {
@@ -1470,58 +1588,6 @@
     );
   }
 
-  async function waitForResponse(baseline, completionMarkers = [], evidenceContext = null) {
-    let sawGeneration = false;
-    const responseEvidence = () => assistantResponseEvidence(
-      evidenceContext?.assistantSnapshot,
-      evidenceContext?.prompt
-    );
-    let generationEndedAt = 0;
-    let failureReason = null;
-
-    const response = await waitUntil(() => {
-      // While generation is active, the stop control is the only state needed
-      // for this hot loop. Avoid a full failure-marker DOM scan on every mutation.
-      if (generating()) {
-        sawGeneration = true;
-        generationEndedAt = 0;
-        return null;
-      }
-
-      const detected = detectorState();
-      if (detected.context_exhausted === true) {
-        failureReason = 'CHAT_EXHAUSTED: conversation context is exhausted';
-        return null;
-      }
-      if (
-        detected.context_exhausted !== true &&
-        detected.usage_limited === true
-      ) {
-        failureReason = 'CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited';
-        return null;
-      }
-
-      if (sawGeneration) {
-        if (!generationEndedAt) generationEndedAt = Date.now();
-        if (Date.now() - generationEndedAt < RESPONSE_SETTLE_MS) return null;
-        const responseText = responseEvidence();
-        return responseText && completionMarkersSatisfied(responseText, completionMarkers)
-          ? responseText
-          : null;
-      }
-
-      const responseText = responseEvidence();
-      return completionMarkersSatisfied(responseText, completionMarkers)
-        ? responseText
-        : null;
-    }, TIMEOUTS.generation, DOM_POLL_MS);
-
-    if (failureReason) throw new Error(failureReason);
-    if (response) return response;
-    throw new Error('PASI_NATIVE: ChatGPT generation timed out');
-  }
-
-
   function rememberContextRecovery(operation, error) {
     let stored = null;
     try {
@@ -1542,6 +1608,8 @@
       recovery_context: recoveryContext(),
       reload_count: 0,
       phase: 'context_exhausted',
+      verification_source: 'network_interceptor',
+      network_state: 'context_exhausted',
       error: String(error?.message || error)
     }));
   }
@@ -1567,7 +1635,37 @@
       reload_count: 0,
       phase: 'monitoring',
       error: String(error?.message || error),
-      response_recovery: true
+      response_recovery: true,
+      verification_source: 'network_interceptor'
+    }));
+  }
+
+  function rememberNetworkRecovery(operation, error, reason = 'network_error') {
+    let stored = null;
+    try {
+      stored = JSON.parse(localStorage.getItem(ACTIVE_KEY) || 'null');
+    } catch (_) {}
+
+    const startedAt = typeof stored?.started_at === 'string'
+      ? stored.started_at
+      : new Date().toISOString();
+
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify({
+      operation_id: operation.operation_id,
+      operation_type: operation.operation_type,
+      started_at: startedAt,
+      started_ms: Date.parse(startedAt) || Date.now(),
+      baseline: typeof stored?.baseline === 'string' ? stored.baseline : '',
+      chat_url: chatUrl(),
+      recovery_context: recoveryContext(),
+      reload_count: 0,
+      phase: 'monitoring',
+      recovery_reason: reason,
+      verification_source: 'network_interceptor',
+      network_recovery: true,
+      response_stopped_on_loss: true,
+      checkpoint_preserved: true,
+      error: String(error?.message || error)
     }));
   }
 
@@ -1599,6 +1697,9 @@
     };
     if (timing && typeof timing === 'object') body.timing = timing;
     if (typeof responseText === 'string') Object.assign(body, completionProgress(responseText));
+    const networkState = typeof timing?.network_state === 'string'
+      ? timing.network_state
+      : null;
     const publishResponseTelemetry = () => {
       void reportObservation('chatgpt_response', {
         chat_url: body.chat_url,
@@ -1606,15 +1707,17 @@
         response_text_available: body.response_text_available,
         ...(typeof responseText === 'string' ? completionProgress(responseText) : {}),
         ...(body.timing ? { timing: body.timing } : {}),
-        conversation_context_exhausted: contextExhausted(),
-        chat_exhausted: contextExhausted(),
-        provider_usage_limited: usageLimited(),
+        conversation_context_exhausted: networkState === 'context_exhausted',
+        chat_exhausted: networkState === 'context_exhausted',
+        provider_usage_limited: networkState === 'usage_limited',
+        network_state: networkState,
         active_operation_id: operationId
       }).catch(() => {});
 
       void reportObservation('chat_response_received', {
         operation_id: operationId,
         phase: 'response_complete',
+        network_state: networkState,
         captured_at: new Date().toISOString()
       });
     };
@@ -1637,21 +1740,15 @@
                 payload.next_operation.__pasi_baseline_fingerprint = fingerprintFromText(responseText);
               }
             }
-            // Publish a fresh conversation signature before the completion
-            // acknowledgement returns to the acceptance runner. The periodic
-            // heartbeat can lag by several seconds, so this is verification
-            // telemetry only and never an acceptance gate.
-            await reportObservation('chatgpt_state', {
+            void reportObservation('chatgpt_state', {
               chat_url: chatUrl(),
-              conversation_context_exhausted: contextExhausted(),
-              chat_exhausted: contextExhausted(),
-              provider_usage_limited: usageLimited(),
+              conversation_context_exhausted: networkState === 'context_exhausted',
+              chat_exhausted: networkState === 'context_exhausted',
+              provider_usage_limited: networkState === 'usage_limited',
+              network_state: networkState,
+              network_request_id: timing?.network_request_id || null,
               github_attached: githubAttached,
               reasoning_mode: reasoningMode,
-              reasoning_capability: reasoningMode === 'unavailable'
-                ? 'unavailable'
-                : (thinkingEnabled() === true ? 'available' : 'unknown'),
-              conversation_signature: conversationSignature(),
               active_operation_id: operationId,
               native_controller: true
             }).catch(() => {});
@@ -1723,6 +1820,7 @@
     localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
     let finalized = false;
     let chainedOperation = null;
+    let networkGeneration = null;
     try {
       switch (operation.operation_type) {
         case 'new_chat': await newChat(); break;
@@ -1742,20 +1840,17 @@
           // Take the ready composer synchronously on this hot path, with the
           // existing event-driven wait as a bounded fallback if the UI is one
           // render behind.
-          const immediateBox = fastHandoff ? (() => {
-            const current = composer();
-            return current && !generating() ? current : null;
-          })() : null;
+          const immediateBox = fastHandoff ? composer() : null;
           const box = immediateBox || await waitUntil(() => {
             const current = composer();
-            return current && !generating() ? current : null;
+            return current && (fastHandoff || !generating()) ? current : null;
           }, PREVIOUS_RESPONSE_WAIT_MS, DOM_POLL_MS);
-          if (!box) throw new Error(generating() ? 'PASI_NATIVE: previous response still generating' : 'PASI_NATIVE: composer unavailable');
+          if (!box) throw new Error('PASI_NATIVE: composer unavailable');
           const baseline = typeof operation.__pasi_baseline_fingerprint === 'string'
             ? operation.__pasi_baseline_fingerprint
             : fingerprint();
           const promptText = operationPrompt(operation);
-          const assistantSnapshot = snapshotAssistantMessages();
+          networkGeneration = await armNetworkGeneration(operation.operation_id);
           if (!activeRecoveryState || activeRecoveryState.operation_id !== operation.operation_id) {
             activeRecoveryState = {
               operation_id: operation.operation_id,
@@ -1771,9 +1866,16 @@
           localStorage.setItem(ACTIVE_KEY, JSON.stringify(activeRecoveryState));
           const submission = await submitPrompt(promptText, {
             fastPath: fastHandoff,
-            readyBox: box
+            readyBox: box,
+            networkStartedPromise: networkGeneration?.startedPromise || null
           });
-          const browserTiming = { ...(submission.timing || {}) };
+          const networkStarted = await networkGeneration.startedPromise;
+          const browserTiming = {
+            ...(submission.timing || {}),
+            network_submission_verified: true,
+            network_request_id: networkStarted.request_id || null,
+            network_request_observed_at_ms: Number(networkStarted.request_started_at_ms || (networkStarted.captured_at ? Date.parse(networkStarted.captured_at) : Date.now())) || Date.now()
+          };
           const previousCompletionAckAtMs = Number(operation.__pasi_completion_ack_at_ms);
           if (
             Number.isFinite(previousCompletionAckAtMs) &&
@@ -1804,6 +1906,7 @@
             submission_via: submission.via,
             submission_attempt: submission.attempt,
             submission_verified: submission.verified,
+            network_submission_verified: browserTiming.network_submission_verified === true,
             timing: browserTiming
           });
           if (!submission.verified) {
@@ -1813,24 +1916,39 @@
               attempt: submission.attempt
             });
           }
-          let generationStartMs = null;
-          if (!(await waitUntil(() => {
-            const started = generating() || Boolean(assistantResponseEvidence(assistantSnapshot, promptText, baseline));
-            if (started && generationStartMs === null) generationStartMs = Date.now();
-            return started;
-          }, GENERATION_START_WAIT_MS, DOM_POLL_MS))) {
-            throw new Error('PASI_NATIVE: submission accepted but generation did not start');
+          const networkResult = await networkGeneration.terminalPromise;
+          browserTiming.network_request_id = networkResult.request_id || null;
+          browserTiming.network_interceptor_version = networkInterceptorVersion;
+          browserTiming.network_state = networkResult.state || null;
+          browserTiming.network_reason = networkResult.reason || null;
+          browserTiming.network_request_started_at_ms = Number(networkResult.request_started_at_ms || 0) || null;
+          browserTiming.network_response_observed_at_ms = Number(networkResult.response_observed_at_ms || 0) || null;
+          browserTiming.generation_start_ms = browserTiming.network_request_started_at_ms;
+          browserTiming.completed_at_ms = Number(networkResult.completed_at_ms || 0) || Date.now();
+
+          if (networkResult.state === 'context_exhausted') {
+            throw new Error('CHAT_EXHAUSTED: conversation context is exhausted');
           }
-          browserTiming.generation_start_ms = generationStartMs;
-          armM0RecoveryProbe(operation);
-          const response = await waitForResponse(
-            baseline,
-            Array.isArray(operation.completion_markers)
-              ? operation.completion_markers
-              : [],
-            { assistantSnapshot, prompt: promptText }
-          );
-          browserTiming.completed_at_ms = Date.now();
+          if (networkResult.state === 'usage_limited') {
+            throw new Error('CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited');
+          }
+          if (networkResult.state === 'auth_required') {
+            throw new Error('CHAT_AUTH_REQUIRED: interactive authentication/security verification is required');
+          }
+          if (networkResult.state === 'interrupted') {
+            throw new Error('PASI_NETWORK: generation interrupted: ' + String(networkResult.reason || 'unknown'));
+          }
+          if (networkResult.state !== 'completed') {
+            throw new Error('PASI_NETWORK: generation failed: ' + String(networkResult.state || 'unknown'));
+          }
+
+          const response = typeof networkResult.response_text === 'string'
+            ? networkResult.response_text
+            : '';
+          if (!response.trim()) {
+            throw new Error('PASI_NATIVE: response text unavailable; network completion acknowledgement withheld');
+          }
+
           const completion = await finishOperation(
             operation.operation_id,
             response,
@@ -1868,9 +1986,17 @@
           errorMessage.startsWith('PASI_NATIVE: ChatGPT generation timed out')
         );
 
+      const networkRecoveryEligible =
+        operation.operation_type === 'prompt' &&
+        errorMessage.startsWith('PASI_NETWORK: generation interrupted:');
+
       if (contextRecoveryEligible) {
         activeRecoveryState = null;
         rememberContextRecovery(operation, error);
+        finalized = false;
+      } else if (networkRecoveryEligible) {
+        activeRecoveryState = null;
+        rememberNetworkRecovery(operation, error, 'connection_error');
         finalized = false;
       } else if (responseRecoveryEligible) {
         activeRecoveryState = null;
@@ -1888,6 +2014,9 @@
       }
       throw error;
     } finally {
+      if (operation.operation_type === 'prompt') {
+        disarmNetworkGeneration(operation.operation_id);
+      }
       if (leaseTimerId !== null) {
         clearInterval(leaseTimerId);
         leaseTimerId = null;
@@ -2104,14 +2233,13 @@
       composerContainsPrompt,
       userMessages,
       assistantMessages,
-      snapshotAssistantMessages,
-      assistantResponseEvidence,
       conversationSignature,
       operationPrompt,
       findNewChatControl,
       detectorState,
       submitPrompt,
-      waitForResponse
+      armNetworkGeneration,
+      disarmNetworkGeneration
     });
   } else {
     start();

@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import argparse, hashlib, json, os, re, time, uuid
+import argparse, base64, hashlib, json, os, re, stat, time, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
+from cryptography.hazmat.primitives.serialization import Encoding, PrivateFormat, PublicFormat, NoEncryption
 from automation.computer_use.chatgpt import ChatGPTAdapter, ChatGPTAdapterError, UrllibBridgeTransport
 
 CHAT_URL_RE=re.compile(r"^https://chatgpt\.com/c/")
 TERMINAL={"complete","error","interrupted"}
+CHAT_RECOVERY_WINDOW_SECONDS=float(os.environ.get("PASI_CHAT_RECOVERY_WINDOW_SECONDS","120"))
+CHAT_RECOVERY_POLL_SECONDS=max(0.25,float(os.environ.get("PASI_CHAT_RECOVERY_POLL_SECONDS","1")))
+EXHAUSTION_FRESHNESS_MIN_SECONDS=-5.0
+EXHAUSTION_FRESHNESS_MAX_SECONDS=30.0
 PASI_DEPLOYMENT_ID=os.environ.get("PASI_DEPLOYMENT_ID","pasi-chatgpt-handoff")
 RUNTIME_DIR=Path(os.environ.get("PASI_ENGINEERING_RUNTIME_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"runtime"))).expanduser().resolve()
 STATE_PATH=RUNTIME_DIR/"chat-session.json"
+NEW_CHAT_DECISIONS_PATH=RUNTIME_DIR/"new-chat-decisions.jsonl"
+NEW_CHAT_CHAIN_GENESIS="PASI_NEW_CHAT_CHAIN_V1:GENESIS"
+AUDIT_KEY_DIR=Path(os.environ.get("PASI_NEW_CHAT_AUDIT_KEY_DIR",str(Path.home()/".pasi"/"engineering-workspace-168h"/"keys"))).expanduser().resolve()
+AUDIT_PRIVATE_KEY_PATH=AUDIT_KEY_DIR/"new-chat-audit-ed25519-private.pem"
+AUDIT_PUBLIC_KEY_PATH=AUDIT_KEY_DIR/"new-chat-audit-ed25519-public.pem"
+AUDIT_SIGNATURE_ALGORITHM="Ed25519"
 
 def fp(task:str)->str: return hashlib.sha256(task.strip().encode()).hexdigest()
 def valid_url(v:object)->str|None: return v if isinstance(v,str) and CHAT_URL_RE.match(v) else None
@@ -32,24 +45,410 @@ def expected_version(root:Path)->str|None:
 
 def observed_chat_state(observation:Mapping[str,Any]|None)->dict[str,Any]:
     data=observation.get("data") if isinstance(observation,Mapping) else None
+    kind=data.get("kind") if isinstance(data,Mapping) else None
+    captured=observation.get("captured_at") if isinstance(observation,Mapping) else None
     if not isinstance(data,Mapping):
-        return {"chat_url":None,"chat_exhausted":False,"usage_limited":False,"active_operation_id":None,"connection_failure":False}
+        return {
+            "chat_url":None,
+            "chat_exhausted":False,
+            "usage_limited":False,
+            "active_operation_id":None,
+            "connection_failure":False,
+            "conversation_signature":None,
+            "captured_at":captured if isinstance(captured,str) else None,
+            "kind":kind,
+        }
     return {
         "chat_url":valid_url(data.get("chat_url")),
         "chat_exhausted":bool(data.get("conversation_context_exhausted") or data.get("chat_exhausted")),
         "usage_limited":bool(data.get("provider_usage_limited") or data.get("usage_limited")),
         "active_operation_id":data.get("active_operation_id") if isinstance(data.get("active_operation_id"),str) else None,
         "connection_failure":bool(data.get("connection_failure")),
+        "conversation_signature":data.get("conversation_signature") if isinstance(data.get("conversation_signature"),str) and data.get("conversation_signature").strip() else None,
+        "captured_at":captured if isinstance(captured,str) else None,
+        "kind":kind,
     }
 
 def select_chat_mode(state:Mapping[str,Any],live:Mapping[str,Any])->str:
     if bool(live.get("usage_limited") or state.get("usage_limited")):
         return "blocked"
-    if bool(live.get("chat_exhausted") or state.get("chat_exhausted")):
+    # Only a fresh, current-conversation exhaustion proof may authorize a
+    # replacement chat. Raw/stale exhaustion flags are intentionally ignored.
+    if bool(live.get("chat_exhaustion_confirmed")):
         return "new_chat"
     if valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")):
         return "reuse"
-    return "new_chat"
+    return "recover"
+
+
+def _timestamp_age_seconds(value:object)->float|None:
+    if not isinstance(value,str):
+        return None
+    try:
+        captured=datetime.fromisoformat(value.replace("Z","+00:00"))
+    except ValueError:
+        return None
+    if captured.tzinfo is None:
+        captured=captured.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc)-captured).total_seconds()
+
+
+def _fresh_timestamp(value:object,max_age_seconds:float=EXHAUSTION_FRESHNESS_MAX_SECONDS)->bool:
+    age=_timestamp_age_seconds(value)
+    return age is not None and EXHAUSTION_FRESHNESS_MIN_SECONDS <= age <= max_age_seconds
+
+
+def _parse_timestamp(value:object)->datetime|None:
+    if not isinstance(value,str):
+        return None
+    try:
+        parsed=datetime.fromisoformat(value.replace("Z","+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _canonical_record_payload(record:Mapping[str,Any])->str:
+    payload=dict(record)
+    payload.pop("record_hash",None)
+    payload.pop("record_signature",None)
+    return json.dumps(payload,sort_keys=True,ensure_ascii=False,separators=(",",":"))
+
+
+def _record_hash(record:Mapping[str,Any])->str:
+    return hashlib.sha256(_canonical_record_payload(record).encode("utf-8")).hexdigest()
+
+
+def _public_key_id(public_key:Ed25519PublicKey)->str:
+    return hashlib.sha256(public_key.public_bytes(Encoding.Raw,PublicFormat.Raw)).hexdigest()[:16]
+
+
+def _ensure_audit_keypair()->tuple[Ed25519PrivateKey,str]:
+    AUDIT_KEY_DIR.mkdir(parents=True,exist_ok=True)
+    if AUDIT_PRIVATE_KEY_PATH.exists():
+        try:
+            loaded=serialization.load_pem_private_key(AUDIT_PRIVATE_KEY_PATH.read_bytes(),password=None)
+        except (ValueError,OSError) as exc:
+            raise RuntimeError(f"new-chat audit private key is invalid: {exc}") from exc
+        if not isinstance(loaded,Ed25519PrivateKey):
+            raise RuntimeError("new-chat audit private key is not Ed25519")
+        private_key=loaded
+    else:
+        private_key=Ed25519PrivateKey.generate()
+        pem=private_key.private_bytes(Encoding.PEM,PrivateFormat.PKCS8,NoEncryption())
+        AUDIT_PRIVATE_KEY_PATH.write_bytes(pem)
+        AUDIT_PRIVATE_KEY_PATH.chmod(stat.S_IRUSR|stat.S_IWUSR)
+
+    public_key=private_key.public_key()
+    public_pem=public_key.public_bytes(Encoding.PEM,PublicFormat.SubjectPublicKeyInfo)
+    if not AUDIT_PUBLIC_KEY_PATH.exists() or AUDIT_PUBLIC_KEY_PATH.read_bytes()!=public_pem:
+        AUDIT_PUBLIC_KEY_PATH.write_bytes(public_pem)
+        AUDIT_PUBLIC_KEY_PATH.chmod(stat.S_IRUSR|stat.S_IWUSR|stat.S_IRGRP|stat.S_IROTH)
+    return private_key,_public_key_id(public_key)
+
+
+def _load_audit_public_key(path:Path=AUDIT_PUBLIC_KEY_PATH)->Ed25519PublicKey|None:
+    try:
+        key=serialization.load_pem_public_key(path.read_bytes())
+    except (OSError,ValueError):
+        return None
+    return key if isinstance(key,Ed25519PublicKey) else None
+
+
+def _sign_record_hash(record_hash:str, private_key:Ed25519PrivateKey)->str:
+    return base64.b64encode(private_key.sign(record_hash.encode("ascii"))).decode("ascii")
+
+
+def _verify_record_signature(record:Mapping[str,Any], public_key:Ed25519PublicKey)->bool:
+    signature=record.get("record_signature")
+    if not isinstance(signature,str) or not signature:
+        return False
+    try:
+        public_key.verify(
+            base64.b64decode(signature,validate=True),
+            str(record.get("record_hash")).encode("ascii"),
+        )
+    except (ValueError,TypeError,UnicodeError):
+        return False
+    return True
+
+
+def _read_chain_records(path:Path)->tuple[list[dict[str,Any]],list[str],int]:
+    if not path.exists():
+        return [],[],0
+    values:list[dict[str,Any]]=[]
+    errors:list[str]=[]
+    nonempty_lines=0
+    for line_number,line in enumerate(path.read_text(encoding="utf-8").splitlines(),1):
+        if not line.strip():
+            continue
+        nonempty_lines+=1
+        try:
+            value=json.loads(line)
+        except json.JSONDecodeError as exc:
+            errors.append(f"line {line_number}: invalid JSON: {exc.msg}")
+            continue
+        if not isinstance(value,Mapping):
+            errors.append(f"line {line_number}: record must be an object")
+            continue
+        values.append(dict(value))
+    return values,errors,nonempty_lines
+
+
+def validate_new_chat_decision_record(record:Mapping[str,Any])->list[str]:
+    errors:list[str]=[]
+    if record.get("decision")!="create_new_chat":
+        errors.append("decision must be create_new_chat")
+    for field in ("decision_id","recorded_at","observed_conversation_url","conversation_signature",
+                  "freshness_window_seconds","exhaustion_evidence","chain_index",
+                  "previous_record_hash","record_hash","record_signature",
+                  "signature_algorithm","signature_key_id"):
+        if field not in record:
+            errors.append(f"missing required field: {field}")
+    if not valid_url(record.get("observed_conversation_url")):
+        errors.append("observed_conversation_url is not a valid ChatGPT conversation URL")
+    signature=record.get("conversation_signature")
+    if not isinstance(signature,str) or not signature.strip():
+        errors.append("conversation_signature is missing or empty")
+
+    window=record.get("freshness_window_seconds")
+    if not isinstance(window,Mapping):
+        errors.append("freshness_window_seconds must be an object")
+        window={}
+    min_age=window.get("min")
+    max_age=window.get("max")
+    if min_age!=EXHAUSTION_FRESHNESS_MIN_SECONDS or max_age!=EXHAUSTION_FRESHNESS_MAX_SECONDS:
+        errors.append("freshness window does not match the enforced exhaustion window")
+
+    observed_age=record.get("observed_age_seconds")
+    if not isinstance(observed_age,(int,float)):
+        errors.append("observed_age_seconds must be numeric")
+    elif not isinstance(min_age,(int,float)) or not isinstance(max_age,(int,float)) or not min_age<=observed_age<=max_age:
+        errors.append("observed_age_seconds falls outside the recorded freshness window")
+
+    captured=_parse_timestamp((record.get("exhaustion_evidence") or {}).get("captured_at") if isinstance(record.get("exhaustion_evidence"),Mapping) else None)
+    recorded=_parse_timestamp(record.get("recorded_at"))
+    if captured is None:
+        errors.append("exhaustion_evidence.captured_at is missing or invalid")
+    if recorded is None:
+        errors.append("recorded_at is missing or invalid")
+    if captured is not None and recorded is not None and recorded < captured:
+        errors.append("recorded_at predates exhaustion evidence capture")
+
+    evidence=record.get("exhaustion_evidence")
+    if not isinstance(evidence,Mapping):
+        return errors
+
+    required_evidence={
+        "kind","chat_url","conversation_signature","captured_at","conversation_context_exhausted",
+        "chat_exhausted","normalized_chat_exhausted",
+    }
+    missing=sorted(required_evidence-set(evidence))
+    errors.extend(f"missing exhaustion evidence field: {field}" for field in missing)
+    if evidence.get("kind")!="chatgpt_state":
+        errors.append("exhaustion evidence kind must be chatgpt_state")
+    if evidence.get("chat_url")!=record.get("observed_conversation_url"):
+        errors.append("evidence chat_url does not match observed_conversation_url")
+    if evidence.get("conversation_signature")!=record.get("conversation_signature"):
+        errors.append("evidence conversation_signature does not match top-level signature")
+    if evidence.get("conversation_context_exhausted") is not True:
+        errors.append("conversation_context_exhausted evidence is not true")
+    if evidence.get("chat_exhausted") is not True:
+        errors.append("chat_exhausted evidence is not true")
+    if evidence.get("normalized_chat_exhausted") is not True:
+        errors.append("normalized_chat_exhausted evidence is not true")
+    if record.get("signature_algorithm")!=AUDIT_SIGNATURE_ALGORITHM:
+        errors.append("signature_algorithm must be Ed25519")
+    if not isinstance(record.get("signature_key_id"),str) or not record.get("signature_key_id").strip():
+        errors.append("signature_key_id is missing or empty")
+    if not isinstance(record.get("record_signature"),str) or not record.get("record_signature").strip():
+        errors.append("record_signature is missing or empty")
+    return errors
+
+
+def replay_new_chat_decisions(path:Path|None=None, state_path:Path|None=None, public_key_path:Path|None=None)->dict[str,Any]:
+    target=path or NEW_CHAT_DECISIONS_PATH
+    anchor_path=state_path
+    if anchor_path is None and target==NEW_CHAT_DECISIONS_PATH:
+        anchor_path=STATE_PATH
+    values,parse_errors,nonempty_lines=_read_chain_records(target)
+    errors=list(parse_errors)
+    public_key=_load_audit_public_key(public_key_path or AUDIT_PUBLIC_KEY_PATH)
+    if values and public_key is None:
+        errors.append("audit public key is missing or invalid")
+    previous_hash=NEW_CHAT_CHAIN_GENESIS
+    expected_index=1
+    for position,value in enumerate(values,1):
+        for error in validate_new_chat_decision_record(value):
+            errors.append(f"line {position}: {error}")
+        index=value.get("chain_index")
+        if index!=expected_index:
+            errors.append(f"line {position}: chain_index {index!r} does not equal expected {expected_index}")
+        if value.get("previous_record_hash")!=previous_hash:
+            errors.append(f"line {position}: previous_record_hash does not match prior chain hash")
+        stored_hash=value.get("record_hash")
+        if isinstance(stored_hash,str) and stored_hash:
+            calculated_hash=_record_hash(value)
+            if stored_hash!=calculated_hash:
+                errors.append(f"line {position}: record_hash does not match canonical record contents")
+            if public_key is not None:
+                actual_key_id=_public_key_id(public_key)
+                if value.get("signature_key_id")!=actual_key_id:
+                    errors.append(f"line {position}: signature_key_id does not match verification key")
+                elif not _verify_record_signature(value,public_key):
+                    errors.append(f"line {position}: record_signature is invalid")
+        else:
+            calculated_hash=None
+        if calculated_hash is not None:
+            previous_hash=calculated_hash
+        else:
+            previous_hash=stored_hash if isinstance(stored_hash,str) else previous_hash
+        expected_index+=1
+
+    if anchor_path is not None and anchor_path.exists():
+        try:
+            anchor=json.loads(anchor_path.read_text(encoding="utf-8"))
+        except (OSError,json.JSONDecodeError):
+            anchor={}
+        if isinstance(anchor,Mapping):
+            anchored_count=anchor.get("new_chat_decision_count")
+            anchored_head=anchor.get("new_chat_decision_chain_head")
+            if anchored_count is not None and anchored_count!=len(values):
+                errors.append(
+                    f"chain anchor count {anchored_count!r} does not match replayed record count {len(values)}"
+                )
+            if anchored_head is not None:
+                expected_head=previous_hash if values else NEW_CHAT_CHAIN_GENESIS
+                if anchored_head!=expected_head:
+                    errors.append("chain anchor head does not match replayed chain tip")
+            anchored_key_id=anchor.get("new_chat_decision_signature_key_id")
+            if anchored_key_id is not None and public_key is not None:
+                actual_key_id=_public_key_id(public_key)
+                if anchored_key_id!=actual_key_id:
+                    errors.append("chain anchor signature key id does not match verification key")
+
+    return {
+        "path":str(target),
+        "records":nonempty_lines,
+        "valid":not errors,
+        "errors":errors,
+        "chain_head":previous_hash if values else NEW_CHAT_CHAIN_GENESIS,
+    }
+
+
+def record_new_chat_decision(proof:Mapping[str,Any], *, reason:str, source_operation_id:str|None=None)->dict[str,Any]:
+    if not proof.get("chat_exhaustion_confirmed"):
+        raise ValueError("new-chat decision requires confirmed current-conversation exhaustion proof")
+    evidence=proof.get("exhaustion_evidence")
+    if not isinstance(evidence,Mapping):
+        raise ValueError("new-chat decision requires durable exhaustion evidence")
+
+    private_key,signature_key_id=_ensure_audit_keypair()
+    replay=replay_new_chat_decisions(NEW_CHAT_DECISIONS_PATH, STATE_PATH, AUDIT_PUBLIC_KEY_PATH)
+    if not replay["valid"]:
+        raise ValueError("cannot append new-chat proof: existing audit chain or signatures are invalid")
+    next_index=replay["records"]+1
+    previous_hash=replay["chain_head"]
+
+    decision={
+        "decision_id":uuid.uuid4().hex,
+        "decision":"create_new_chat",
+        "reason":reason,
+        "recorded_at":datetime.now(timezone.utc).isoformat(),
+        "observed_conversation_url":proof.get("chat_url"),
+        "conversation_signature":proof.get("conversation_signature"),
+        "freshness_window_seconds":dict(proof.get("freshness_window_seconds") or {}),
+        "observed_age_seconds":proof.get("observed_age_seconds"),
+        "source_operation_id":source_operation_id,
+        "exhaustion_evidence":dict(evidence),
+        "chain_index":next_index,
+        "previous_record_hash":previous_hash,
+        "signature_algorithm":AUDIT_SIGNATURE_ALGORITHM,
+        "signature_key_id":signature_key_id,
+    }
+    decision["record_hash"]=_record_hash(decision)
+    decision["record_signature"]=_sign_record_hash(decision["record_hash"],private_key)
+    RUNTIME_DIR.mkdir(parents=True,exist_ok=True)
+    with NEW_CHAT_DECISIONS_PATH.open("a",encoding="utf-8") as handle:
+        handle.write(json.dumps(decision,sort_keys=True,separators=(",",":"))+"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    state=load()
+    state["last_new_chat_decision"]=decision
+    state["new_chat_decision_count"]=next_index
+    state["new_chat_decision_chain_head"]=decision["record_hash"]
+    state["new_chat_decision_signature_key_id"]=signature_key_id
+    save(state)
+    return decision
+
+
+
+def confirm_current_chat_exhaustion(
+    adapter:ChatGPTAdapter,
+    *,
+    expected_chat_url:str|None=None,
+    expected_operation_id:str|None=None,
+    timeout:float=5.0,
+)->dict[str,Any]|None:
+    # New-chat permission is fail-closed. We require the native controller's
+    # current conversation state, not an inherited runner flag or an error
+    # string produced by an earlier operation.
+    deadline=time.monotonic()+max(0.25,timeout)
+    while time.monotonic()<deadline:
+        try:
+            observation=adapter.read_browser_observation()
+        except ChatGPTAdapterError:
+            observation=None
+        data=observation.get("data") if isinstance(observation,Mapping) else None
+        if not isinstance(data,Mapping) or data.get("kind")!="chatgpt_state":
+            time.sleep(.25)
+            continue
+        observed=observed_chat_state(observation)
+        current_url=observed.get("chat_url")
+        if not valid_url(current_url):
+            time.sleep(.25)
+            continue
+        if expected_chat_url and current_url != expected_chat_url:
+            time.sleep(.25)
+            continue
+        if not _fresh_timestamp(observed.get("captured_at")):
+            time.sleep(.25)
+            continue
+        signature=observed.get("conversation_signature")
+        if not isinstance(signature,str) or not signature.strip():
+            time.sleep(.25)
+            continue
+        active_operation_id=observed.get("active_operation_id")
+        if expected_operation_id and active_operation_id not in {expected_operation_id,None}:
+            time.sleep(.25)
+            continue
+        if observed.get("chat_exhausted") is not True:
+            time.sleep(.25)
+            continue
+        if data.get("conversation_context_exhausted") is not True:
+            time.sleep(.25)
+            continue
+        age=_timestamp_age_seconds(observed.get("captured_at"))
+        return {
+            **observed,
+            "chat_exhaustion_confirmed":True,
+            "freshness_window_seconds":{
+                "min":EXHAUSTION_FRESHNESS_MIN_SECONDS,
+                "max":EXHAUSTION_FRESHNESS_MAX_SECONDS,
+            },
+            "observed_age_seconds":age,
+            "exhaustion_evidence":{
+                "kind":data.get("kind"),
+                "chat_url":data.get("chat_url"),
+                "conversation_signature":data.get("conversation_signature"),
+                "captured_at":observed.get("captured_at"),
+                "active_operation_id":active_operation_id,
+                "conversation_context_exhausted":data.get("conversation_context_exhausted"),
+                "chat_exhausted":data.get("chat_exhausted"),
+                "normalized_chat_exhausted":observed.get("chat_exhausted"),
+            },
+        }
+    return None
 
 def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
     deadline=time.monotonic()+timeout; expected=expected_version(ext); latest=observed_chat_state(None)
@@ -70,6 +469,36 @@ def wait_live(adapter:ChatGPTAdapter,ext:Path,timeout:float)->dict[str,Any]:
                 except ValueError: pass
         time.sleep(.5)
     raise RuntimeError("Engineering Workspace ChatGPT controller heartbeat is not live")
+
+def recover_existing_chat(adapter:ChatGPTAdapter,state:Mapping[str,Any],live:Mapping[str,Any])->dict[str,Any]:
+    merged=dict(state)
+    if valid_url(live.get("chat_url")):
+        merged["chat_url"]=live["chat_url"]
+    if bool(live.get("chat_exhausted")):
+        merged["chat_exhausted"]=True
+    if bool(live.get("usage_limited")):
+        merged["usage_limited"]=True
+    if valid_url(merged.get("chat_url")) or bool(merged.get("chat_exhausted")):
+        return merged
+
+    # Health can legitimately omit the conversation URL during a transient
+    # controller/browser state transition. Re-read the authoritative browser
+    # state before deciding anything about chat creation.
+    try:
+        observation=adapter.read_browser_state()
+    except ChatGPTAdapterError:
+        observation=None
+    observed=observed_chat_state(observation)
+    if valid_url(observed.get("chat_url")):
+        merged["chat_url"]=observed["chat_url"]
+    merged["chat_exhausted"]=bool(merged.get("chat_exhausted") or observed.get("chat_exhausted"))
+    merged["usage_limited"]=bool(merged.get("usage_limited") or observed.get("usage_limited"))
+    if valid_url(merged.get("chat_url")) or bool(merged.get("chat_exhausted")):
+        return merged
+    raise RuntimeError(
+        "CHAT_SESSION_UNCERTAIN: existing ChatGPT session could not be identified; "
+        "refusing to create a new chat without explicit context-exhaustion evidence"
+    )
 
 def prompt(task:str,phase:str,task_id:str,issue:str)->str:
     return f"""CURRENT TASK:
@@ -107,6 +536,10 @@ PASI_RESULT_PATCH_BEGIN
 PASI_RESULT_PATCH_END
 """
 
+def should_clear_active_operation(response:Any)->bool:
+    return getattr(response,"completion",None)=="complete"
+
+
 def main()->int:
     p=argparse.ArgumentParser()
     p.add_argument("task"); p.add_argument("--repo",type=Path,required=True)
@@ -124,65 +557,256 @@ def main()->int:
         session_id=f"engineering-{uuid.uuid4().hex}"
         state["session_id"]=session_id
     save(state)
-    adapter=ChatGPTAdapter(transport=UrllibBridgeTransport(timeout_seconds=10.0),session_id=session_id,poll_interval_seconds=.25,max_wait_seconds=a.timeout)
-    live=wait_live(adapter,a.extension_root,min(30,a.timeout))
-    state=load()
-    state["session_id"]=session_id
-    if valid_url(live.get("chat_url")):
-        state["chat_url"]=live["chat_url"]
-    state["chat_exhausted"]=bool(live.get("chat_exhausted"))
-    state["usage_limited"]=bool(live.get("usage_limited"))
-    state["connection_interrupted"]=False
-    save(state)
+    adapter=ChatGPTAdapter(
+        transport=UrllibBridgeTransport(timeout_seconds=10.0),
+        session_id=session_id,
+        poll_interval_seconds=.25,
+        max_wait_seconds=a.timeout,
+    )
+
     key=fp(task)
-    active=state.get("active_operation_id"); active_key=state.get("active_task_fingerprint")
+    active=state.get("active_operation_id")
+    active_task_id=state.get("active_task_id")
+    pending_new_chat=state.get("pending_new_chat_operation_id")
 
-    def wait_task_response(operation_id:str)->Any:
+    def preserve_active(operation_id:str)->None:
+        state["active_operation_id"]=operation_id
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=True
+        save(state)
+
+    def wait_existing_operation(operation_id:str)->Any:
+        recovery_deadline=None
+        while True:
+            try:
+                wait_budget=a.timeout
+                if recovery_deadline is not None:
+                    remaining_recovery=recovery_deadline-time.monotonic()
+                    if remaining_recovery<=0:
+                        preserve_active(operation_id)
+                        raise ChatGPTAdapterError(
+                            "ChatGPT connection recovery window expired while preserving the existing operation"
+                        )
+                    wait_budget=min(a.timeout,remaining_recovery)
+                result=adapter.wait_for_completion(
+                    operation_id,
+                    timeout_seconds=wait_budget,
+                    cancel_on_timeout=False,
+                )
+            except ChatGPTAdapterError:
+                if recovery_deadline is None:
+                    recovery_deadline=time.monotonic()+CHAT_RECOVERY_WINDOW_SECONDS
+                preserve_active(operation_id)
+                # Never reinterpret transport/browser loss as permission to
+                # create a chat. Give the existing operation another chance
+                # after the bridge/controller becomes reachable again.
+                remaining_recovery=recovery_deadline-time.monotonic()
+                if remaining_recovery<=0:
+                    raise
+                try:
+                    wait_live(adapter,a.extension_root,min(5,remaining_recovery))
+                except Exception:
+                    pass
+                time.sleep(min(CHAT_RECOVERY_POLL_SECONDS,max(0.25,remaining_recovery)))
+                continue
+            if result.completion=="timeout":
+                # The operation remains durable and uncancelled. The supervisor
+                # may retry this exact operation later rather than submitting a
+                # duplicate prompt.
+                state["connection_interrupted"]=False
+                preserve_active(operation_id)
+                return result
+            state["connection_interrupted"]=False
+            return result
+
+    # The active operation is authoritative. Reconnect/re-read it before
+    # consulting browser state or choosing a chat mode. This prevents a stale
+    # heartbeat, missing URL, or connection interruption from causing a new
+    # prompt/chat while the previous action is still incomplete.
+    if isinstance(pending_new_chat,str) and pending_new_chat.strip():
         try:
-            result=adapter.wait_for_completion(operation_id,timeout_seconds=a.timeout)
+            recovered=wait_existing_operation(pending_new_chat)
         except ChatGPTAdapterError:
-            # Preserve the same operation and stable session identity across
-            # bridge/browser interruption. Recovery may requeue the same
-            # operation; the runner must never create a replacement chat.
-            state["active_operation_id"]=operation_id
-            state["active_task_fingerprint"]=key
-            state["connection_interrupted"]=True
-            save(state)
             raise
-        state["connection_interrupted"]=False
-        return result
+        if recovered.completion!="complete":
+            raise RuntimeError(f"pending ChatGPT session creation did not complete: {recovered.completion}")
+        state["pending_new_chat_operation_id"]=None
+        state["chat_url"]=valid_url(recovered.chat_url) or state.get("chat_url")
+        state["chat_exhausted"]=False
+        state["usage_limited"]=False
+        state["reasoning_mode"]=None
+        save(state)
 
-    if isinstance(active,str) and active.strip() and active_key==key:
-        op=active; response=wait_task_response(op)
+    response=None
+    op=None
+    if isinstance(active,str) and active.strip():
+        if isinstance(active_task_id,str) and active_task_id.strip() and active_task_id!=a.task_id:
+            raise RuntimeError(
+                f"CHAT_ACTIVE_TASK_MISMATCH: active operation {active} belongs to {active_task_id}, not {a.task_id}; "
+                "refusing to submit a second prompt"
+            )
+        op=active
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        save(state)
+        response=wait_existing_operation(op)
     else:
+        live=wait_live(adapter,a.extension_root,min(30,a.timeout))
+        state=load()
+        state["session_id"]=session_id
+        if valid_url(live.get("chat_url")):
+            state["chat_url"]=live["chat_url"]
+        state["chat_exhausted"]=False
+        state["chat_exhaustion_confirmed"]=False
+        state["usage_limited"]=bool(state.get("usage_limited") or live.get("usage_limited"))
+        state["connection_interrupted"]=bool(live.get("connection_failure"))
+        if live.get("chat_exhausted") is True:
+            initial_exhaustion=confirm_current_chat_exhaustion(
+                adapter,
+                expected_chat_url=valid_url(live.get("chat_url")) or valid_url(state.get("chat_url")),
+                timeout=min(5.0,a.timeout),
+            )
+            if initial_exhaustion:
+                live.update(initial_exhaustion)
+                state["chat_exhausted"]=True
+                state["chat_exhaustion_confirmed"]=True
+                state["chat_url"]=initial_exhaustion["chat_url"]
+        save(state)
+
         mode=select_chat_mode(state,live)
         if mode=="blocked":
             raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")
+        if mode=="recover":
+            recovered=recover_existing_chat(adapter,state,live)
+            if recovered.get("usage_limited"):
+                raise RuntimeError("CHAT_USAGE_LIMITED: ChatGPT provider usage is exhausted or rate limited; no new chat will be created")
+            state.update(recovered)
+            live=recovered
+            mode="reuse"
         if mode=="new_chat":
-            op=adapter.new_session(); r=adapter.read_operation(op)
+            record_new_chat_decision(
+                live,
+                reason="current_chat_exhausted_before_task_dispatch",
+                source_operation_id=live.get("active_operation_id"),
+            )
+            try:
+                op=adapter.new_session()
+            except ChatGPTAdapterError:
+                pending=getattr(adapter,"current_operation_id",None)
+                if isinstance(pending,str) and pending.strip():
+                    state["pending_new_chat_operation_id"]=pending
+                    state["connection_interrupted"]=True
+                    save(state)
+                raise
+            r=adapter.read_operation(op)
             if r.completion!="complete": raise RuntimeError("new ChatGPT session did not complete")
-            state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
+            state["pending_new_chat_operation_id"]=None
+            state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
+            state["chat_exhausted"]=False
+            state["chat_exhaustion_confirmed"]=False
+            state["usage_limited"]=False
+            state["reasoning_mode"]=None
             save(state)
-        if state.get("reasoning_mode")!="thinking": adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"
+        if state.get("reasoning_mode")!="thinking":
+            adapter.select_reasoning_mode("thinking")
+            state["reasoning_mode"]="thinking"
+            save(state)
         op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue))
-        state["active_operation_id"]=op; state["active_task_fingerprint"]=key; state["connection_interrupted"]=False; save(state)
-        response=wait_task_response(op)
+        state["active_operation_id"]=op
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=False
+        save(state)
+        response=wait_existing_operation(op)
+
     if response.completion=="timeout":
-        try: response=adapter.read_operation(op)
-        except Exception: pass
-    if response.completion=="error" and response.chat_exhausted:
-        state["chat_exhausted"]=True; state["usage_limited"]=False; save(state); op=adapter.new_session(); r=adapter.read_operation(op)
+        try:
+            response=adapter.read_operation(op)
+        except Exception:
+            pass
+
+    # A context-exhaustion error is only a trigger to seek fresh proof.
+    # It never authorizes a replacement chat by itself.
+    exhaustion_candidate=response.chat_exhausted
+    current_chat_url=valid_url(response.chat_url) or valid_url(state.get("chat_url"))
+    exhaustion_proof=None
+    if exhaustion_candidate:
+        exhaustion_proof=confirm_current_chat_exhaustion(
+            adapter,
+            expected_chat_url=current_chat_url,
+            expected_operation_id=op if isinstance(op,str) else None,
+            timeout=min(5.0,a.timeout),
+        )
+    exhausted_without_contract=bool(
+        exhaustion_proof
+        and (response.completion!="complete" or not bool(response.text.strip()))
+    )
+    if exhausted_without_contract:
+        state["chat_exhausted"]=True
+        state["usage_limited"]=False
+        state["active_operation_id"]=None
+        state["active_task_id"]=None
+        state["active_task_fingerprint"]=None
+        save(state)
+        record_new_chat_decision(
+            exhaustion_proof,
+            reason="current_chat_exhausted_after_response_without_valid_contract",
+            source_operation_id=op if isinstance(op,str) else None,
+        )
+        try:
+            op=adapter.new_session()
+        except ChatGPTAdapterError:
+            pending=getattr(adapter,"current_operation_id",None)
+            if isinstance(pending,str) and pending.strip():
+                state["pending_new_chat_operation_id"]=pending
+                state["connection_interrupted"]=True
+                save(state)
+            raise
+        r=adapter.read_operation(op)
         if r.completion!="complete": raise RuntimeError("replacement ChatGPT session did not complete")
-        state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
-        adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"
-        op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue)); state["active_operation_id"]=op; state["active_task_fingerprint"]=key; save(state)
-        response=wait_task_response(op)
-    print(f"Prompt operation: {op}"); print(f"Completion: {response.completion}"); print(f"Chat URL: {response.chat_url or state.get('chat_url') or 'not reported'}")
-    if response.text: print("\n=== CHATGPT RESPONSE ===\n"); print(response.text)
+        state["pending_new_chat_operation_id"]=None
+        state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url")
+        state["chat_exhausted"]=False
+        state["chat_exhaustion_confirmed"]=False
+        state["usage_limited"]=False
+        state["reasoning_mode"]=None
+        exhaustion_proof=None
+        save(state)
+        adapter.select_reasoning_mode("thinking")
+        state["reasoning_mode"]="thinking"
+        op=adapter.submit_prompt(prompt(task,a.phase,a.task_id,a.issue))
+        state["active_operation_id"]=op
+        state["active_task_id"]=a.task_id
+        state["active_task_fingerprint"]=key
+        state["connection_interrupted"]=False
+        save(state)
+        response=wait_existing_operation(op)
+
+    print(f"Prompt operation: {op}")
+    print(f"Completion: {response.completion}")
+    print(f"Chat URL: {response.chat_url or state.get('chat_url') or 'not reported'}")
+    if response.text:
+        print("\n=== CHATGPT RESPONSE ===\n")
+        print(response.text)
     if isinstance(adapter.last_operation,Mapping) and adapter.last_operation.get("operation_id"):
-        print("PASI_OPERATION_METRICS: "+json.dumps({"operation_id":adapter.last_operation.get("operation_id"),"timing":adapter.last_operation.get("timing"),"recovery_events":adapter.last_operation.get("recovery_events")},separators=(",",":")))
-    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url"); state["chat_exhausted"]=bool(response.chat_exhausted)
-    if response.completion in TERMINAL: state["active_operation_id"]=None; state["active_task_fingerprint"]=None
+        print("PASI_OPERATION_METRICS: "+json.dumps({
+            "operation_id":adapter.last_operation.get("operation_id"),
+            "timing":adapter.last_operation.get("timing"),
+            "recovery_events":adapter.last_operation.get("recovery_events"),
+        },separators=(",",":")))
+
+    state["chat_url"]=valid_url(response.chat_url) or state.get("chat_url")
+    state["chat_exhausted"]=bool(exhaustion_proof)
+    state["chat_exhaustion_confirmed"]=bool(exhaustion_proof)
+    state["connection_interrupted"]=False
+
+    if should_clear_active_operation(response):
+        state["active_operation_id"]=None
+        state["active_task_id"]=None
+        state["active_task_fingerprint"]=None
+    state["pending_new_chat_operation_id"]=None
     save(state)
     return 0 if response.completion=="complete" and bool(response.text.strip()) else 1
+
 if __name__=="__main__": raise SystemExit(main())

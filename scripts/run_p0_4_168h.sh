@@ -11,13 +11,50 @@ test "$(basename "$REPO_ROOT")" = "PASI-Engineering-Workspace" || {
 
 : "${PASI_GITHUB_TOKEN:?set PASI_GITHUB_TOKEN to a GitHub token with issue-write access}"
 export PASI_PUSH=1
-export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-python scripts/pasi_engineering_executor.py}"
+if [[ -n "${PASI_PYTHON:-}" ]]; then
+  PYTHON_BIN="$PASI_PYTHON"
+elif [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+else
+  PYTHON_BIN="$(command -v python3 || command -v python || true)"
+  if [[ -z "$PYTHON_BIN" ]]; then
+    echo "error: no usable Python executable found; set PASI_PYTHON" >&2
+    exit 2
+  fi
+  echo "[PASI 168h] repository .venv is absent; creating it from $PYTHON_BIN." >&2
+  "$PYTHON_BIN" -m venv "$REPO_ROOT/.venv"
+  PYTHON_BIN="$REPO_ROOT/.venv/bin/python"
+fi
+
+if [[ "$PYTHON_BIN" == */* ]]; then
+  if [[ ! -x "$PYTHON_BIN" ]]; then
+    echo "error: PASI Python executable not found or not executable: $PYTHON_BIN" >&2
+    exit 2
+  fi
+else
+  resolved_python="$(command -v "$PYTHON_BIN" || true)"
+  if [[ -z "$resolved_python" || ! -x "$resolved_python" ]]; then
+    echo "error: PASI Python command not found on PATH: $PYTHON_BIN" >&2
+    exit 2
+  fi
+  PYTHON_BIN="$resolved_python"
+fi
+
+if ! "$PYTHON_BIN" -c 'import cryptography' >/dev/null 2>&1; then
+  echo "[PASI 168h] Python dependencies are not installed; bootstrapping repository environment." >&2
+  "$PYTHON_BIN" -m pip install -e '.[dev]'
+fi
+
+export PASI_ENGINEERING_EXECUTOR_CMD="${PASI_ENGINEERING_EXECUTOR_CMD:-$PYTHON_BIN scripts/pasi_engineering_executor.py}"
 export PASI_TASK_TIMEOUT_SECONDS="${PASI_TASK_TIMEOUT_SECONDS:-1800}"
 export PASI_ENGINEERING_EXTENSION_ROOT="${PASI_ENGINEERING_EXTENSION_ROOT:-$REPO_ROOT/extensions/pasi-chatgpt}"
 
+PASI_168H_SMOKE="${PASI_168H_SMOKE:-0}"
 WORKTREE="${PASI_168H_WORKTREE:-$HOME/.pasi-worktrees/pasi-engineering-workspace-168h}"
 BRANCH="${PASI_168H_BRANCH:-pasi/p0-4-168h-run-$(date +%Y%m%d-%H%M%S)}"
 RUNTIME_DIR="${PASI_ACCEPTANCE_STATE_DIR:-$HOME/.pasi/engineering-workspace-168h}"
+export PASI_ENGINEERING_RUNTIME_DIR="${PASI_ENGINEERING_RUNTIME_DIR:-$RUNTIME_DIR/runtime}"
+export PASI_NEW_CHAT_AUDIT_KEY_DIR="${PASI_NEW_CHAT_AUDIT_KEY_DIR:-$RUNTIME_DIR/keys}"
 PID_FILE="$RUNTIME_DIR/supervisor.pid"
 MAX_RESTARTS="${PASI_168H_MAX_RESTARTS:-64}"
 BASE_BACKOFF="${PASI_168H_RESTART_BACKOFF_SECONDS:-5}"
@@ -41,7 +78,7 @@ cleanup() {
 trap cleanup EXIT
 
 read_status() {
-  "$REPO_ROOT/.venv/bin/python" - "$RUNTIME_DIR/state.json" <<'PY'
+  "$PYTHON_BIN" - "$RUNTIME_DIR/state.json" <<'PY'
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
@@ -59,7 +96,11 @@ backoff="$BASE_BACKOFF"
 
 while true; do
   set +e
-  python scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
+  if [[ "$PASI_168H_SMOKE" == "1" ]]; then
+    "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --smoke
+  else
+    "$PYTHON_BIN" scripts/pasi_168h_acceptance.py --hours 168 --worktree "$WORKTREE" --branch "$BRANCH"
+  fi
   rc=$?
   set -e
 

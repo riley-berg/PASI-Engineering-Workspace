@@ -708,6 +708,9 @@ class BridgeState:
         self.state_manager = state_manager
         self.lock = threading.RLock()
         self.operation_changed = threading.Condition(self.lock)
+        self.browser_testing_changed = threading.Condition(self.lock)
+        self._browser_test_requests: dict[str, dict[str, Any]] = {}
+        self._browser_test_results: dict[str, dict[str, Any]] = {}
         self._queue_cache: list[dict[str, Any]] | None = None
         self._queue_cache_mtime_ns: int | None = None
 
@@ -899,6 +902,115 @@ class BridgeState:
 
         if changed:
             self._save_queue(queue)
+
+    def queue_browser_test_request(
+        self,
+        action: str,
+        tab_id: int | None = None,
+        params: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        allowed = {"screenshot", "dom", "console_errors", "network"}
+        action = str(action or "").strip()
+        if action not in allowed:
+            raise ValueError("unsupported browser-test action")
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise ValueError("tab_id must be a positive integer or null")
+        params = dict(params or {})
+        if len(json.dumps(params, ensure_ascii=False, separators=(",", ":"))) > 20_000:
+            raise ValueError("browser-test params exceed the bounded request size")
+
+        if tab_id is None:
+            health = self.state_manager.load_browser_health()
+            health_data = health.get("data") if isinstance(health, Mapping) else {}
+            if not isinstance(health_data, Mapping) or not isinstance(health_data.get("tab_id"), int):
+                state = self.state_manager.load_browser_state()
+                state_data = state.get("data") if isinstance(state, Mapping) else {}
+                tab_id = state_data.get("tab_id") if isinstance(state_data, Mapping) else None
+            if not isinstance(tab_id, int) or tab_id < 1:
+                raise ValueError("no attached ChatGPT tab is available")
+
+        request_id = "bt-" + os.urandom(10).hex()
+        request = {
+            "request_id": request_id,
+            "action": action,
+            "tab_id": tab_id,
+            "params": params,
+            "created_at": time.time(),
+        }
+        with self.browser_testing_changed:
+            if len(self._browser_test_requests) >= 64:
+                oldest = min(self._browser_test_requests, key=lambda key: self._browser_test_requests[key]["created_at"])
+                self._browser_test_requests.pop(oldest, None)
+            self._browser_test_requests[request_id] = request
+            self.browser_testing_changed.notify_all()
+        return {"request_id": request_id, "tab_id": tab_id}
+
+    def wait_for_browser_test_request(
+        self,
+        tab_id: int,
+        timeout_ms: int = 0,
+    ) -> dict[str, Any] | None:
+        if not isinstance(tab_id, int) or tab_id < 1:
+            raise ValueError("tab_id must be a positive integer")
+        timeout_ms = min(max(int(timeout_ms or 0), 0), 10_000)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        with self.browser_testing_changed:
+            while True:
+                candidates = sorted(
+                    (
+                        item for item in self._browser_test_requests.values()
+                        if item.get("tab_id") == tab_id
+                    ),
+                    key=lambda item: float(item.get("created_at", 0)),
+                )
+                if candidates:
+                    request = dict(candidates[0])
+                    self._browser_test_requests.pop(request["request_id"], None)
+                    return request
+                if timeout_ms <= 0:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                self.browser_testing_changed.wait(timeout=remaining)
+
+    def submit_browser_test_result(
+        self,
+        request_id: str,
+        tab_id: int,
+        ok: bool,
+        data: Mapping[str, Any] | None = None,
+        error: Mapping[str, Any] | str | None = None,
+    ) -> dict[str, Any]:
+        with self.browser_testing_changed:
+            result = {
+                "request_id": request_id,
+                "tab_id": tab_id,
+                "ok": bool(ok),
+                "data": dict(data or {}) if ok else None,
+                "error": (
+                    dict(error) if isinstance(error, Mapping)
+                    else {"code": "BROWSER_TEST_FAILED", "message": str(error or "browser test failed")}
+                    if error is not None
+                    else None
+                ),
+                "completed_at": time.time(),
+            }
+            if len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))) > 12_000_000:
+                raise ValueError("browser-test result exceeds the bounded response size")
+            self._browser_test_results[request_id] = result
+            if len(self._browser_test_results) > 64:
+                oldest = min(self._browser_test_results, key=lambda key: self._browser_test_results[key]["completed_at"])
+                self._browser_test_results.pop(oldest, None)
+            self.browser_testing_changed.notify_all()
+            return {"accepted": True, "request_id": request_id}
+
+    def get_browser_test_result(self, request_id: str) -> dict[str, Any] | None:
+        if not isinstance(request_id, str) or not request_id.strip():
+            raise ValueError("request_id is required")
+        with self.browser_testing_changed:
+            result = self._browser_test_results.pop(request_id, None)
+            return dict(result) if isinstance(result, Mapping) else None
 
     @classmethod
     def _mark_claimed(
@@ -2300,6 +2412,30 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/browser/testing/request":
+            values = parse_qs(parsed.query).get("tab_id", [])
+            if not values:
+                self._send_json({"error": "tab_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                tab_id = int(values[0])
+                wait_ms = min(max(int(parse_qs(parsed.query).get("wait_ms", ["0"])[0]), 0), 10_000)
+            except ValueError:
+                self._send_json({"error": "tab_id and wait_ms must be integers."}, HTTPStatus.BAD_REQUEST)
+                return
+            request = self.bridge_state.wait_for_browser_test_request(tab_id, wait_ms)
+            self._send_json({"request": request})
+            return
+
+        if path == "/browser/testing/result":
+            values = parse_qs(parsed.query).get("request_id", [])
+            request_id = values[0].strip() if values else ""
+            if not request_id or len(request_id) > 200:
+                self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({"result": self.bridge_state.get_browser_test_result(request_id)})
+            return
+
         if path == "/operation":
             operation_ids = parse_qs(parsed.query).get("operation_id", [])
             operation_id = operation_ids[0] if operation_ids else ""
@@ -2403,6 +2539,14 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            if path == "/browser/testing/request":
+                self._browser_testing_request(payload)
+                return
+
+            if path == "/browser/testing/result":
+                self._browser_testing_result(payload)
+                return
+
             if path == "/chat/claim":
                 self._claim(payload)
                 return
@@ -2472,6 +2616,64 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.INTERNAL_SERVER_ERROR,
             )
+
+    def _browser_testing_request(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        action = payload.get("action")
+        tab_id = payload.get("tab_id")
+        params = payload.get("params")
+        if not isinstance(action, str) or not action.strip():
+            self._send_json({"error": "action is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            self._send_json({"error": "tab_id must be a positive integer or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if params is not None and not isinstance(params, dict):
+            self._send_json({"error": "params must be an object."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.queue_browser_test_request(
+                action.strip(),
+                tab_id,
+                params,
+            )
+        )
+
+    def _browser_testing_result(
+        self,
+        payload: dict[str, Any],
+    ) -> None:
+        request_id = payload.get("request_id")
+        tab_id = payload.get("tab_id")
+        ok = payload.get("ok")
+        data = payload.get("data")
+        error = payload.get("error")
+        if not isinstance(request_id, str) or not request_id.strip():
+            self._send_json({"error": "request_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(tab_id, int) or tab_id < 1:
+            self._send_json({"error": "tab_id must be a positive integer."}, HTTPStatus.BAD_REQUEST)
+            return
+        if not isinstance(ok, bool):
+            self._send_json({"error": "ok must be a boolean."}, HTTPStatus.BAD_REQUEST)
+            return
+        if data is not None and not isinstance(data, dict):
+            self._send_json({"error": "data must be an object or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        if error is not None and not isinstance(error, (dict, str)):
+            self._send_json({"error": "error must be an object, string, or null."}, HTTPStatus.BAD_REQUEST)
+            return
+        self._send_json(
+            self.bridge_state.submit_browser_test_result(
+                request_id.strip(),
+                tab_id,
+                ok,
+                data,
+                error,
+            )
+        )
 
     def _claim(
         self,

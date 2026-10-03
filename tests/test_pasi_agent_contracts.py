@@ -24,6 +24,10 @@ EXPECTED_TOOLS = {
     "pasi.get_operation_state",
     "pasi.get_environment_state",
     "pasi.get_acceptance_evidence",
+    "pasi.get_browser_screenshot",
+    "pasi.get_browser_dom",
+    "pasi.get_browser_console_errors",
+    "pasi.get_browser_network",
 }
 
 
@@ -207,3 +211,59 @@ def test_mcp_server_advertises_exact_tool_schemas():
     for name in EXPECTED_TOOLS:
         assert tools[name].input_schema == TOOL_INPUT_SCHEMAS[name]
         assert tools[name].output_schema == TOOL_OUTPUT_SCHEMAS[name]
+
+
+def test_browser_tools_are_read_only_and_bounded():
+    names = {
+        "pasi.get_browser_screenshot",
+        "pasi.get_browser_dom",
+        "pasi.get_browser_console_errors",
+        "pasi.get_browser_network",
+    }
+    assert names.issubset(set(TOOL_NAMES))
+    assert TOOL_INPUT_SCHEMAS["pasi.get_browser_dom"]["additionalProperties"] is False
+    assert TOOL_INPUT_SCHEMAS["pasi.get_browser_network"]["additionalProperties"] is False
+
+
+def test_browser_dom_observation_delegates_to_the_cdp_boundary(monkeypatch):
+    service = PasiAgentObservationService()
+    monkeypatch.setattr(
+        "automation.pasi_agent_browser_testing.BrowserTestingClient.request",
+        lambda self, *args, **kwargs: {
+            "tab_id": 31,
+            "url": "https://chatgpt.com/c/test",
+            "title": "PASI test",
+            "selector": "#start",
+            "matched_count": 1,
+            "truncated": False,
+            "elements": [{"tag": "button", "id": "start", "text": "Start", "visible": True}],
+        },
+    )
+    result = service.observe(
+        "pasi.get_browser_dom",
+        {"selector": "#start", "max_elements": 1, "_request_id": "browser-dom"},
+    )
+    assert result["ok"] is True
+    assert result["data"]["dom"]["elements"][0]["text"] == "Start"
+
+
+def test_browser_screenshot_hashes_image_content(monkeypatch):
+    service = PasiAgentObservationService()
+    monkeypatch.setattr(
+        "automation.pasi_agent_browser_testing.BrowserTestingClient.request",
+        lambda self, *args, **kwargs: {
+            "tab_id": 31,
+            "mime_type": "image/png",
+            "width": 1200,
+            "height": 800,
+            "byte_length": 4,
+            "image_base64": "AAAA",
+        },
+    )
+    result = service.observe(
+        "pasi.get_browser_screenshot",
+        {"_request_id": "browser-shot"},
+    )
+    assert result["ok"] is True
+    assert result["data"]["screenshot"]["sha256"]
+    assert result["data"]["screenshot"]["image_base64"] == "AAAA"

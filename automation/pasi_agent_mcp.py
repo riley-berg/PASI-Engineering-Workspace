@@ -13,6 +13,7 @@ try:
         CallToolResult,
         ListToolsResult,
         PaginatedRequestParams,
+        ImageContent,
         TextContent,
         Tool,
     )
@@ -65,14 +66,49 @@ async def call_tool(
     arguments["_request_id"] = _request_id(ctx)
     service = PasiAgentObservationService()
     result = service.observe(params.name, arguments)
-    return CallToolResult(
-        content=[
+    structured_result = result
+    content: list[Any] = []
+    if (
+        result.get("ok") is True
+        and params.name == "pasi.get_browser_screenshot"
+        and isinstance(result.get("data"), dict)
+        and isinstance(result["data"].get("screenshot"), dict)
+    ):
+        screenshot = result["data"]["screenshot"]
+        image_data = screenshot.get("image_base64")
+        if isinstance(image_data, str) and image_data:
+            structured_result = json.loads(json.dumps(result))
+            structured_result["data"]["screenshot"].pop("image_base64", None)
+            content.append(
+                TextContent(
+                    type="text",
+                    text=json.dumps(structured_result, ensure_ascii=False, separators=(",", ":")),
+                )
+            )
+            content.append(
+                ImageContent(
+                    type="image",
+                    data=image_data,
+                    mimeType="image/png",
+                )
+            )
+        else:
+            content.append(
+                TextContent(
+                    type="text",
+                    text=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
+                )
+            )
+    else:
+        content.append(
             TextContent(
                 type="text",
                 text=json.dumps(result, ensure_ascii=False, separators=(",", ":")),
             )
-        ],
-        structured_content=result,
+        )
+    return CallToolResult(
+        content=content,
+        structured_content=structured_result,
         is_error=not bool(result.get("ok")),
     )
 

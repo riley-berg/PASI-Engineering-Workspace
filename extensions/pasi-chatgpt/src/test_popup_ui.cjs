@@ -441,3 +441,28 @@ test("popup preserves open diagnostics while refreshing runner state", () => {
   assert.match(popupJs, /card\.querySelector\("\.runner-diagnostics"\)\?\.open === true/);
   assert.match(popupJs, /diagnostic\.open = openDiagnostics\.get\(profileId\) === true/);
 });
+
+
+test("popup preserves scroll position while runner state is re-rendered", () => {
+  assert.match(t, /function restorePopupScroll\(scrollTop\)/);
+  assert.match(t, /const scrollTop = .*scrollTop.*\|\| window\.scrollY/);
+  assert.match(t, /root\.replaceChildren\(\)/);
+  assert.match(t, /restorePopupScroll\(scrollTop\)/);
+});
+
+test("popup runner cards come from the backend registry instead of a fixed two-runner list", () => {
+  assert.match(t, /function getRunnerRegistry\(\)/);
+  assert.match(t, /\/runner\/registry/);
+  assert.match(t, /for \(const entry of registryRunners\)/);
+  assert.match(t, /const registryEntry = registryRunners\.find/);
+  assert.match(t, /function runnerProfileMeta\(profileId/);
+});
+
+test("popup exposes user runner creation and candidate revision controls", () => {
+  assert.match(t, /id="createRunnerForm"/);
+  assert.match(t, /id="createRevisionForm"/);
+  assert.match(t, /\/runner\/registry\/create/);
+  assert.match(t, /\/runner\/registry\/revision/);
+  assert.match(t, /\/runner\/registry\/promote/);
+  assert.match(t, /\/runner\/registry\/rollback/);
+});

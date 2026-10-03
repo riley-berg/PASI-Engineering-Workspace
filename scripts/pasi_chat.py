@@ -170,8 +170,19 @@ def main()->int:
     if response.completion=="timeout":
         try: response=adapter.read_operation(op)
         except Exception: pass
-    if response.completion=="error" and response.chat_exhausted:
-        state["chat_exhausted"]=True; state["usage_limited"]=False; save(state); op=adapter.new_session(); r=adapter.read_operation(op)
+    # Context exhaustion can surface as error, interrupted, or a terminal
+    # completion with no response text. In all of those cases, a replacement
+    # chat is safe because the adapter only sets chat_exhausted for bounded
+    # context-exhaustion evidence; provider-level usage limits are handled by
+    # select_chat_mode() as "blocked".
+    exhausted_without_contract=response.chat_exhausted and (
+        response.completion!="complete" or not bool(response.text.strip())
+    )
+    if exhausted_without_contract:
+        state["chat_exhausted"]=True; state["usage_limited"]=False
+        state["active_operation_id"]=None; state["active_task_fingerprint"]=None
+        save(state)
+        op=adapter.new_session(); r=adapter.read_operation(op)
         if r.completion!="complete": raise RuntimeError("replacement ChatGPT session did not complete")
         state["chat_url"]=valid_url(r.chat_url) or state.get("chat_url"); state["chat_exhausted"]=False; state["usage_limited"]=False; state["reasoning_mode"]=None
         adapter.select_reasoning_mode("thinking"); state["reasoning_mode"]="thinking"

@@ -62,3 +62,12 @@ The roadmap Project v2 board can be inspected and updated through the GraphQL wr
 Controlled field updates are available through .github/workflows/github-project-v2.yml. See docs/operations/github-project-v2.md.
 
 Branch cleanup and repository security are automated through hosted GitHub Actions in .github/workflows/branch-hygiene.yml and .github/workflows/pasi-security-analysis.yml.
+
+
+## Live runner diagnostics
+
+After the Engineering Workspace bridge is running, the read-only live runner diagnostic surface is available on the same localhost bridge:
+
+    http://127.0.0.1:8765/runner/diagnostics
+
+It exposes sanitized bridge process data, detected PASI runner processes, profile-isolated M1/168h state, and current browser health. It does not expose the bridge token.

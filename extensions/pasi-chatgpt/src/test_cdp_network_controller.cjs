@@ -41,24 +41,24 @@ function fakeDebugger() {
           method === 'Page.enable' || method === 'Page.disable') return callback({});
       if (method === 'Page.getLayoutMetrics') return callback({visualViewport: {clientWidth: 1280, clientHeight: 720}});
       if (method === 'Page.captureScreenshot') return callback({data: Buffer.from('PASI_SCREENSHOT').toString('base64')});
-      if (method === 'Runtime.evaluate') {
-        return callback({result: {type: 'object', value: {
-          kind: 'dom',
-          tab_id: 31,
-          url: 'https://chatgpt.com/c/test',
-          title: 'PASI Test',
-          ready_state: 'complete',
-          selector: '#start',
-          matched_count: 1,
-          truncated: false,
-          elements: [{
-            tag: 'button',
-            id: 'start',
-            text: 'Start',
-            visible: true,
-            styles: {backgroundColor: 'rgb(69, 70, 74)', color: 'rgb(244, 241, 236)'}
-          }]
-        }}});
+      if (method === 'DOMSnapshot.captureSnapshot') {
+        return callback({
+          documents: [{
+            frame: {url: 'https://chatgpt.com/c/test', name: 'PASI Test'},
+            nodes: {
+              nodeName: ['#document', 'BODY', 'BUTTON', '#text'],
+              nodeType: [9, 1, 1, 3],
+              nodeValue: ['', '', '', 'Start'],
+              parentIndex: [-1, 0, 1, 2],
+              attributes: [[], [], ['id', 'start', 'class', 'primary', 'data-testid', 'start-button'], []],
+            },
+            layout: {
+              nodeIndex: [0, 1, 2],
+              bounds: [[0, 0, 1280, 720], [10, 10, 120, 40], [10, 10, 120, 40]],
+            },
+          }],
+        });
+      }
       if (method === 'DOM.getBoxModel') {
         return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
       }
@@ -857,7 +857,7 @@ test('network-health exposes the request-to-task map and controller fence', asyn
 });
 
 
-test('browser testing exposes screenshot and bounded DOM inspection', async () => {
+test('browser testing exposes screenshot and bounded DOM snapshot inspection', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});
   controller.install();
@@ -875,6 +875,7 @@ test('browser testing exposes screenshot and bounded DOM inspection', async () =
   assert.equal(dom.matched_count, 1);
   assert.equal(dom.elements[0].id, 'start');
   assert.equal(dom.elements[0].text, 'Start');
+  assert.equal(dom.elements[0].visible, true);
 });
 
 test('browser testing records console errors and sanitizes network URLs', async () => {

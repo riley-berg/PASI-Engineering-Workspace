@@ -439,15 +439,6 @@
       }
     }
 
-    async function handleDebuggerEvent(source, method, params) {
-      const tabId = source?.tabId;
-      if (Number.isInteger(tabId)) {
-        recordConsoleEvent(tabId, method, params);
-        recordNetworkEvent(tabId, method, params);
-      }
-      return handlePaused(source, method, params);
-    }
-
     function sendCommand(tabId, method, params = {}) {
       return new Promise((resolve, reject) => {
         if (!debuggerApi?.sendCommand) {
@@ -1378,8 +1369,12 @@
     }
 
     async function handlePaused(source, method, params) {
-      if (method !== 'Fetch.requestPaused') return;
       const tabId = source?.tabId;
+      if (Number.isInteger(tabId)) {
+        recordConsoleEvent(tabId, method, params);
+        recordNetworkEvent(tabId, method, params);
+      }
+      if (method !== 'Fetch.requestPaused') return;
       if (!Number.isInteger(tabId) || !params?.requestId) return;
       const request = params.request || {};
       const generation = request.method === 'POST' && requestUrlIsGeneration(request.url);
@@ -1529,6 +1524,65 @@
       };
     }
 
+    function domSnapshotAttributes(flatAttributes) {
+      const attributes = {};
+      const values = Array.isArray(flatAttributes) ? flatAttributes : [];
+      for (let index = 0; index + 1 < values.length; index += 2) {
+        const name = String(values[index] || '');
+        const value = String(values[index + 1] || '');
+        if (!name) continue;
+        attributes[name] = value.slice(0, 1000);
+      }
+      return attributes;
+    }
+
+    function domSnapshotNodeMatches(nodeName, attributes, selector) {
+      const query = String(selector || 'body').trim();
+      if (!query || query === '*') return true;
+      const tagMatch = query.match(/^[a-zA-Z][\w-]*/);
+      let remainder = query;
+      if (tagMatch) {
+        if (String(nodeName || '').toLowerCase() !== tagMatch[0].toLowerCase()) return false;
+        remainder = remainder.slice(tagMatch[0].length);
+      }
+      const idMatch = remainder.match(/#([\w-]+)/);
+      if (idMatch && attributes.id !== idMatch[1]) return false;
+      const classMatches = [...remainder.matchAll(/\.([\w-]+)/g)].map((match) => match[1]);
+      if (classMatches.length) {
+        const classes = new Set(String(attributes.class || '').split(/\s+/).filter(Boolean));
+        if (classMatches.some((value) => !classes.has(value))) return false;
+      }
+      const attributeMatches = [...remainder.matchAll(/\[([a-zA-Z_:][-a-zA-Z0-9_:.]*)(?:\s*=\s*["']([^"']*)["'])?\]/g)];
+      for (const match of attributeMatches) {
+        const name = String(match[1] || '');
+        if (!Object.prototype.hasOwnProperty.call(attributes, name)) return false;
+        if (match[2] != null && attributes[name] !== match[2]) return false;
+      }
+      return true;
+    }
+
+    function domSnapshotText(nodeIndex, nodes, childrenByParent, maxTextChars) {
+      const fragments = [];
+      const stack = [{index: nodeIndex, depth: 0}];
+      const visited = new Set();
+      while (stack.length && fragments.join('').length < maxTextChars) {
+        const current = stack.pop();
+        if (!current || current.depth > 8 || visited.has(current.index)) continue;
+        visited.add(current.index);
+        const node = nodes[current.index];
+        if (!node) continue;
+        if (Number(node.nodeType) === 3 || String(node.nodeName || '').toLowerCase() === '#text') {
+          if (typeof node.nodeValue === 'string' && node.nodeValue) fragments.push(node.nodeValue);
+          continue;
+        }
+        const children = childrenByParent.get(current.index) || [];
+        for (let index = Math.min(children.length, 64) - 1; index >= 0; index -= 1) {
+          stack.push({index: children[index], depth: current.depth + 1});
+        }
+      }
+      return fragments.join(' ').replace(/\s+/g, ' ').trim().slice(0, maxTextChars);
+    }
+
     async function browserTestDom(tabId, params = {}) {
       await attachTab(tabId);
       const selector = typeof params.selector === 'string' && params.selector.trim()
@@ -1536,83 +1590,86 @@
         : 'body';
       const maxElements = Math.min(Math.max(Number(params.max_elements) || 50, 1), 100);
       const maxTextChars = Math.min(Math.max(Number(params.max_text_chars) || 500, 50), MAX_BROWSER_TEST_TEXT_CHARS);
-      const expression = `(() => {
-        const selector = ${JSON.stringify(selector)};
-        const maxElements = ${maxElements};
-        const maxTextChars = ${maxTextChars};
-        const styleKeys = ['display','visibility','opacity','color','backgroundColor','borderColor','fontSize','fontWeight'];
-        const visible = (node, style, rect) =>
-          style.display !== 'none' &&
-          style.visibility !== 'hidden' &&
-          Number(style.opacity || 1) > 0 &&
-          rect.width > 0 &&
-          rect.height > 0;
-        const nodes = [...document.querySelectorAll(selector)];
-        const elements = nodes.slice(0, maxElements).map((node) => {
-          const style = getComputedStyle(node);
-          const rect = node.getBoundingClientRect();
-          return {
-            tag: node.tagName.toLowerCase(),
-            id: String(node.id || ''),
-            class_name: String(node.className || '').slice(0, 500),
-            role: node.getAttribute('role'),
-            aria_label: node.getAttribute('aria-label'),
-            title: node.getAttribute('title'),
-            test_id: node.getAttribute('data-testid'),
-            type: node.getAttribute('type'),
-            name: node.getAttribute('name'),
-            disabled: node instanceof HTMLButtonElement || node instanceof HTMLInputElement
-              ? node.disabled === true
-              : node.getAttribute('aria-disabled') === 'true',
-            checked: 'checked' in node ? node.checked === true : null,
-            selected: 'selected' in node ? node.selected === true : null,
-            visible: visible(node, style, rect),
-            text: String(node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, maxTextChars),
-            bounds: {
-              x: Math.round(rect.x * 100) / 100,
-              y: Math.round(rect.y * 100) / 100,
-              width: Math.round(rect.width * 100) / 100,
-              height: Math.round(rect.height * 100) / 100
-            },
-            styles: Object.fromEntries(styleKeys.map((key) => [key, style[key]]))
-          };
-        });
-        return {
-          kind: 'dom',
-          tab_id: ${Number(tabId)},
-          url: location.href,
-          title: document.title,
-          ready_state: document.readyState,
-          selector,
-          matched_count: nodes.length,
-          truncated: nodes.length > maxElements,
-          elements
-        };
-      })()`;
-      const evaluated = await sendCommand(tabId, 'Runtime.evaluate', {
-        expression,
-        returnByValue: true,
-        awaitPromise: false,
+      if (selector.length > 500) throw new Error('DOM selector exceeds bound');
+      const snapshot = await sendCommand(tabId, 'DOMSnapshot.captureSnapshot', {
+        computedStyles: [],
+        includePaintOrder: false,
+        includeTextColorOpacities: false,
       });
-      if (evaluated?.exceptionDetails) {
-        throw new Error(
-          String(
-            evaluated.exceptionDetails.text ||
-            evaluated.exceptionDetails.exception?.description ||
-            'DOM inspection failed'
-          ).slice(0, 500)
-        );
+      const document = Array.isArray(snapshot?.documents) ? snapshot.documents[0] : null;
+      const nodes = Array.isArray(document?.nodes?.nodeName)
+        ? document.nodes.nodeName.map((nodeName, index) => ({
+            nodeName,
+            nodeType: Array.isArray(document.nodes.nodeType) ? document.nodes.nodeType[index] : null,
+            nodeValue: Array.isArray(document.nodes.nodeValue) ? document.nodes.nodeValue[index] : '',
+            parentIndex: Array.isArray(document.nodes.parentIndex) ? document.nodes.parentIndex[index] : -1,
+            attributes: domSnapshotAttributes(
+              Array.isArray(document.nodes.attributes) && Array.isArray(document.nodes.attributes[index])
+                ? document.nodes.attributes[index]
+                : []
+            ),
+          }))
+        : [];
+      const childrenByParent = new Map();
+      for (let index = 0; index < nodes.length; index += 1) {
+        const parent = Number(nodes[index]?.parentIndex);
+        if (!Number.isInteger(parent) || parent < 0) continue;
+        const children = childrenByParent.get(parent) || [];
+        children.push(index);
+        childrenByParent.set(parent, children);
       }
-      return evaluated?.result?.value || {
+      const matched = [];
+      const scanLimit = Math.min(nodes.length, 50_000);
+      for (let index = 0; index < scanLimit; index += 1) {
+        const node = nodes[index];
+        if (!node || Number(node.nodeType) !== 1) continue;
+        if (!domSnapshotNodeMatches(node.nodeName, node.attributes, selector)) continue;
+        matched.push(index);
+        if (matched.length >= maxElements) break;
+      }
+      const elements = matched.map((index) => {
+        const node = nodes[index];
+        const layoutIndex = Array.isArray(document?.layout?.nodeIndex)
+          ? document.layout.nodeIndex.indexOf(index)
+          : -1;
+        const bounds = layoutIndex >= 0 && Array.isArray(document?.layout?.bounds)
+          ? document.layout.bounds[layoutIndex] || null
+          : null;
+        return {
+          tag: String(node.nodeName || '').toLowerCase(),
+          id: node.attributes.id || '',
+          class_name: node.attributes.class || '',
+          role: node.attributes.role || null,
+          aria_label: node.attributes['aria-label'] || null,
+          title: node.attributes.title || null,
+          test_id: node.attributes['data-testid'] || null,
+          type: node.attributes.type || null,
+          name: node.attributes.name || null,
+          disabled: node.attributes.disabled != null || node.attributes['aria-disabled'] === 'true',
+          selected: node.attributes.selected != null || node.attributes['aria-selected'] === 'true',
+          visible: bounds ? Number(bounds[2]) > 0 && Number(bounds[3]) > 0 : null,
+          text: domSnapshotText(index, nodes, childrenByParent, maxTextChars),
+          bounds: Array.isArray(bounds) && bounds.length >= 4
+            ? {
+                x: Number(bounds[0]),
+                y: Number(bounds[1]),
+                width: Number(bounds[2]),
+                height: Number(bounds[3]),
+              }
+            : null,
+        };
+      });
+      return {
         kind: 'dom',
         tab_id: tabId,
-        url: '',
-        title: '',
-        ready_state: 'unknown',
+        url: String(document?.frame?.url || ''),
+        title: String(document?.frame?.name || ''),
+        ready_state: null,
         selector,
-        matched_count: 0,
-        truncated: false,
-        elements: [],
+        matched_count: matched.length,
+        truncated: nodes.length > scanLimit || matched.length >= maxElements,
+        elements,
+        source: 'cdp_dom_snapshot',
       };
     }
 
@@ -1662,7 +1719,7 @@
     function install() {
       if (installed) return false;
       if (!debuggerApi?.onEvent?.addListener) throw new Error('chrome.debugger.onEvent is unavailable');
-      debuggerApi.onEvent.addListener(handleDebuggerEvent);
+      debuggerApi.onEvent.addListener(handlePaused);
       if (debuggerApi.onDetach?.addListener) {
         debuggerApi.onDetach.addListener((source, reason) => {
           const tabId = source?.tabId;
@@ -1708,7 +1765,6 @@
       ensureReasoningMode,
       ensureGithubRepository,
       handlePaused,
-      handleDebuggerEvent,
       runBrowserTest,
       findComposerAXNode,
       currentBinding,

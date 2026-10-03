@@ -71,3 +71,49 @@ After the Engineering Workspace bridge is running, the read-only live runner dia
     http://127.0.0.1:8765/runner/diagnostics
 
 It exposes sanitized bridge process data, detected PASI runner processes, profile-isolated M1/168h state, and current browser health. It does not expose the bridge token.
+
+
+## PASI Agent Interface
+
+PASI exposes a read-only observation interface for AI agents through the Model Context Protocol (MCP). The interface deliberately separates observation authority from the privileged runner/control bridge.
+
+Install the optional MCP dependency:
+
+```bash
+python -m pip install -e '.[agent]'
+```
+
+Launch the local stdio MCP server:
+
+```bash
+python scripts/pasi_agent_mcp.py
+```
+
+The server exposes exactly these seven read-only tools:
+
+- `pasi.get_runner_state`
+- `pasi.get_process_state`
+- `pasi.get_browser_state`
+- `pasi.get_extension_state`
+- `pasi.get_operation_state`
+- `pasi.get_environment_state`
+- `pasi.get_acceptance_evidence`
+
+The source of truth for their JSON Schema 2020-12 input/output contracts is `automation/pasi_agent_contracts.py`. Tool results use the `pasi-agent-v1` envelope:
+
+```json
+{
+  "schema_version": "pasi-agent-v1",
+  "request_id": "req-...",
+  "ok": true,
+  "observed_at": "2026-10-02T21:15:03.412Z",
+  "data": {},
+  "error": null
+}
+```
+
+Observation failures use the same envelope with `ok=false`, `data=null`, and a structured error containing `code`, `message`, `retryable`, `source`, and `details`.
+
+The interface is observation-only. It never receives or returns the bridge token and does not expose runner-control, queue mutation, or chat mutation operations.
+
+The Streamable HTTP application is also available from `automation.pasi_agent_mcp.create_streamable_http_app()`, but it is not started or exposed by the default launcher. Local deployment should use an explicit authenticated transport or native host boundary rather than creating an unauthenticated network listener.

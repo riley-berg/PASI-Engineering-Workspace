@@ -459,8 +459,8 @@ test("popup runner cards come from the backend registry instead of a fixed two-r
 });
 
 test("popup exposes user runner creation and candidate revision controls", () => {
-  assert.match(popupJs, /id="createRunnerForm"/);
-  assert.match(popupJs, /id="createRevisionForm"/);
+  assert.match(popupHtml, /id="createRunnerForm"/);
+  assert.match(popupHtml, /id="createRevisionForm"/);
   assert.match(popupJs, /\/runner\/registry\/create/);
   assert.match(popupJs, /\/runner\/registry\/revision/);
   assert.match(popupJs, /\/runner\/registry\/promote/);

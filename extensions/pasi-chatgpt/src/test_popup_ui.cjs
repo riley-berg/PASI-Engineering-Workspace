@@ -262,7 +262,7 @@ test("popup refuses to call a runner ready when post-start state is unavailable"
 });
 
 test("failed runner state exposes its diagnostic error", () => {
-  assert.match(popupJs, /state\?\.error \|\| state\?\.stop_reason/);
+  assert.match(popupJs, /state\?\.error[\s\S]*state\?\.stop_reason/);
 });
 
 test("runner action status survives the post-action render", () => {
@@ -382,7 +382,7 @@ test("M1 startup phases are surfaced instead of appearing silently stuck", () =>
 test("popup diagnostics include failure phase and log location", () => {
   assert.match(popupJs, /"Log path:"/);
   assert.match(popupJs, /"Failed at:"/);
-  assert.match(popupJs, /state\\?\.phase/);
+  assert.match(popupJs, /state\?\.phase/);
 });
 
 test("popup surfaces actual background-process diagnostics per runner profile", () => {

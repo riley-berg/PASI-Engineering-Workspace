@@ -139,3 +139,65 @@ def test_runner_diagnostics_payload_contains_live_process_and_profile_state(monk
     assert payload["profiles"]["m1"]["completed_operations"] == 1
     assert payload["profiles"]["168h"]["error"] == "acceptance worktree is not clean"
     assert payload["browser_health"]["observation"]["kind"] == "chatgpt_health"
+
+
+def test_load_runner_state_clears_stale_error_when_live_runner_is_running(monkeypatch, tmp_path):
+    state_path = tmp_path / "runtime" / "m1" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps({
+            "status": "running",
+            "runner_profile": "m1",
+            "execution_mode": "supervised_m1",
+            "runner_pid": 4242,
+            "error": "old unrelated failure",
+            "failed_at": "2026-10-02T00:00:00+00:00",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
+    monkeypatch.setattr(
+        bridge,
+        "runner_process_info",
+        lambda profile=None: {
+            "pid": 4242,
+            "profile": "m1",
+            "cmdline": "pasi_m1_cdp_chain.py",
+            "workspace": True,
+            "recognized": True,
+        },
+    )
+
+    result = bridge.load_runner_state("m1")
+
+    assert result["status"] == "running"
+    assert result["ready"] is True
+    assert result["error"] is None
+    assert "failed_at" not in result
+    assert result["evidence"]["live_process_present"] is True
+    assert result["evidence"]["failure_confirmed"] is False
+
+
+def test_load_runner_state_uses_process_loss_as_failure_evidence(monkeypatch, tmp_path):
+    state_path = tmp_path / "runtime" / "m1" / "state.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps({
+            "status": "running",
+            "runner_profile": "m1",
+            "execution_mode": "supervised_m1",
+            "runner_pid": 4242,
+            "error": "old unrelated failure",
+        }) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bridge, "runner_state_path", lambda profile: state_path)
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
+
+    result = bridge.load_runner_state("m1")
+
+    assert result["status"] == "failed"
+    assert result["ready"] is False
+    assert result["error"] == "runner process is no longer alive"
+    assert result["evidence"]["live_process_present"] is False
+    assert result["evidence"]["failure_confirmed"] is True

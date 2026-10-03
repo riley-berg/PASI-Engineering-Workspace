@@ -703,7 +703,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const method = String(message.method || 'GET').toUpperCase();
     const path = String(message.path || '');
     const allowed = (
-      (method === 'GET' && new Set(['/status', '/browser/observation', '/runner/capabilities', '/runner/state', '/runner/registry']).has(path))
+      (method === 'GET' && new Set(['/health', '/status', '/browser/observation', '/runner/capabilities', '/runner/state', '/runner/registry']).has(path))
       || (method === 'POST' && new Set([
         '/runner/control',
         '/runner/registry/create',

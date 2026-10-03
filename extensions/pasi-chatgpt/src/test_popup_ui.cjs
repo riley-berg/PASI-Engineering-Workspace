@@ -111,9 +111,15 @@ test("light and dark palettes are unmistakably distinct", () => {
   assert.doesNotMatch(popupCss, /runner-option|status-stopped/);
 });
 
-test("popup uses connected and operational runner semantics", () => {
+test("popup connection badge reflects bridge reachability, not runner availability", () => {
   assert.match(popupHtml, /id="connectionBadge" class="status-badge">Connected<\/span>/);
-  assert.match(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
+  assert.match(popupJs, /async function getBridgeHealth\(\)/);
+  assert.match(popupJs, /bridgeRequest\("GET", "\/health"\)/);
+  assert.match(popupJs, /function renderBridgeBadge\(health\)/);
+  assert.match(popupJs, /connected \? "Connected" : "Bridge unavailable"/);
+  assert.match(popupJs, /PASI bridge is responding on 127\.0\.0\.1:8765\./);
+  assert.doesNotMatch(popupJs, /state\?\.available \? "Connected" : "Disconnected"/);
+  assert.match(backgroundJs, /new Set\(\['\/health', '\/status'/);
   assert.match(popupJs, /state\.status === "starting"/);
   assert.match(popupJs, /state\.status === "stopping"/);
   assert.match(popupJs, /typeof state\.process_alive === "boolean"/);
@@ -252,10 +258,12 @@ test("runner start requires ready state before claiming the runner is ready", ()
   assert.doesNotMatch(popupJs, /runner started\./);
 });
 
-test("popup preserves bridge errors when runner state cannot be read", () => {
+test("popup preserves bridge errors without assigning them to a runner", () => {
   assert.match(popupJs, /const message = String\(error\?\.message \|\| error/);
   assert.match(popupJs, /available: false,[\s\S]*reason: message/);
-  assert.match(popupJs, /Runner state unavailable:/);
+  assert.match(popupJs, /async function getBridgeHealth\(\)/);
+  assert.match(popupJs, /Bridge unavailable/);
+  assert.doesNotMatch(popupJs, /Runner state unavailable: /);
 });
 
 test("popup preserves bridge transport errors instead of collapsing them to HTTP unknown", () => {
@@ -472,4 +480,17 @@ test("popup recognizes arbitrary supervised runner profiles", () => {
   assert.match(popupJs, /function activeProfileForState\(state\)[\s\S]*mode\.startsWith\("supervised_"/);
   assert.match(popupJs, /\^\[a-z\]\[a-z0-9\.\_\-\]\{1,63\}\$/);
   assert.match(popupJs, /runnerProfileMeta\(profileId, state, registryEntry\)/);
+});
+
+
+test("popup does not surface an unavailable runner as a blanket error", () => {
+  assert.match(popupJs, /if \(!state\?\.available\) return "";/);
+  assert.match(popupJs, /if \(status === "Unavailable"\) return "";/);
+});
+
+test("popup diagnostics expose evidence behind runner failures", () => {
+  assert.match(popupJs, /Failure evidence: /);
+  assert.match(popupJs, /Live process evidence: /);
+  assert.match(popupJs, /State file evidence: /);
+  assert.match(popupJs, /evidence\?\.failure_confirmed === true/);
 });

@@ -379,6 +379,12 @@ test("M1 startup phases are surfaced instead of appearing silently stuck", () =>
 });
 
 
+test("popup diagnostics include failure phase and log location", () => {
+  assert.match(popupJs, /"Log path:"/);
+  assert.match(popupJs, /"Failed at:"/);
+  assert.match(popupJs, /phase: "\\"/);
+});
+
 test("popup surfaces actual background-process diagnostics per runner profile", () => {
   assert.match(popupJs, /function diagnosticText\(state, aggregateState, profileId\)/);
   assert.match(popupJs, /Process alive:/);

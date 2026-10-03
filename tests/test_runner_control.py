@@ -148,6 +148,8 @@ def test_load_runner_state_keeps_terminal_state_but_exposes_live_process(monkeyp
     assert result["process_pid"] == 4242
     assert result["process_profile"] == "m1"
     assert result["ready"] is False
+    assert result["state_consistency"] == "live_process_terminal_state"
+    assert "persisted state is completed" in result["diagnostic_warning"]
     assert result["completed_at"].startswith("2026-10-02T00:00:00")
 
 

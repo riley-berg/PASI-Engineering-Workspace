@@ -345,6 +345,21 @@ def load_runner_state(profile: str | None = None) -> dict[str, Any]:
     return selected
 
 
+def runner_diagnostics_payload(bridge_state: "BridgeState") -> dict[str, Any]:
+    """Build a sanitized live diagnostic snapshot for localhost/browser inspection."""
+    runner_state = load_runner_state()
+    browser_health = bridge_state.get_browser_health()
+    return {
+        "schema_version": "pasi-runner-diagnostics-v1",
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "bridge_process": runner_state.get("bridge_process"),
+        "active_profile": runner_state.get("active_profile"),
+        "processes": runner_state.get("processes", []),
+        "profiles": runner_state.get("profiles", {}),
+        "browser_health": browser_health,
+    }
+
+
 def runner_execution_authorized(payload: Mapping[str, Any]) -> bool:
     profile = str(
         payload.get("runner_profile") or payload.get("active_profile") or ""
@@ -2239,6 +2254,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/runner/state":
             self._send_json(load_runner_state())
+            return
+
+        if path == "/runner/diagnostics":
+            # This is intentionally read-only and token-free: the bridge binds
+            # exclusively to 127.0.0.1, and no secrets/tokens are included.
+            self._send_json(runner_diagnostics_payload(self.bridge_state))
             return
 
         if path == "/browser/observation":

@@ -233,7 +233,14 @@
     if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
     if (status === "Failed") {
-      return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
+      const reason = String(
+        state?.error ||
+        state?.stop_reason ||
+        state?.last_result ||
+        "Last run failed."
+      ).trim();
+      const phase = String(state?.phase || "").trim();
+      return phase ? reason + " (phase: " + phase + ")" : reason;
     }
     return "";
   }
@@ -347,6 +354,8 @@
       "Detected PID: " + String(process?.pid ?? state?.process_pid ?? "none"),
       "Detected command: " + String(process?.cmdline ?? state?.process_cmdline ?? "none"),
       "Runtime state: " + String(state?.runtime_state_path || "n/a"),
+      "Log path: " + String(state?.log_path || "n/a"),
+      "Failed at: " + String(state?.failed_at || "n/a"),
       "Bridge PID: " + String(aggregateState?.bridge_process?.pid ?? "n/a"),
       "Error: " + String(state?.error || "none"),
       "All detected PASI processes:",

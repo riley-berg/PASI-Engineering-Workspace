@@ -159,13 +159,15 @@
   }
 
   function activeProfileForState(state) {
-    const processProfile = String(state?.process_profile || "");
-    if (processProfile === "m1" || processProfile === "168h") return processProfile;
-    const explicit = String(state?.runner_profile || "");
-    if (explicit === "m1" || explicit === "168h") return explicit;
+    const processProfile = String(state?.process_profile || "").trim().toLowerCase();
+    if (/^[a-z][a-z0-9._-]{1,63}$/.test(processProfile)) return processProfile;
+    const explicit = String(state?.runner_profile || "").trim().toLowerCase();
+    if (/^[a-z][a-z0-9._-]{1,63}$/.test(explicit)) return explicit;
     const mode = String(state?.execution_mode || "");
-    if (mode === "supervised_m1") return "m1";
-    if (mode === "supervised_168h") return "168h";
+    if (mode.startsWith("supervised_")) {
+      const derived = mode.slice("supervised_".length).trim().toLowerCase();
+      if (/^[a-z][a-z0-9._-]{1,63}$/.test(derived)) return derived;
+    }
     return null;
   }
 
@@ -221,7 +223,9 @@
     return {
       id: profileId,
       title: String(entry.name || state?.runner_name || fallback.title || profileId),
-      source: String(entry.source || state?.runner_source || "user"),
+      source: String(entry.source || (
+        RUNNER_PROFILES[profileId] ? "builtin" : state?.runner_source || "user"
+      )),
       stableVersion: Number.isFinite(Number(entry.stable_version))
         ? Number(entry.stable_version)
         : null,

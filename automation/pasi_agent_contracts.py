@@ -477,7 +477,8 @@ TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
                 "enum": ["screenshot", "dom", "console_errors", "network", "click", "fill", "press_key", "scroll"],
             },
             "tab_id": {"type": ["integer", "null"], "minimum": 1},
-            "selector": {"type": ["string", "null"], "maxLength": 500},
+            "target": {"type": ["string", "null"], "maxLength": 500},
+            "role": {"type": ["string", "null"], "maxLength": 80},
             "value": {"type": ["string", "null"], "maxLength": 20000},
             "key": {"type": ["string", "null"], "maxLength": 30},
             "modifiers": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
@@ -809,7 +810,8 @@ class PasiAgentObservationService:
         self,
         action: str,
         tab_id: int | None = None,
-        selector: str | None = None,
+        target: str | None = None,
+        role: str | None = None,
         value: str | None = None,
         key: str | None = None,
         modifiers: int = 0,
@@ -829,8 +831,10 @@ class PasiAgentObservationService:
             raise PasiAgentInputError("unsupported browser test action")
         if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
             raise PasiAgentInputError("tab_id must be a positive integer or null")
-        if selector is not None and (not isinstance(selector, str) or len(selector) > 500):
-            raise PasiAgentInputError("selector must be null or a bounded string")
+        if target is not None and (not isinstance(target, str) or len(target) > 500):
+            raise PasiAgentInputError("target must be null or a bounded accessibility name")
+        if role is not None and (not isinstance(role, str) or len(role) > 80):
+            raise PasiAgentInputError("role must be null or a bounded accessibility role")
         if value is not None and (not isinstance(value, str) or len(value) > 20000):
             raise PasiAgentInputError("value must be null or at most 20000 characters")
         if key is not None and (not isinstance(key, str) or len(key) > 30):
@@ -845,7 +849,8 @@ class PasiAgentObservationService:
             action,
             tab_id=tab_id,
             params={
-                "selector": selector,
+                "target": target,
+                "role": role,
                 "value": value,
                 "key": key,
                 "modifiers": modifiers,

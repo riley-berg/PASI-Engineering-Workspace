@@ -260,7 +260,7 @@ test("popup preserves bridge errors when runner state cannot be read", () => {
 
 test("popup preserves bridge transport errors instead of collapsing them to HTTP unknown", () => {
   assert.match(popupJs, /response\.error/);
-  assert.match(popupJs, /Bridge request failed: .*response\.error/);
+  assert.match(popupJs, /Bridge request failed: no response from the PASI bridge\./);
   assert.doesNotMatch(popupJs, /HTTP unknown/);
 });
 

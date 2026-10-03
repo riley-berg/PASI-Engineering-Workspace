@@ -515,6 +515,15 @@ class PasiAgentObservationService:
                 source="agent_interface",
                 details={},
             )
+        except _ObservationNotFound as exc:
+            return _failure(
+                request_id,
+                code=exc.code,
+                message=str(exc),
+                retryable=False,
+                source=exc.source,
+                details=exc.details,
+            )
         except StateCorruptionError as exc:
             return _failure(
                 request_id,
@@ -804,7 +813,7 @@ class PasiAgentObservationService:
         prompt_data = {
             "present": isinstance(prompt, str) and bool(prompt),
             "sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest() if isinstance(prompt, str) else None,
-            "content_included": bool(include_response_text),
+            "content_included": False,
         }
         response_text = operation.get("response_text")
         response_data = {
@@ -895,6 +904,88 @@ class PasiAgentObservationService:
             "promotion": dict(promotion),
         }
 
+    def _derive_acceptance_evidence(self, profile: str | None) -> list[dict[str, Any]]:
+        profiles = [profile] if profile else ["m1", "168h"]
+        records: list[dict[str, Any]] = []
+        for current_profile in profiles:
+            runner = bridge.load_runner_state(current_profile)
+            if not runner.get("available"):
+                continue
+            version_id = str(runner.get("branch") or runner.get("repo") or "unversioned")
+            status = str(runner.get("status") or "unavailable")
+            completed = int(runner.get("completed_operations") or 0)
+            target = int(runner.get("target_operations") or 0)
+            gates: list[dict[str, Any]] = [
+                {
+                    "gate_id": current_profile + "-process",
+                    "name": current_profile.upper() + " runner process observed",
+                    "status": "passed" if runner.get("process_alive") else "failed" if status in {"failed", "completed", "cancelled"} else "pending",
+                    "observed_at": runner.get("last_updated_at") or runner.get("started_at"),
+                    "evidence_refs": [f"process:{runner.get('runner_pid')}"] if runner.get("runner_pid") else [],
+                    "details": {},
+                }
+            ]
+            if current_profile == "m1":
+                gates.extend([
+                    {
+                        "gate_id": "m1-browser",
+                        "name": "ChatGPT browser/CDP authority available",
+                        "status": "passed" if runner.get("chat_url") and runner.get("process_alive") else "failed" if status == "failed" else "pending",
+                        "observed_at": runner.get("last_updated_at") or runner.get("started_at"),
+                        "evidence_refs": ["browser:chatgpt_health"],
+                        "details": {"chat_url": runner.get("chat_url")},
+                    },
+                    {
+                        "gate_id": "m1-chain",
+                        "name": "20-operation sequential chain completed",
+                        "status": "passed" if completed == target == 20 and status == "completed" else "failed" if status == "failed" else "pending",
+                        "observed_at": runner.get("completed_at") or runner.get("failed_at") or runner.get("last_updated_at"),
+                        "evidence_refs": [f"operations:{completed}/{target}"],
+                        "details": {"completed": completed, "target": target},
+                    },
+                    {
+                        "gate_id": "m1-response-processing",
+                        "name": "Response processing reached the durable completion boundary",
+                        "status": "passed" if completed == 20 and status == "completed" else "failed" if status == "failed" else "pending",
+                        "observed_at": runner.get("completed_at") or runner.get("last_updated_at"),
+                        "evidence_refs": [f"last-operation:{runner.get('last_operation_id')}"] if runner.get("last_operation_id") else [],
+                        "details": {"request_ids": runner.get("request_ids")},
+                    },
+                ])
+            else:
+                gates.extend([
+                    {
+                        "gate_id": "168h-initialization",
+                        "name": "168h acceptance initialization completed",
+                        "status": "failed" if status == "failed" and runner.get("phase") in {"initialization", "initializing_worktree", "loading_schedule"} else "passed" if runner.get("phase") not in {"initializing_worktree", "loading_schedule"} else "pending",
+                        "observed_at": runner.get("last_updated_at") or runner.get("started_at"),
+                        "evidence_refs": [f"worktree:{runner.get('worktree')}"] if runner.get("worktree") else [],
+                        "details": {"branch": runner.get("branch")},
+                    },
+                    {
+                        "gate_id": "168h-run",
+                        "name": "168h acceptance execution remains operational",
+                        "status": "passed" if status in {"running", "roadmap_complete", "deadline_reached"} else "failed" if status == "failed" else "pending",
+                        "observed_at": runner.get("completed_at") or runner.get("failed_at") or runner.get("last_updated_at"),
+                        "evidence_refs": [f"run:{runner.get('run_id')}"] if runner.get("run_id") else [],
+                        "details": {"current_task": runner.get("current_task"), "completed_tasks": runner.get("completed_tasks")},
+                    },
+                ])
+            passed = sum(1 for gate in gates if gate["status"] == "passed")
+            failed = sum(1 for gate in gates if gate["status"] == "failed")
+            pending = sum(1 for gate in gates if gate["status"] in {"pending", "running"})
+            records.append({
+                "acceptance_id": f"derived-{current_profile}-{runner.get('run_id') or 'unknown'}",
+                "profile": current_profile,
+                "version_id": version_id,
+                "started_at": runner.get("started_at"),
+                "completed_at": runner.get("completed_at"),
+                "status": "passed" if failed == 0 and pending == 0 else "failed" if failed else "running" if pending else "pending",
+                "gates": gates,
+                "summary": {"passed": passed, "failed": failed, "pending": pending},
+            })
+        return records
+
     def get_acceptance_evidence(
         self,
         acceptance_id: str | None = None,
@@ -913,6 +1004,8 @@ class PasiAgentObservationService:
             records = [dict(item) for item in payload if isinstance(item, Mapping)]
         else:
             records = []
+        if not records:
+            records = self._derive_acceptance_evidence(profile)
 
         filtered = []
         for record in records:

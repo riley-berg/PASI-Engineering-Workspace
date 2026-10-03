@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from pasi.core.human_testing import (
     CodeChangeCandidate,
     HumanTestRun,
@@ -74,7 +76,7 @@ def test_trust_requires_all_qualification_dimensions():
 def test_failed_run_breaks_trailing_success_requirement():
     policy = HumanTestTrustPolicy(required_trailing_successes=5)
     runs = [run(i) for i in range(20)]
-    runs[-5] = run(19, status=HumanTestStatus.FAIL)
+    runs[-5] = run(15, status=HumanTestStatus.FAIL)
     cert = HumanTestTrustEvaluator().evaluate(runs, policy=policy)
     assert cert.status is TrustStatus.PENDING
     assert cert.trailing_successes == 4
@@ -95,7 +97,7 @@ def test_self_improvement_requires_trust_and_exact_candidate_head():
         CodeChangeCandidate(
             candidate_sha="2" * 40,
             ci_passed=True,
-            human_test_run_id="run-2",
+            human_test_run_id="run-002",
             human_test_status=HumanTestStatus.PASS,
             human_test_code_head="2" * 40,
             human_test_execution_source="mv3-human-test-extension",

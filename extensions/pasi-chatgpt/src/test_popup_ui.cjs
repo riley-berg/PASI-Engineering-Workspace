@@ -379,3 +379,9 @@ test("popup refreshes live runner state while it remains open", () => {
   assert.match(timerSource, /\}, 750\);/);
   assert.match(popupJs, /clearInterval\(runnerRefreshTimer\)/);
 });
+
+test("popup preserves open diagnostics while refreshing runner state", () => {
+  assert.match(popupJs, /const openDiagnostics = new Map\(/);
+  assert.match(popupJs, /card\.querySelector\("\.runner-diagnostics"\)\?\.open === true/);
+  assert.match(popupJs, /diagnostic\.open = openDiagnostics\.get\(profileId\) === true/);
+});

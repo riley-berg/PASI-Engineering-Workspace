@@ -106,6 +106,12 @@ html.light-theme body {
   font-weight: 700;
 }
 
+
+.status-badge.error {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
 .theme-toggle {
   width: 28px;
   height: 28px;

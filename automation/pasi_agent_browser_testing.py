@@ -169,10 +169,6 @@ def _require_reference_elements(dom: Mapping[str, Any], requirements: Any) -> li
     return failures
 
 
-def _reference_failure(check: str, detail: str) -> dict[str, str]:
-    return {"check": check, "detail": detail}
-
-
 def load_reference_material(path: str | os.PathLike[str]) -> dict[str, Any]:
     reference_path = Path(path).expanduser().resolve()
     try:
@@ -181,6 +177,8 @@ def load_reference_material(path: str | os.PathLike[str]) -> dict[str, Any]:
         raise BrowserTestingError(f"reference material is not valid JSON: {reference_path}") from exc
     if not isinstance(payload, dict):
         raise BrowserTestingError("reference material must be a JSON object")
+    if payload.get("schema_version") != 1:
+        raise BrowserTestingError("reference material schema_version must be 1")
     return payload
 
 

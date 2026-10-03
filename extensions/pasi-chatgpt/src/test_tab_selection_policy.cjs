@@ -97,3 +97,48 @@ test('safe tab policy reports when no existing tab is safe to reuse', () => {
   assert.equal(result.reused_existing, false);
   assert.equal(result.reason, 'no_safe_existing_tab');
 });
+
+
+test('managed tab policy always reuses the tracked tab before considering other tabs', () => {
+  const result = policy.selectManagedTab([
+    chatTab(1, {active: true}),
+    chatTab(2, {active: false}),
+  ], 1);
+
+  assert.equal(result.mode, 'reuse');
+  assert.equal(result.selected_tab_id, 1);
+  assert.equal(result.reason, 'managed_tab_reuse');
+});
+
+test('managed tab policy does not create a second tab while the tracked tab is busy', () => {
+  const result = policy.selectManagedTab([
+    chatTab(1, {active: true}),
+    chatTab(2, {active: false}),
+  ], 1, {busyTabIds: [1]});
+
+  assert.equal(result.mode, 'reuse_busy');
+  assert.equal(result.selected_tab_id, 1);
+  assert.equal(result.reason, 'managed_tab_busy');
+});
+
+test('managed tab policy adopts one safe existing tab when no managed tab is tracked', () => {
+  const result = policy.selectManagedTab([
+    chatTab(1, {active: true}),
+    chatTab(2, {active: false}),
+  ], null);
+
+  assert.equal(result.mode, 'adopt_existing');
+  assert.equal(result.selected_tab_id, 2);
+  assert.equal(result.reason, 'adopt_safe_existing_tab');
+});
+
+test('managed tab policy requests one new tab only when no safe existing tab is available', () => {
+  const result = policy.selectManagedTab([
+    chatTab(1, {active: true}),
+    chatTab(2, {pinned: true, active: false}),
+  ], null, {busyTabIds: [1]});
+
+  assert.equal(result.mode, 'create');
+  assert.equal(result.selected_tab_id, null);
+  assert.equal(result.reason, 'create_managed_tab');
+});

@@ -82,3 +82,32 @@ def test_runner_start_uses_profile_isolated_runtime(monkeypatch, tmp_path):
     assert bridge.runner_runtime_dir("m1") == (runtime / "m1").resolve()
     assert bridge.runner_runtime_dir("168h") == (runtime / "168h").resolve()
     assert bridge.runner_state_path("m1") != bridge.runner_state_path("168h")
+
+
+def test_runner_diagnostics_payload_contains_live_process_and_profile_state(monkeypatch):
+    class FakeBridgeState:
+        def get_browser_health(self):
+            return {"observation": {"kind": "chatgpt_health"}}
+
+    monkeypatch.setattr(
+        bridge,
+        "load_runner_state",
+        lambda profile=None: {
+            "active_profile": "m1",
+            "bridge_process": {"pid": 100},
+            "processes": [{"pid": 200, "profile": "m1", "recognized": True}],
+            "profiles": {
+                "m1": {"status": "running", "completed_operations": 1},
+                "168h": {"status": "failed", "error": "acceptance worktree is not clean"},
+            },
+        },
+    )
+
+    payload = bridge.runner_diagnostics_payload(FakeBridgeState())
+
+    assert payload["schema_version"] == "pasi-runner-diagnostics-v1"
+    assert payload["active_profile"] == "m1"
+    assert payload["processes"][0]["pid"] == 200
+    assert payload["profiles"]["m1"]["completed_operations"] == 1
+    assert payload["profiles"]["168h"]["error"] == "acceptance worktree is not clean"
+    assert payload["browser_health"]["observation"]["kind"] == "chatgpt_health"

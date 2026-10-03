@@ -33,7 +33,7 @@ EXPECTED_TOOLS = {
 }
 
 
-def test_agent_tool_contracts_are_exactly_the_read_only_seven():
+def test_agent_tool_contracts_match_the_declared_runtime_tools():
     assert set(TOOL_NAMES) == EXPECTED_TOOLS
     assert set(TOOL_INPUT_SCHEMAS) == EXPECTED_TOOLS
     assert set(TOOL_OUTPUT_SCHEMAS) == EXPECTED_TOOLS

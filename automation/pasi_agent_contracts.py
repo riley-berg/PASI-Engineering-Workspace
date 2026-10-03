@@ -919,7 +919,7 @@ class PasiAgentObservationService:
                 {
                     "gate_id": current_profile + "-process",
                     "name": current_profile.upper() + " runner process observed",
-                    "status": "passed" if runner.get("process_alive") else "failed" if status in {"failed", "completed", "cancelled"} else "pending",
+                    "status": "passed" if runner.get("process_alive") or status == "completed" else "failed" if status in {"failed", "cancelled"} else "pending",
                     "observed_at": runner.get("last_updated_at") or runner.get("started_at"),
                     "evidence_refs": [f"process:{runner.get('runner_pid')}"] if runner.get("runner_pid") else [],
                     "details": {},

@@ -2229,7 +2229,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = parsed.path
 
-        if path != "/health" and not self._request_is_authorized(require_token=True):
+        if path not in {"/health", "/runner/diagnostics"} and not self._request_is_authorized(require_token=True):
             self._send_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
             return
 

@@ -667,6 +667,21 @@
     }
   }
 
+  async function getLiveActiveUrl(fallbackUrl) {
+    let activeUrl = String(fallbackUrl || "");
+
+    // The popup must authorize runners from the browser tab that is active
+    // right now. The userscript registry is only a fallback because its URL
+    // can lag behind a tab switch during extension lifecycle transitions.
+    try {
+      const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
+      const tabUrl = String(tabs?.[0]?.url || "");
+      if (tabUrl) activeUrl = tabUrl;
+    } catch (_) {}
+
+    return activeUrl;
+  }
+
   async function render({clearStatus = false} = {}) {
     try {
       applyTheme();
@@ -676,17 +691,8 @@
         getRunnerState(),
       ]);
 
-      // Runner authorization is based on the actual active browser tab,
-      // not the userscript manager's asynchronous view of that tab. The
-      // userscript registry can briefly return an empty/stale URL during an
-      // extension lifecycle transition, which must not flash "Page not
-      // authorized" while the user is still on ChatGPT.
-      let activeUrl = String(activeResult.url || "");
-      try {
-        const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
-        const tabUrl = String(tabs?.[0]?.url || "");
-        if (tabUrl) activeUrl = tabUrl;
-      } catch (_) {}
+      // Resolve authorization from the live active tab on every render.
+      const activeUrl = await getLiveActiveUrl(activeResult.url);
       const runnerSupported = isRunnerTargetUrl(activeUrl);
       const userscriptsMatched = hasMatchedUserscripts(activeResult);
 

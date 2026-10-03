@@ -17,6 +17,8 @@ from automation.orchestrator.state import StateManager
 
 
 EXPECTED_TOOLS = {
+    "pasi.control_runner",
+    "pasi.run_browser_test",
     "pasi.get_runner_state",
     "pasi.get_process_state",
     "pasi.get_browser_state",
@@ -211,6 +213,16 @@ def test_mcp_server_advertises_exact_tool_schemas():
     for name in EXPECTED_TOOLS:
         assert tools[name].input_schema == TOOL_INPUT_SCHEMAS[name]
         assert tools[name].output_schema == TOOL_OUTPUT_SCHEMAS[name]
+
+
+def test_runner_control_and_browser_interaction_tools_are_bounded():
+    assert TOOL_INPUT_SCHEMAS["pasi.control_runner"]["additionalProperties"] is False
+    assert TOOL_INPUT_SCHEMAS["pasi.control_runner"]["properties"]["wait_ms"]["maximum"] == 10000
+    actions = TOOL_INPUT_SCHEMAS["pasi.run_browser_test"]["properties"]["action"]["enum"]
+    assert "click" in actions
+    assert "fill" in actions
+    assert "press_key" in actions
+    assert "scroll" in actions
 
 
 def test_browser_tools_are_read_only_and_bounded():

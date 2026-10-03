@@ -71,6 +71,46 @@ def test_github_token_accepts_projects_and_gh_names(monkeypatch):
     assert bridge._github_token() == "projects-token"
 
 
+def test_runner_start_reports_immediate_child_exit(monkeypatch, tmp_path):
+    script = tmp_path / "168h.py"
+    script.write_text("raise SystemExit(1)\n", encoding="utf-8")
+    executable = tmp_path / "python"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+
+    monkeypatch.setenv("PASI_GITHUB_TOKEN", "test-token")
+    monkeypatch.setattr(bridge, "RUNNER_RUNTIME_DIR", tmp_path / "runtime")
+    monkeypatch.setattr(bridge, "RUNNER_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(
+        bridge,
+        "RUNNER_PROFILES",
+        {"168h": (str(executable), str(script), "--hours", "168")},
+    )
+    monkeypatch.setattr(bridge, "runner_process_info", lambda profile=None: None)
+
+    class FakeProcess:
+        pid = 4242
+
+        @staticmethod
+        def poll():
+            return 1
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+
+    result = bridge._start_runner("168h")
+    state = json.loads(
+        (tmp_path / "runtime" / "168h" / "state.json").read_text(encoding="utf-8")
+    )
+
+    assert result["accepted"] is False
+    assert result["action"] == "start"
+    assert result["profile"] == "168h"
+    assert result["reason"] == "runner exited during startup with exit code 1"
+    assert state["status"] == "failed"
+    assert state["error"] == result["reason"]
+    assert state["runner_pid"] == 4242
+
+
 def test_explicit_start_never_becomes_stop(monkeypatch):
     monkeypatch.setattr(
         bridge,

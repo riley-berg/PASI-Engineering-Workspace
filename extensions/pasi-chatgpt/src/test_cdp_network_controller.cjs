@@ -59,6 +59,12 @@ function fakeDebugger() {
           }],
         });
       }
+      if (method === 'DOM.getDocument') {
+        return callback({root: {nodeId: 1}});
+      }
+      if (method === 'DOM.querySelector') {
+        return callback({nodeId: 42});
+      }
       if (method === 'DOM.getBoxModel') {
         return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
       }
@@ -170,6 +176,43 @@ test('CDP controller keeps prompt bindings exclusive and exposes idle state', as
   await controller.unbindOperation(31, 'op-31-c', 'controller-31');
   assert.equal(controller.isIdle(31), true);
 });
+
+test('bounded browser interactions use native CDP input and selectors', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+
+  const clicked = await controller.runBrowserTest(31, 'click', {selector: '#start'});
+  assert.equal(clicked.success, true);
+  assert.equal(clicked.action, 'click');
+
+  const filled = await controller.runBrowserTest(31, 'fill', {selector: '#start', value: 'PASI'});
+  assert.equal(filled.success, true);
+
+  const pressed = await controller.runBrowserTest(31, 'press_key', {key: 'Enter'});
+  assert.equal(pressed.success, true);
+
+  const scrolled = await controller.runBrowserTest(31, 'scroll', {delta_y: 400});
+  assert.equal(scrolled.success, true);
+
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'DOM.querySelector' && command.params.selector === '#start'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchMouseEvent' && command.params.type === 'mousePressed'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.insertText' && command.params.text === 'PASI'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchMouseEvent' && command.params.type === 'mouseWheel'
+  ));
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
+});
+
 
 test('CDP reasoning control verifies an existing Thinking state and can enable it', async () => {
   const debuggerApi = fakeDebugger();

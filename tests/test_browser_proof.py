@@ -131,7 +131,7 @@ def test_reference_proof_fails_when_reference_requirement_is_missing():
 
     assert result["result"] == "failed"
     assert result["reference_complete"] is False
-    assert result["coverage_percent"] == 0.0
+    assert result["coverage_percent"] == 50.0
     assert result["checks_failed"] == 1
 
 

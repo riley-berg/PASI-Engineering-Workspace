@@ -1,4 +1,4 @@
-importScripts("api_contract.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js", "cdp-network-controller.js");
+importScripts("api_contract.js", "tab-selection-policy.js", "userscript_contract.js", "userscript_runtime.js", "userscript_backup.js", "userscript_dnr.js", "userscript_install_queue.js", "userscript_vcs.js", "userscript_compiler.js", "userscript_cloud.js", "background-userscripts.js", "background-api.js", "timeout-config.js", "cdp-network-controller.js");
 
 const BRIDGE = 'http://127.0.0.1:8765';
 const ALARM = 'pasi-watchdog';
@@ -759,7 +759,7 @@ function controllerIdForTab(tabId, runId = '') {
     : 'cdp-tab:' + String(tabId);
 }
 
-async function reportWorkerHealth(tab) {
+async function reportWorkerHealth(tab, tabSelection = null) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return;
   const binding = cdpNetworkController?.currentBinding?.(tabId);
@@ -785,19 +785,28 @@ async function reportWorkerHealth(tab) {
         dispatcher_waiter_tab_id: supervisedExecutionWaiters.has(String(tabId)) ? tabId : null,
         network_controller: 'cdp_fetch',
         controller_id: binding?.controllerId || null,
+        tab_selection: tabSelection && typeof tabSelection === 'object'
+          ? {
+              policy_version: String(tabSelection.policy_version || ''),
+              selected_tab_id: Number.isInteger(tabSelection.selected_tab_id) ? tabSelection.selected_tab_id : tabId,
+              reused_existing: tabSelection.reused_existing === true,
+              reason: String(tabSelection.reason || ''),
+              candidate_count: Array.isArray(tabSelection.candidates) ? tabSelection.candidates.length : 0,
+            }
+          : null,
       }
     }
   }, 5000);
 }
 
-async function attachAndObserveTab(tab) {
+async function attachAndObserveTab(tab, tabSelection = null) {
   const tabId = tab?.id;
   if (typeof tabId !== 'number' || !isChatGPTUrl(tab?.url)) return false;
   if (!cdpNetworkController?.attachTab) return false;
   try {
     await cdpNetworkController.attachTab(tabId);
     ensureSupervisedExecutionWaiter(tabId);
-    await reportWorkerHealth(tab);
+    await reportWorkerHealth(tab, tabSelection);
     ensureBrowserTestingWaiter(tabId);
     return true;
   } catch (_) {
@@ -809,14 +818,17 @@ async function attachExistingChatTabs() {
   const tabs = await chrome.tabs.query({
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
-  const active = tabs.find((tab) => tab.active && typeof tab.id === 'number');
-  if (active) {
-    await attachAndObserveTab(active);
-    return;
-  }
-  for (const tab of tabs) {
-    if (await attachAndObserveTab(tab)) return;
-  }
+  const busyTabIds = tabs
+    .filter((tab) => Number.isInteger(tab?.id) && cdpNetworkController?.isIdle?.(tab.id) === false)
+    .map((tab) => tab.id);
+  const selection = globalThis.PASI_TAB_SELECTION_POLICY?.selectReusableTab?.(tabs, {
+    busyTabIds,
+    preferActive: false,
+  });
+  if (!selection?.selected_tab_id) return;
+  const selected = tabs.find((tab) => tab.id === selection.selected_tab_id);
+  if (!selected) return;
+  if (await attachAndObserveTab(selected, selection)) return;
 }
 
 async function inspect() {

@@ -552,7 +552,8 @@ const BRIDGE_ROUTES = new Set([
   'GET /browser/health',
   'GET /browser/state',
   'GET /browser/response',
-    'POST /browser/observation',
+  'POST /browser/testing/result',
+  'POST /browser/observation',
   'POST /queue',
   'POST /chat/claim',
   'POST /chat/heartbeat',
@@ -561,6 +562,7 @@ const BRIDGE_ROUTES = new Set([
   'POST /chat/cancel',
   'GET /next-operation'
 ]);
+const BRIDGE_BROWSER_TEST_REQUEST_RE = /^\/browser\/testing\/request\?tab_id=[0-9]{1,10}&wait_ms=[0-9]{1,5}$/;
 const BRIDGE_OPERATION_RE = /^\/operation\?operation_id=[^&]{1,200}$/;
 const BRIDGE_NEXT_OPERATION_RE = /^\/next-operation\?controller_id=[^&]{1,200}(?:&wait_ms=[0-9]{1,5})?$/;
 
@@ -589,7 +591,8 @@ function allowedBridgeRequest(method, path) {
   const value = String(path || '');
   if (normalized === 'GET' && (
     BRIDGE_OPERATION_RE.test(value) ||
-    BRIDGE_NEXT_OPERATION_RE.test(value)
+    BRIDGE_NEXT_OPERATION_RE.test(value) ||
+    BRIDGE_BROWSER_TEST_REQUEST_RE.test(value)
   )) return true;
   return BRIDGE_ROUTES.has(`${normalized} ${value}`);
 }

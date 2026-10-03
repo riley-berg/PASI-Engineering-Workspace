@@ -658,10 +658,7 @@
       }
       root.append(card);
     }
-
-    $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
-    $("connectionBadge").classList.remove("active");
-    restorePopupScroll(scrollTop);
+restorePopupScroll(scrollTop);
   }
 
   async function renderUserscripts(activeResult) {

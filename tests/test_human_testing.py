@@ -142,7 +142,7 @@ def test_human_test_store_persists_runs_and_trust(tmp_path):
     import os
     os.environ["PASI_HUMAN_TEST_TRUST_SECRET"] = "test-secret"
     restarted = HumanTestStore(tmp_path / "human-tests.db")
-    assert restarted.get_run("run-2").status is HumanTestStatus.PASS
+    assert restarted.get_run("run-002").status is HumanTestStatus.PASS
     assert restarted.get_trust().status is TrustStatus.TRUSTED
     del os.environ["PASI_HUMAN_TEST_TRUST_SECRET"]
 

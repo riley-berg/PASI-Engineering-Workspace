@@ -102,11 +102,15 @@
   }
 
   async function getRunnerState() {
-    const response = await bridgeRequest("GET", "/runner/state");
     try {
+      const response = await bridgeRequest("GET", "/runner/state");
       return parseBridgeResponse(response);
-    } catch (_) {
-      return {available: false, reason: "runner state unavailable"};
+    } catch (error) {
+      const message = String(error?.message || error || "runner state unavailable").trim();
+      return {
+        available: false,
+        reason: message || "runner state unavailable",
+      };
     }
   }
 
@@ -220,10 +224,23 @@
     if (status === "Active process") {
       return "Runner process is alive, but its state is not ready.";
     }
+    if (status === "Unavailable") {
+      const reason = String(state?.reason || state?.error || "").trim();
+      return reason
+        ? "Runner state unavailable: " + reason
+        : "Runner state unavailable.";
+    }
     if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
     if (status === "Failed") {
-      return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
+      const reason = String(
+        state?.error ||
+        state?.stop_reason ||
+        state?.last_result ||
+        "Last run failed."
+      ).trim();
+      const phase = String(state?.phase || "").trim();
+      return phase ? reason + " (phase: " + phase + ")" : reason;
     }
     return "";
   }
@@ -290,6 +307,16 @@
 
     const settledState = await waitForRunnerState(profileId, action);
     if (action === "start") {
+      if (!settledState?.available) {
+        throw new Error(
+          String(
+            settledState?.reason ||
+            settledState?.error ||
+            (profileId === "168h" ? "168h" : "M1") +
+            " runner state could not be read after the start request."
+          )
+        );
+      }
       if (settledState?.status === "failed") {
         throw new Error(
           String(
@@ -327,6 +354,8 @@
       "Detected PID: " + String(process?.pid ?? state?.process_pid ?? "none"),
       "Detected command: " + String(process?.cmdline ?? state?.process_cmdline ?? "none"),
       "Runtime state: " + String(state?.runtime_state_path || "n/a"),
+      "Log path: " + String(state?.log_path || "n/a"),
+      "Failed at: " + String(state?.failed_at || "n/a"),
       "Bridge PID: " + String(aggregateState?.bridge_process?.pid ?? "n/a"),
       "Error: " + String(state?.error || "none"),
       "All detected PASI processes:",

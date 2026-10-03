@@ -248,8 +248,21 @@ test("runner start requires ready state before claiming the runner is ready", ()
   assert.doesNotMatch(popupJs, /runner started\./);
 });
 
+test("popup preserves bridge errors when runner state cannot be read", () => {
+  assert.match(popupJs, /const message = String\(error\?\.message \|\| error/);
+  assert.match(popupJs, /available: false,[\s\S]*reason: message/);
+  assert.match(popupJs, /Runner state unavailable:/);
+});
+
+test("popup refuses to call a runner ready when post-start state is unavailable", () => {
+  assert.match(
+    popupJs,
+    /if \(!settledState\?\.available\) \{[\s\S]*throw new Error/
+  );
+});
+
 test("failed runner state exposes its diagnostic error", () => {
-  assert.match(popupJs, /state\?\.error \|\| state\?\.stop_reason/);
+  assert.match(popupJs, /state\?\.error[\s\S]*state\?\.stop_reason/);
 });
 
 test("runner action status survives the post-action render", () => {
@@ -365,6 +378,12 @@ test("M1 startup phases are surfaced instead of appearing silently stuck", () =>
   assert.match(popupJs, /ready_for_first_operation: "Ready for the first M1 operation\."/);
 });
 
+
+test("popup diagnostics include failure phase and log location", () => {
+  assert.match(popupJs, /Log path:/);
+  assert.match(popupJs, /Failed at:/);
+  assert.match(popupJs, /state\?\.phase/);
+});
 
 test("popup surfaces actual background-process diagnostics per runner profile", () => {
   assert.match(popupJs, /function diagnosticText\(state, aggregateState, profileId\)/);

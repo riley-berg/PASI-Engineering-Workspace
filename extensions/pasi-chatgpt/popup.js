@@ -670,13 +670,20 @@
   async function getLiveActiveUrl(fallbackUrl) {
     let activeUrl = String(fallbackUrl || "");
 
-    // The popup must authorize runners from the browser tab that is active
-    // right now. The userscript registry is only a fallback because its URL
-    // can lag behind a tab switch during extension lifecycle transitions.
+    // Prefer the active tab in the focused browser window. If that tab is
+    // outside PASI's ChatGPT runner target, fall back to any open ChatGPT tab
+    // so opening the popup from an unrelated window does not deauthorize the
+    // extension while an authorized runner tab is still open elsewhere.
     try {
       const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
       const tabUrl = String(tabs?.[0]?.url || "");
       if (tabUrl) activeUrl = tabUrl;
+      if (isRunnerTargetUrl(activeUrl)) return activeUrl;
+
+      const openTabs = await chrome.tabs.query({});
+      const authorizedTab = openTabs.find((tab) => isRunnerTargetUrl(tab?.url));
+      const authorizedUrl = String(authorizedTab?.url || "");
+      if (authorizedUrl) activeUrl = authorizedUrl;
     } catch (_) {}
 
     return activeUrl;

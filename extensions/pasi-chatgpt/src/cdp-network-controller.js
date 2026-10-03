@@ -1673,65 +1673,52 @@
       };
     }
 
-    async function browserTestElementPoint(tabId, selector) {
-      const query = String(selector || '').trim();
-      if (!query || query.length > 500) throw new Error('selector is required and must be bounded');
-      const documentResult = await sendCommand(tabId, 'DOM.getDocument', {depth: -1, pierce: true});
-      const rootNodeId = Number(documentResult?.root?.nodeId || 0);
-      if (!rootNodeId) throw new Error('DOM root is unavailable');
-      const match = await sendCommand(tabId, 'DOM.querySelector', {
-        nodeId: rootNodeId,
-        selector: query,
-      });
-      const nodeId = Number(match?.nodeId || 0);
-      if (!nodeId) throw new Error('No element matched selector: ' + query);
-      const box = await sendCommand(tabId, 'DOM.getBoxModel', {nodeId});
-      const border = Array.isArray(box?.model?.border) ? box.model.border : [];
-      if (border.length < 8) throw new Error('Matched element has no visible box: ' + query);
-      const x = (Number(border[0]) + Number(border[2]) + Number(border[4]) + Number(border[6])) / 4;
-      const y = (Number(border[1]) + Number(border[3]) + Number(border[5]) + Number(border[7])) / 4;
-      return {nodeId, x, y};
+    function findBrowserTestAXNode(nodes, target, role) {
+      const needle = String(target || '').trim();
+      if (!needle) throw new Error('target is required');
+      const roles = role ? new Set([String(role).trim()]) : null;
+      const node = findAXNodeByText(nodes, needle, roles);
+      if (!node) {
+        throw new Error('No accessible element matched target: ' + needle);
+      }
+      return node;
     }
 
     async function browserTestClick(tabId, params = {}) {
-      const target = await browserTestElementPoint(tabId, params.selector);
-      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: target.x,
-        y: target.y,
-        button: 'none',
-      });
-      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: target.x,
-        y: target.y,
-        button: 'left',
-        clickCount: 1,
-      });
-      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: target.x,
-        y: target.y,
-        button: 'left',
-        clickCount: 1,
-      });
+      const nodes = await readAXTree(tabId);
+      const target = findBrowserTestAXNode(nodes, params.target, params.role);
+      const coordinates = await clickAXNode(tabId, target);
       return {
         kind: 'interaction',
         action: 'click',
         tab_id: tabId,
-        selector: String(params.selector || '').trim(),
-        coordinates: {x: target.x, y: target.y},
+        target: axName(target),
+        role: axRole(target),
+        coordinates,
         success: true,
       };
     }
 
     async function browserTestFill(tabId, params = {}) {
-      const selector = String(params.selector || '').trim();
       const value = typeof params.value === 'string' ? params.value : '';
-      if (!selector || selector.length > 500) throw new Error('selector is required and must be bounded');
       if (value.length > 20_000) throw new Error('fill value exceeds bound');
-      const target = await browserTestElementPoint(tabId, selector);
-      await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.nodeId});
+      const nodes = await readAXTree(tabId);
+      const roles = new Set(['textbox', 'searchbox', 'combobox', 'generic']);
+      const target = params.target
+        ? findBrowserTestAXNode(nodes, params.target, params.role)
+        : findEditableAXNode(nodes);
+      if (!target) throw new Error('No accessible editable element matched target');
+      const backendNodeId = Number(target?.backendDOMNodeId);
+      if (!Number.isInteger(backendNodeId) || backendNodeId <= 0) {
+        throw new Error('CDP editable control has no backend node');
+      }
+      const editable = axBooleanProperty(target, 'editable');
+      const multiline = axBooleanProperty(target, 'multiline');
+      const role = axRole(target);
+      if (!(editable === true || multiline === true || roles.has(role))) {
+        throw new Error('Target is not an editable accessibility control');
+      }
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId});
       await sendCommand(tabId, 'Input.dispatchKeyEvent', {
         type: 'keyDown',
         key: 'Control',
@@ -1756,12 +1743,13 @@
         code: 'ControlLeft',
         modifiers: 0,
       });
-      await sendCommand(tabId, 'Input.insertText', {text: value});
+      await fillAXNode(tabId, target, value);
       return {
         kind: 'interaction',
         action: 'fill',
         tab_id: tabId,
-        selector,
+        target: axName(target),
+        role,
         value_length: value.length,
         success: true,
       };

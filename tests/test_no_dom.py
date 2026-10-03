@@ -10,21 +10,19 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
 
     extension = root / "extensions" / "pasi-chatgpt"
     manifest = extension / "manifest.json"
-    content = extension / "src" / "content.js"
 
     assert manifest.is_file()
-    assert content.is_file()
 
     data = json.loads(manifest.read_text(encoding="utf-8"))
     assert data["manifest_version"] == 3
     assert data["name"] == "PASI ChatGPT Handoff"
     assert data["background"]["service_worker"] == "src/background.js"
+    assert not (extension / "src" / "legacy").exists()
+    assert not (extension / "src" / "recovery.js").exists()
+    assert not (extension / "src" / "chatgpt.js").exists()
     readme = extension.joinpath("README.md").read_text(encoding="utf-8")
     assert "Tampermonkey" in readme
     assert "does not depend on Tampermonkey or Greasemonkey" in readme
-    content_text = content.read_text(encoding="utf-8")
-    assert "CONTROLLER_VERSION = '2.4.11'" in content_text
-    assert "PASI_DEPLOYMENT_ID = 'pasi-engineering-workspace-handoff-v1'" in content_text
 
 
 def test_computer_use_package_imports_without_historical_modules():

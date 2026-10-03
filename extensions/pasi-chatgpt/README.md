@@ -103,3 +103,33 @@ The wrapper exposes compatible aliases including `GM_getValue`, `GM_setValue`, `
 Chrome clears dynamically registered user scripts when an extension updates, so PASI persists its registry in `chrome.storage.local` and restores enabled scripts from the service worker's install/update lifecycle.
 
 This architecture gives PASI the useful Tampermonkey-style separation—privileged core, injection wrapper, isolated script runtime—without making Tampermonkey itself part of the system.
+
+
+## CDP network authority
+
+The active ChatGPT transport path is the MV3 service worker's Chrome DevTools Protocol debugger attachment. The service worker attaches to the selected ChatGPT tab and enables the CDP Fetch domain for the generation endpoints:
+
+- `/backend-api/f/conversation`
+- `/backend-api/conversation`
+
+Request-to-task correlation is explicit:
+
+`PASI operation -> controller_id -> tab -> exact POST request -> exact request body/prompt -> requestId -> response stream -> assistant message id -> terminal lifecycle`
+
+At the request pause, the correlation layer matches the queued operation prompt against the outbound request body before assigning the request to the task. At the response pause it uses `Fetch.takeResponseBodyAsStream` and `IO.read` to capture the raw SSE bytes before ChatGPT renders them, parses the assistant message stream, and replays the exact response bytes with `Fetch.fulfillRequest`.
+
+A response is authoritative only when the same correlated request reaches a terminal stream state and the configured completion marker is present. The persisted operation records the CDP request ID, controller ID, assistant message ID, response source, and terminal network classification.
+
+DOM response detection remains only a bounded fallback for compatibility while prompt submission and recovery are migrated. A DOM failure cannot overwrite or supersede a terminal CDP network record. A stale DOM completion cannot replace an authoritative CDP response, and a CDP network failure is routed through the orchestrator's transient failure/retry path.
+
+The previous page-world `network-interceptor.js` and Phase 2 shadow event bus were removed; they are no longer part of the active extension path.
+
+Run the deterministic CDP contract tests with:
+
+```
+node --test extensions/pasi-chatgpt/src/test_cdp_network_controller.cjs
+```
+
+The Python gate also validates the CDP contract, legacy-DOM isolation, completion-marker authority, controller fencing, and extension packaging.
+
+Live browser acceptance is still required before deleting the remaining legacy DOM controller.

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import CONFIG, ensure_runtime_directories
 from .models import ChatOperation
+from .operation_state import OperationState
 from .operation_lifecycle import InvalidOperationTransition, validate_transition
 from .state import TERMINAL_QUEUE_STATUSES, StateManager
 from scripts.pasi_timeout_policy import load_timeout_policy
@@ -22,6 +23,27 @@ from scripts.pasi_timeout_policy import load_timeout_policy
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_RESPONSE_TEXT_CHARS = 120_000
+
+class ControllerOwnershipConflict(InvalidOperationTransition):
+    """Raised when a stale controller instance mutates another instance's operation."""
+
+def completion_markers_satisfied(response_text: object, markers: object) -> bool:
+    if not isinstance(response_text, str) or not response_text.strip():
+        return False
+    if not isinstance(markers, list):
+        return True
+    configured = [
+        marker.strip()
+        for marker in markers
+        if isinstance(marker, str) and marker.strip()
+    ]
+    if not configured:
+        return True
+    lines = [line.strip() for line in response_text.splitlines()]
+    return any(
+        any(line == marker or line.startswith(marker + ":") for line in lines)
+        for marker in configured
+    )
 MAX_TRANSIENT_FAILURE_RETRIES = 3
 TIMEOUT_POLICY = load_timeout_policy()
 CLAIM_LEASE_SECONDS = TIMEOUT_POLICY["bridge_claim_lease_seconds"]
@@ -49,6 +71,12 @@ RUNNER_STATE_PATH = RUNNER_RUNTIME_DIR / "state.json"
 RUNNER_CONTROL_PATH = RUNNER_RUNTIME_DIR / "control.json"
 MAX_RUNNER_CAPABILITIES_BYTES = 256_000
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
+    "PASI_CDP: CONTEXT_EXHAUSTED",
+    "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
+    "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
+    "PASI_CDP: network failure",
+    "PASI_CDP: CDP_DEBUGGER_DETACHED",
+    "PASI_CDP: NETWORK_STREAM_DISCONNECTED",
     "Could not find ChatGPT composer.",
     "Composer disappeared before submission.",
     "Could not find ChatGPT send button.",
@@ -61,6 +89,8 @@ _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI: browser page reloaded during operation",
     "PASI_NATIVE: bridge completion failed",
     "CHAT_EXHAUSTED:",
+    "PASI_NATIVE: controller dispatch unavailable",
+    "PASI_NATIVE: CDP submit target unavailable:",
     "PASI_NATIVE: new chat did not reach a verified ready state",
     "PASI_NATIVE: new chat control did not change conversation identity",
     "PASI_NATIVE: prompt submission could not be verified after bounded attempts",
@@ -182,6 +212,15 @@ class BridgeState:
         return queue
 
     def _save_queue(self, queue: list[dict[str, Any]]) -> None:
+        # The nested operation_state is a derived canonical view of the same
+        # queue item. Refresh it on every durable queue write so it cannot
+        # remain at the initial "queued" status after claim/generation/completion.
+        for item in queue:
+            try:
+                item["operation_state"] = OperationState.from_chat_operation(item).to_dict()
+            except Exception:
+                item.pop("operation_state", None)
+
         has_inline_terminal_responses = False
         for item in queue:
             if item.get("status") not in TERMINAL_QUEUE_STATUSES:
@@ -342,17 +381,26 @@ class BridgeState:
             self._save_queue(queue)
 
     @classmethod
-    def _mark_claimed(cls, item: dict[str, Any]) -> dict[str, Any]:
+    def _mark_claimed(
+        cls,
+        item: dict[str, Any],
+        controller_id: str | None = None,
+    ) -> dict[str, Any]:
         now = time.time()
         validate_transition(str(item.get("status", "")), "claimed")
         item["status"] = "claimed"
         item["claimed_at"] = now
         item["updated_at"] = now
+        if controller_id is None:
+            item.pop("controller_id", None)
+        else:
+            item["controller_id"] = controller_id
         return item
 
     def claim_operation(
         self,
         operation_id: str,
+        controller_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
@@ -364,22 +412,47 @@ class BridgeState:
                 if item.get("status") != "queued":
                     return None
 
-                claimed = self._mark_claimed(item)
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
         return None
 
-    def claim_next_operation(self) -> dict[str, Any] | None:
+    def claim_next_operation(
+        self,
+        controller_id: str | None = None,
+    ) -> dict[str, Any] | None:
         with self.lock:
             queue = self._load_queue()
             self._sweep_queue_locked(queue)
+
+            # A completion acknowledgement may durably claim the next
+            # operation before the worker has delivered it. Allow the same
+            # controller to redeliver that claimed-but-not-started operation
+            # after a service-worker restart or dispatch failure. Once CDP emits
+            # STARTED, the item becomes generating and this path is closed.
+            now = time.time()
+            for item in queue:
+                if (
+                    item.get("status") == "claimed"
+                    and item.get("controller_id") == controller_id
+                    and not item.get("network_request_id")
+                    and not item.get("network_lifecycle_event")
+                    and now - float(item.get("claimed_at", 0) or 0) >= 5
+                ):
+                    return dict(item)
+
+            # Queue dispatch is strictly serial. A controller-ready signal may
+            # arrive while the current operation is active. Never advance to a
+            # second operation until the current one is durably completed.
+            if any(item.get("status") in {"claimed", "generating"} for item in queue):
+                return None
 
             for item in queue:
                 if item.get("status") != "queued":
                     continue
 
-                claimed = self._mark_claimed(item)
+                claimed = self._mark_claimed(item, controller_id)
                 self._save_queue(queue)
                 return dict(claimed)
 
@@ -432,6 +505,7 @@ class BridgeState:
         response_text: str | None = None,
         response_text_available: bool = False,
         timing: object = None,
+        controller_id: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Complete one operation and claim exactly one next operation in one durable queue write."""
         with self.lock:
@@ -444,6 +518,37 @@ class BridgeState:
             )
             if current is None:
                 return None, None
+
+            if (
+                current.get("operation_type") == "prompt"
+                and current.get("network_response_authoritative") is True
+                and current.get("response_text_available") is True
+                and isinstance(current.get("response_text"), str)
+                and current.get("response_text").strip()
+            ):
+                response_text = current.get("response_text")
+                response_text_available = True
+
+            if controller_id is not None:
+                owner = current.get("controller_id")
+                if owner is not None and owner != controller_id:
+                    raise ControllerOwnershipConflict(
+                        "Operation is owned by a different controller instance."
+                    )
+                current["controller_id"] = controller_id
+
+            if current.get("operation_type") == "prompt":
+                if not completion_markers_satisfied(
+                    response_text,
+                    current.get("completion_markers"),
+                ):
+                    raise ValueError(
+                        "Prompt completion response does not satisfy the operation completion markers."
+                    )
+                if current.get("network_response_authoritative") is not True:
+                    raise ValueError(
+                        "Prompt completion requires authoritative CDP response evidence."
+                    )
 
             if current.get("status") == "completed":
                 chained = self.get_chained_operation(operation_id)
@@ -471,7 +576,7 @@ class BridgeState:
             for item in queue:
                 if item is current or item.get("status") != "queued":
                     continue
-                chained = dict(self._mark_claimed(item))
+                chained = dict(self._mark_claimed(item, controller_id))
                 current["next_operation_id"] = item.get("operation_id")
                 break
 
@@ -623,8 +728,11 @@ class BridgeState:
                     else current
                 )
                 if item.get("response_text_available") is True and isinstance(authoritative, str) and authoritative.strip():
-                    item["response_text"] = authoritative
-                    item["response_text_available"] = True
+                    return dict(item)
+                if not completion_markers_satisfied(
+                    bounded_response,
+                    item.get("completion_markers"),
+                ):
                     return dict(item)
                 item["response_text"] = bounded_response
                 item["response_text_available"] = True
@@ -700,6 +808,11 @@ class BridgeState:
         data = observation.get("data")
         kind = data.get("kind") if isinstance(data, dict) else None
 
+        if schema_version == "pasi-network-cdp-v1" and kind in {
+            "chatgpt_network_lifecycle",
+            "chatgpt_network_response",
+        }:
+            return 120
         if schema_version == "pasi-native-chromium-v2" and kind in {
             "chatgpt_health",
             "chatgpt_state",
@@ -721,7 +834,7 @@ class BridgeState:
             data = observation.get("data")
             if isinstance(data, dict):
                 kind = data.get("kind")
-                if kind == "chatgpt_response":
+                if kind in {"chatgpt_response", "chatgpt_network_response"}:
                     timing = data.get("timing")
                     active_operation_id = data.get("active_operation_id")
                     if isinstance(active_operation_id, str) and timing is not None:
@@ -830,23 +943,16 @@ class BridgeState:
         observation: dict[str, Any],
     ) -> None:
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict):
+            return
+
+        kind = data.get("kind")
+        if kind not in {"chatgpt_response", "chatgpt_network_response", "chatgpt_network_lifecycle"}:
             return
 
         operation_id = data.get("active_operation_id")
-        response_text = data.get("response_text")
-        response_text_available = data.get("response_text_available")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return
-        if not isinstance(response_text, str) or len(response_text) > MAX_RESPONSE_TEXT_CHARS:
-            return
-        # Nonblank response text is the persisted evidence. A stale controller
-        # may report the legacy availability flag incorrectly, but that flag
-        # must not discard an already-bound response. Blank text remains
-        # fail-closed.
-        if not response_text.strip():
-            return
-        response_text_available = True
 
         queue = self._load_queue()
         for item in queue:
@@ -854,26 +960,77 @@ class BridgeState:
                 continue
             if item.get("operation_type") != "prompt":
                 return
-            stored_response = self.state_manager.load_terminal_response(operation_id)
-            current_response = item.get("response_text")
-            if (
-                isinstance(stored_response, str)
-                and stored_response.strip()
-            ) or (
-                item.get("response_text_available") is True
-                and isinstance(current_response, str)
-                and current_response.strip()
-            ):
-                return
 
-            item["response_text"] = response_text
-            item["response_text_available"] = True
-            chat_url = data.get("chat_url")
-            if isinstance(chat_url, str):
-                item["chat_url"] = chat_url
-            item["response_source"] = "browser_observation"
-            item["response_observed_at"] = observation.get("captured_at", time.time())
-            self._save_queue(queue)
+            network_source = data.get("network_source")
+            controller_id = data.get("controller_id")
+            if network_source == "cdp_fetch":
+                if (
+                    isinstance(controller_id, str)
+                    and controller_id.strip()
+                    and item.get("controller_id") != controller_id.strip()
+                ):
+                    return
+                event_type = str(data.get("event_type") or "")
+                item["network_source"] = "cdp_fetch"
+                if isinstance(controller_id, str) and controller_id.strip():
+                    item["network_controller_id"] = controller_id.strip()
+                request_id = data.get("request_id")
+                if isinstance(request_id, str) and request_id:
+                    item["network_request_id"] = request_id[:200]
+                if event_type == "STARTED":
+                    if item.get("status") == "claimed":
+                        validate_transition("claimed", "generating")
+                        item["status"] = "generating"
+                    item["network_lifecycle_event"] = event_type
+                elif event_type in {"COMPLETED", "INTERRUPTED", "FAILED"}:
+                    item["network_terminal_event"] = event_type
+                elif event_type:
+                    # Lifecycle events such as STARTED are not terminal
+                    # evidence. Keep them separate so response polling cannot
+                    # misclassify an in-flight generation as a failure.
+                    item["network_lifecycle_event"] = event_type
+                    item.pop("network_terminal_event", None)
+                    item.pop("network_terminal_reason", None)
+                    item.pop("network_classification", None)
+                    item.pop("network_failure_source", None)
+                reason = data.get("reason")
+                classification = data.get("classification")
+                if isinstance(reason, str) and reason:
+                    item["network_terminal_reason"] = reason[:200]
+                if isinstance(classification, str) and classification:
+                    item["network_classification"] = classification[:120]
+                if event_type in {"INTERRUPTED", "FAILED"}:
+                    item["network_failure_source"] = "cdp"
+
+            response_text = data.get("response_text")
+            response_verified = (
+                isinstance(response_text, str)
+                and len(response_text) <= MAX_RESPONSE_TEXT_CHARS
+                and bool(response_text.strip())
+                and completion_markers_satisfied(
+                    response_text,
+                    item.get("completion_markers"),
+                )
+            )
+            if response_verified:
+                item["response_text"] = response_text
+                item["response_text_available"] = True
+                item["response_source"] = (
+                    "cdp_fetch_stream"
+                    if network_source == "cdp_fetch"
+                    else "browser_observation"
+                )
+                item["response_observed_at"] = observation.get("captured_at", time.time())
+                if network_source == "cdp_fetch":
+                    item["network_response_authoritative"] = True
+                    assistant_message_id = data.get("assistant_message_id")
+                    if isinstance(assistant_message_id, str) and assistant_message_id:
+                        item["network_assistant_message_id"] = assistant_message_id[:200]
+                chat_url = data.get("chat_url") or data.get("request_url")
+                if isinstance(chat_url, str) and chat_url:
+                    item["chat_url"] = chat_url
+            if network_source == "cdp_fetch" or kind == "chatgpt_response":
+                self._save_queue(queue)
             return
 
     def _repair_response_from_browser_observation(
@@ -885,6 +1042,7 @@ class BridgeState:
         operation_id = item.get("operation_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             return False
+
         stored_response = self.state_manager.load_terminal_response(operation_id)
         if isinstance(stored_response, str) and stored_response.strip():
             return False
@@ -899,40 +1057,56 @@ class BridgeState:
         observation = self.state_manager.load_browser_response()
         if not isinstance(observation, dict):
             return False
-
         data = observation.get("data")
-        if not isinstance(data, dict) or data.get("kind") != "chatgpt_response":
+        if not isinstance(data, dict) or data.get("kind") not in {"chatgpt_response", "chatgpt_network_response"}:
             return False
         if data.get("active_operation_id") != item.get("operation_id"):
             return False
 
         response_text = data.get("response_text")
-        # Nonblank, operation-bound response text is the evidence. Do not let
-        # a stale controller availability flag hide already-captured text.
         if (
             not isinstance(response_text, str)
             or len(response_text) > MAX_RESPONSE_TEXT_CHARS
             or not response_text.strip()
+            or not completion_markers_satisfied(
+                response_text,
+                item.get("completion_markers"),
+            )
         ):
             return False
 
         item["response_text"] = response_text
         item["response_text_available"] = True
-        chat_url = data.get("chat_url")
+        chat_url = data.get("chat_url") or data.get("request_url")
         if isinstance(chat_url, str):
             item["chat_url"] = chat_url
-        item["response_source"] = "browser_observation"
-        item["response_observed_at"] = observation.get(
-            "captured_at",
-            time.time(),
+        item["response_source"] = (
+            "cdp_fetch_stream"
+            if data.get("network_source") == "cdp_fetch"
+            else "browser_observation"
         )
+        item["network_response_authoritative"] = data.get("network_source") == "cdp_fetch"
+        item["response_observed_at"] = observation.get("captured_at", time.time())
         return True
 
     @staticmethod
     def _retry_class(error: str) -> str:
-        if error.startswith("CHAT_EXHAUSTED:") or error.startswith("PASI_NATIVE: context recovery exhausted:"):
+        if (
+            error.startswith("CHAT_EXHAUSTED:")
+            or error.startswith("PASI_NATIVE: context recovery exhausted:")
+            or error.startswith("PASI_CDP: CONTEXT_EXHAUSTED")
+        ):
             return "context"
-        if error.startswith("PASI_NATIVE: ChatGPT generation timed out") or error.startswith("PASI_NATIVE: response text unavailable"):
+        if (
+            error.startswith("PASI_NATIVE: ChatGPT generation timed out")
+            or error.startswith("PASI_NATIVE: response text unavailable")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
+            or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
+            or error.startswith("PASI_CDP: network failure")
+            or error.startswith("PASI_CDP: NETWORK_STREAM_DISCONNECTED")
+            or error.startswith("PASI_CDP: CDP_DEBUGGER_DETACHED")
+        ):
             return "response"
         return "controller"
 
@@ -957,6 +1131,34 @@ class BridgeState:
                     }
                 retry_class = self._retry_class(error)
                 count = int(retry_counts.get(retry_class, 0) or 0)
+
+                if retry_class == "context":
+                    if count >= RETRY_BUDGETS[retry_class]:
+                        validate_transition(current_status, "failed")
+                        item["status"] = "failed"
+                        item["error"] = error[:MAX_ERROR_CHARS]
+                        item["failure_reason"] = "context_retry_exhausted"
+                        item["retry_class"] = "context"
+                        item["retry_counts"] = dict(retry_counts)
+                        item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                        item["updated_at"] = time.time()
+                        self._save_queue(queue)
+                        return dict(item)
+
+                    retry_counts = dict(retry_counts)
+                    retry_counts["context"] = count + 1
+                    item["status"] = "failed"
+                    item["error"] = (
+                        "CHAT_EXHAUSTED: explicit network context exhaustion; "
+                        "the runner must prepare a fresh ChatGPT conversation before retrying the task."
+                    )
+                    item["failure_reason"] = "context_exhausted"
+                    item["retry_class"] = "context"
+                    item["retry_counts"] = retry_counts
+                    item["retry_count"] = sum(int(value or 0) for value in retry_counts.values())
+                    item["updated_at"] = time.time()
+                    self._save_queue(queue)
+                    return dict(item)
 
                 if (
                     item.get("operation_type") == "prompt"
@@ -1392,7 +1594,12 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if path == "/next-operation":
-            operation = self.bridge_state.claim_next_operation()
+            controller_ids = parse_qs(parsed.query).get("controller_id", [])
+            controller_id = controller_ids[0].strip() if controller_ids else ""
+            if not controller_id or len(controller_id) > 200:
+                self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            operation = self.bridge_state.claim_next_operation(controller_id)
             self._send_json({"operation": operation})
             return
 
@@ -1490,14 +1697,18 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
         payload: dict[str, Any],
     ) -> None:
         operation_id = payload.get("operation_id")
+        controller_id = payload.get("controller_id")
         if not isinstance(operation_id, str) or not operation_id.strip():
             self._send_json(
                 {"error": "operation_id is required."},
                 HTTPStatus.BAD_REQUEST,
             )
             return
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
 
-        operation = self.bridge_state.claim_operation(operation_id)
+        operation = self.bridge_state.claim_operation(operation_id, controller_id.strip())
         if operation is None:
             self._send_json(
                 {"error": "Operation is not queued."},
@@ -1714,6 +1925,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             "response_text_available",
             False,
         )
+        controller_id = payload.get("controller_id")
         ack_only = payload.get("ack_only", False)
         timing = payload.get("timing")
 
@@ -1728,6 +1940,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 },
                 HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
             return
 
         if chat_url is not None and not isinstance(
@@ -1779,6 +1995,17 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        claim_next = payload.get("claim_next", True)
+        if not isinstance(claim_next, bool):
+            self._send_json(
+                {
+                    "error":
+                        "claim_next must be a boolean."
+                },
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+
         if response_text is not None and len(response_text) > MAX_RESPONSE_TEXT_CHARS:
             self._send_json(
                 {
@@ -1816,6 +2043,21 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.NOT_FOUND,
             )
             return
+        if existing_operation.get("controller_id") != controller_id.strip():
+            self._send_json(
+                {"error": "Operation is owned by a different controller instance."},
+                HTTPStatus.CONFLICT,
+            )
+            return
+
+        if (
+            existing_operation.get("network_response_authoritative") is True
+            and existing_operation.get("response_text_available") is True
+            and isinstance(existing_operation.get("response_text"), str)
+            and existing_operation.get("response_text").strip()
+        ):
+            response_text = existing_operation.get("response_text")
+            response_text_available = True
 
         incoming_response_verified = (
             response_text_available is True
@@ -1855,15 +2097,29 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             return
 
         if existing_operation.get("operation_type") == "prompt":
+            completion_markers = existing_operation.get("completion_markers")
             persisted_response_verified = (
                 existing_operation.get("response_text_available") is True
                 and isinstance(existing_operation.get("response_text"), str)
                 and bool(str(existing_operation.get("response_text")).strip())
             )
+            candidate_response = (
+                response_text
+                if incoming_response_verified
+                else existing_operation.get("response_text")
+            )
             if not incoming_response_verified and not persisted_response_verified:
                 self._send_json(
                     {
                         "error": "Prompt completion requires verified nonblank response_text."
+                    },
+                    HTTPStatus.CONFLICT,
+                )
+                return
+            if not completion_markers_satisfied(candidate_response, completion_markers):
+                self._send_json(
+                    {
+                        "error": "Prompt completion response does not satisfy the operation completion markers."
                     },
                     HTTPStatus.CONFLICT,
                 )
@@ -1884,13 +2140,24 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             response_text_available = True
 
         try:
-            operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
-                operation_id=operation_id,
-                chat_url=chat_url,
-                response_text=response_text,
-                response_text_available=response_text_available,
-                timing=normalized_timing,
-            )
+            if claim_next:
+                operation, chained_operation = self.bridge_state.complete_operation_and_claim_next(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                    controller_id=controller_id.strip(),
+                )
+            else:
+                operation = self.bridge_state.complete_operation(
+                    operation_id=operation_id,
+                    chat_url=chat_url,
+                    response_text=response_text,
+                    response_text_available=response_text_available,
+                    timing=normalized_timing,
+                )
+                chained_operation = None
         except InvalidOperationTransition:
             # Completion acknowledgements are retried by the browser controller.
             # Once an operation is durably completed, return its persisted state
@@ -1933,6 +2200,10 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
             "operation_id"
         )
 
+        controller_id = payload.get("controller_id")
+        failure_source = payload.get("failure_source", "dom_fallback")
+
+
         error = payload.get(
             "error"
         )
@@ -1947,6 +2218,33 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                         "operation_id is required."
                 },
                 HTTPStatus.BAD_REQUEST,
+            )
+            return
+
+        if not isinstance(controller_id, str) or not controller_id.strip() or len(controller_id) > 200:
+            self._send_json({"error": "controller_id is required."}, HTTPStatus.BAD_REQUEST)
+            return
+
+        current = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if current is None:
+            self._send_json({"error": "Operation not found."}, HTTPStatus.NOT_FOUND)
+            return
+        if current.get("controller_id") != controller_id.strip():
+            self._send_json({"error": "Operation is owned by a different controller instance."}, HTTPStatus.CONFLICT)
+            return
+
+        current_network = self.bridge_state.get_operation(operation_id, repair_response=False)
+        if (
+            failure_source == "dom_fallback"
+            and isinstance(current_network, dict)
+            and current_network.get("network_terminal_event")
+        ):
+            self._send_json(
+                {
+                    "operation": current_network,
+                    "suppressed": True,
+                    "reason": "network_authority_already_recorded"
+                }
             )
             return
 

@@ -1673,6 +1673,156 @@
       };
     }
 
+    async function browserTestElementPoint(tabId, selector) {
+      const query = String(selector || '').trim();
+      if (!query || query.length > 500) throw new Error('selector is required and must be bounded');
+      const documentResult = await sendCommand(tabId, 'DOM.getDocument', {depth: -1, pierce: true});
+      const rootNodeId = Number(documentResult?.root?.nodeId || 0);
+      if (!rootNodeId) throw new Error('DOM root is unavailable');
+      const match = await sendCommand(tabId, 'DOM.querySelector', {
+        nodeId: rootNodeId,
+        selector: query,
+      });
+      const nodeId = Number(match?.nodeId || 0);
+      if (!nodeId) throw new Error('No element matched selector: ' + query);
+      const box = await sendCommand(tabId, 'DOM.getBoxModel', {nodeId});
+      const border = Array.isArray(box?.model?.border) ? box.model.border : [];
+      if (border.length < 8) throw new Error('Matched element has no visible box: ' + query);
+      const x = (Number(border[0]) + Number(border[2]) + Number(border[4]) + Number(border[6])) / 4;
+      const y = (Number(border[1]) + Number(border[3]) + Number(border[5]) + Number(border[7])) / 4;
+      return {nodeId, x, y};
+    }
+
+    async function browserTestClick(tabId, params = {}) {
+      const target = await browserTestElementPoint(tabId, params.selector);
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: target.x,
+        y: target.y,
+        button: 'none',
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: target.x,
+        y: target.y,
+        button: 'left',
+        clickCount: 1,
+      });
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: target.x,
+        y: target.y,
+        button: 'left',
+        clickCount: 1,
+      });
+      return {
+        kind: 'interaction',
+        action: 'click',
+        tab_id: tabId,
+        selector: String(params.selector || '').trim(),
+        coordinates: {x: target.x, y: target.y},
+        success: true,
+      };
+    }
+
+    async function browserTestFill(tabId, params = {}) {
+      const selector = String(params.selector || '').trim();
+      const value = typeof params.value === 'string' ? params.value : '';
+      if (!selector || selector.length > 500) throw new Error('selector is required and must be bounded');
+      if (value.length > 20_000) throw new Error('fill value exceeds bound');
+      const target = await browserTestElementPoint(tabId, selector);
+      await sendCommand(tabId, 'DOM.focus', {backendNodeId: target.nodeId});
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Control',
+        code: 'ControlLeft',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'a',
+        code: 'KeyA',
+        modifiers: 2,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Control',
+        code: 'ControlLeft',
+        modifiers: 0,
+      });
+      await sendCommand(tabId, 'Input.insertText', {text: value});
+      return {
+        kind: 'interaction',
+        action: 'fill',
+        tab_id: tabId,
+        selector,
+        value_length: value.length,
+        success: true,
+      };
+    }
+
+    async function browserTestPressKey(tabId, params = {}) {
+      const key = String(params.key || '').trim();
+      const allowedNamed = new Set([
+        'Enter', 'Escape', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+        'Home', 'End', 'PageUp', 'PageDown', 'Backspace', 'Delete', 'Space'
+      ]);
+      if (!key || key.length > 30 || (key.length !== 1 && !allowedNamed.has(key))) {
+        throw new Error('key must be one printable character or a supported named key');
+      }
+      const modifiers = Math.max(0, Math.min(15, Number(params.modifiers) || 0));
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key,
+        code: key.length === 1 ? '' : key,
+        modifiers,
+      });
+      await sendCommand(tabId, 'Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key,
+        code: key.length === 1 ? '' : key,
+        modifiers,
+      });
+      return {
+        kind: 'interaction',
+        action: 'press_key',
+        tab_id: tabId,
+        key,
+        modifiers,
+        success: true,
+      };
+    }
+
+    async function browserTestScroll(tabId, params = {}) {
+      const deltaX = Math.max(-5000, Math.min(5000, Number(params.delta_x) || 0));
+      const deltaY = Math.max(-5000, Math.min(5000, Number(params.delta_y) || 0));
+      const metrics = await sendCommand(tabId, 'Page.getLayoutMetrics');
+      const viewport = metrics?.visualViewport || metrics?.layoutViewport || {};
+      const x = Math.max(1, Number(viewport.clientWidth || viewport.width || 1) / 2);
+      const y = Math.max(1, Number(viewport.clientHeight || viewport.height || 1) / 2);
+      await sendCommand(tabId, 'Input.dispatchMouseEvent', {
+        type: 'mouseWheel',
+        x,
+        y,
+        deltaX,
+        deltaY,
+      });
+      return {
+        kind: 'interaction',
+        action: 'scroll',
+        tab_id: tabId,
+        delta_x: deltaX,
+        delta_y: deltaY,
+        success: true,
+      };
+    }
+
     function browserTestConsoleErrors(tabId, params = {}) {
       const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
       const errors = (consoleErrors.get(tabId) || []).slice(-limit);
@@ -1713,6 +1863,10 @@
       if (normalized === 'dom') return browserTestDom(tabId, params);
       if (normalized === 'console_errors') return browserTestConsoleErrors(tabId, params);
       if (normalized === 'network') return browserTestNetwork(tabId, params);
+      if (normalized === 'click') return browserTestClick(tabId, params);
+      if (normalized === 'fill') return browserTestFill(tabId, params);
+      if (normalized === 'press_key') return browserTestPressKey(tabId, params);
+      if (normalized === 'scroll') return browserTestScroll(tabId, params);
       throw new Error('Unsupported browser-test action');
     }
 

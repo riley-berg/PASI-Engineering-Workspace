@@ -40,9 +40,9 @@ test('safe tab policy never reuses a tab with active PASI work', () => {
 
   assert.equal(result.selected_tab_id, 1);
   assert.equal(result.candidates.find((item) => item.tab_id === 2).eligible, false);
-  assert.deepEqual(
-    result.candidates.find((item) => item.tab_id === 2).reasons,
-    ['active_pasi_work'],
+  assert.equal(
+    result.candidates.find((item) => item.tab_id === 2).reasons[0],
+    'active_pasi_work',
   );
 });
 

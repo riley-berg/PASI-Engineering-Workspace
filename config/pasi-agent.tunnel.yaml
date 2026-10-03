@@ -1,0 +1,28 @@
+# PASI AI-facing Secure MCP Tunnel profile.
+#
+# The tunnel ID and runtime API key are intentionally supplied through:
+#   CONTROL_PLANE_TUNNEL_ID
+#   CONTROL_PLANE_API_KEY
+#
+# This file is safe to keep checked in. Do not put a real API key here.
+
+config_version: 1
+
+control_plane:
+  base_url: https://api.openai.com
+  api_key: env:CONTROL_PLANE_API_KEY
+
+health:
+  listen_addr: 127.0.0.1:8787
+
+admin_ui:
+  open_browser: false
+
+log:
+  level: info
+  format: json
+
+mcp:
+  commands:
+    - channel: main
+      command: ./.venv/bin/python scripts/pasi_agent_mcp.py

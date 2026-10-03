@@ -697,10 +697,19 @@ async function reportWorkerHealth(tab) {
         controller_version: 'cdp-worker-v1',
         extension_version: chrome.runtime.getManifest().version,
         chat_url: String(tab.url || ''),
+        tab_id: tabId,
         active_operation_id: binding?.operationId || null,
         page_visible: tab.active === true,
         native_controller: true,
-        network_authority: true
+        network_authority: true,
+        extension_service_worker: {
+          state: 'running',
+          heartbeat_at: new Date().toISOString(),
+        },
+        dispatcher_waiter_active: supervisedExecutionWaiters.has(String(tabId)),
+        dispatcher_waiter_tab_id: supervisedExecutionWaiters.has(String(tabId)) ? tabId : null,
+        network_controller: 'cdp_fetch',
+        controller_id: binding?.controllerId || null,
       }
     }
   }, 5000);
@@ -712,8 +721,8 @@ async function attachAndObserveTab(tab) {
   if (!cdpNetworkController?.attachTab) return false;
   try {
     await cdpNetworkController.attachTab(tabId);
-    await reportWorkerHealth(tab);
     ensureSupervisedExecutionWaiter(tabId);
+    await reportWorkerHealth(tab);
     return true;
   } catch (_) {
     return false;

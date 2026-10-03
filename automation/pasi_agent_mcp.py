@@ -68,13 +68,17 @@ async def call_tool(
     result = service.observe(params.name, arguments)
     structured_result = result
     content: list[Any] = []
-    if (
-        result.get("ok") is True
-        and params.name == "pasi.get_browser_screenshot"
-        and isinstance(result.get("data"), dict)
-        and isinstance(result["data"].get("screenshot"), dict)
-    ):
-        screenshot = result["data"]["screenshot"]
+    screenshot = None
+    if result.get("ok") is True and isinstance(result.get("data"), dict):
+        if params.name == "pasi.get_browser_screenshot":
+            candidate = result["data"].get("screenshot")
+            if isinstance(candidate, dict):
+                screenshot = candidate
+        elif params.name == "pasi.run_browser_test":
+            candidate = result["data"].get("result")
+            if isinstance(candidate, dict) and candidate.get("kind") == "screenshot":
+                screenshot = candidate
+    if isinstance(screenshot, dict):
         image_data = screenshot.get("image_base64")
         if isinstance(image_data, str) and image_data:
             structured_result = json.loads(json.dumps(result))

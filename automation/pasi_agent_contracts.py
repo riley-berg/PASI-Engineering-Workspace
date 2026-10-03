@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import time
 import os
 import re
 from datetime import datetime, timezone
@@ -361,6 +362,34 @@ _ENVIRONMENT_DATA_SCHEMA = {
     },
 }
 
+_BROWSER_TEST_RESULT_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["result"],
+    "properties": {
+        "result": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    },
+}
+
+_RUNNER_CONTROL_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["action", "profile", "accepted", "status", "state"],
+    "properties": {
+        "action": {"type": "string", "enum": ["start", "stop"]},
+        "profile": {"type": "string", "enum": ["m1", "168h"]},
+        "accepted": {"type": "boolean"},
+        "status": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]},
+        "pid": {"type": ["integer", "null"]},
+        "state": {"anyOf": [_RUNNER_SCHEMA, {"type": "null"}]},
+    },
+}
+
+
 _ACCEPTANCE_DATA_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -428,6 +457,44 @@ def _envelope(data_schema: Mapping[str, Any]) -> dict[str, Any]:
 
 
 TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "pasi.control_runner": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["profile", "action"],
+        "properties": {
+            "profile": {"type": "string", "enum": ["m1", "168h"]},
+            "action": {"type": "string", "enum": ["start", "stop"]},
+            "wait_ms": {"type": "integer", "minimum": 250, "maximum": 10000, "default": 5000},
+        },
+    },
+    "pasi.run_browser_test": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["action"],
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["screenshot", "dom", "console_errors", "network", "click", "fill", "press_key", "scroll"],
+            },
+            "tab_id": {"type": ["integer", "null"], "minimum": 1},
+            "target": {"type": ["string", "null"], "maxLength": 500},
+            "role": {"type": ["string", "null"], "maxLength": 80},
+            "value": {"type": ["string", "null"], "maxLength": 20000},
+            "key": {"type": ["string", "null"], "maxLength": 30},
+            "modifiers": {"type": "integer", "minimum": 0, "maximum": 15, "default": 0},
+            "delta_x": {"type": "number", "minimum": -5000, "maximum": 5000, "default": 0},
+            "delta_y": {"type": "number", "minimum": -5000, "maximum": 5000, "default": 0},
+            "max_elements": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            "max_text_chars": {"type": "integer", "minimum": 50, "maximum": 4000, "default": 500},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            "url_contains": {"type": ["string", "null"], "maxLength": 200},
+            "resource_types": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {"type": "string", "maxLength": 40},
+            },
+        },
+    },
     "pasi.get_runner_state": {
         "type": "object",
         "additionalProperties": False,
@@ -528,6 +595,8 @@ TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "pasi.control_runner": _envelope(_RUNNER_CONTROL_DATA_SCHEMA),
+    "pasi.run_browser_test": _envelope(_BROWSER_TEST_RESULT_DATA_SCHEMA),
     "pasi.get_browser_screenshot": _envelope(_BROWSER_SCREENSHOT_DATA_SCHEMA),
     "pasi.get_browser_dom": _envelope(_BROWSER_DOM_DATA_SCHEMA),
     "pasi.get_browser_console_errors": _envelope(_BROWSER_CONSOLE_DATA_SCHEMA),
@@ -562,6 +631,8 @@ TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "pasi.control_runner": "Start or stop one supervised PASI runner and return the observed lifecycle state. Mutating; bounded to M1 or 168h.",
+    "pasi.run_browser_test": "Run one bounded browser test or native CDP webpage interaction on an already-authorized PASI tab and return structured feedback.",
     "pasi.get_browser_screenshot": "Capture a fresh visible-tab screenshot through the attached PASI CDP browser authority. Observation only.",
     "pasi.get_browser_dom": "Inspect bounded rendered DOM metadata and computed visual state for CSS selectors through the attached PASI CDP browser authority. Observation only.",
     "pasi.get_browser_console_errors": "Read recent browser console errors and uncaught exceptions captured by the PASI CDP browser authority. Observation only.",
@@ -583,7 +654,7 @@ class PasiAgentInputError(ValueError):
 
 
 class PasiAgentObservationService:
-    """Read-only observation facade for the PASI runtime."""
+    """PASI runtime facade with bounded lifecycle control and browser testing."""
 
     def __init__(
         self,
@@ -621,7 +692,11 @@ class PasiAgentObservationService:
             self._validate_arguments(tool_name, arguments or {})
             args = dict(arguments or {})
             args.pop("_request_id", None)
-            if tool_name == "pasi.get_browser_screenshot":
+            if tool_name == "pasi.control_runner":
+                data = self.control_runner(**args)
+            elif tool_name == "pasi.run_browser_test":
+                data = self.run_browser_test(**args)
+            elif tool_name == "pasi.get_browser_screenshot":
                 data = self.get_browser_screenshot(**args)
             elif tool_name == "pasi.get_browser_dom":
                 data = self.get_browser_dom(**args)
@@ -695,6 +770,99 @@ class PasiAgentObservationService:
     def _browser_test_client(self):
         from automation.pasi_agent_browser_testing import BrowserTestingClient
         return BrowserTestingClient()
+
+    def control_runner(
+        self,
+        profile: str,
+        action: str,
+        wait_ms: int = 5000,
+    ) -> dict[str, Any]:
+        if profile not in {"m1", "168h"}:
+            raise PasiAgentInputError("profile must be m1 or 168h")
+        if action not in {"start", "stop"}:
+            raise PasiAgentInputError("action must be start or stop")
+        if not isinstance(wait_ms, int) or wait_ms < 250 or wait_ms > 10000:
+            raise PasiAgentInputError("wait_ms must be between 250 and 10000")
+        result = bridge.request_runner_control(action, profile)
+        state = bridge.load_runner_state(profile)
+        deadline = time.monotonic() + wait_ms / 1000
+        while time.monotonic() < deadline:
+            state = bridge.load_runner_state(profile)
+            live = state.get("process_alive") is True
+            if action == "start":
+                if state.get("status") in {"running", "failed", "completed", "paused", "cancelled"} or not live:
+                    break
+            else:
+                if not live or state.get("status") in {"paused", "failed", "completed", "cancelled"}:
+                    break
+            time.sleep(0.1)
+        return {
+            "action": action,
+            "profile": profile,
+            "accepted": bool(result.get("accepted")),
+            "status": state.get("status"),
+            "reason": result.get("reason"),
+            "pid": result.get("pid") or state.get("runner_pid"),
+            "state": self._runner_record(profile, state, include_terminal=True),
+        }
+
+    def run_browser_test(
+        self,
+        action: str,
+        tab_id: int | None = None,
+        target: str | None = None,
+        role: str | None = None,
+        value: str | None = None,
+        key: str | None = None,
+        modifiers: int = 0,
+        delta_x: float = 0,
+        delta_y: float = 0,
+        max_elements: int = 50,
+        max_text_chars: int = 500,
+        limit: int = 50,
+        url_contains: str | None = None,
+        resource_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        allowed = {
+            "screenshot", "dom", "console_errors", "network",
+            "click", "fill", "press_key", "scroll",
+        }
+        if action not in allowed:
+            raise PasiAgentInputError("unsupported browser test action")
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise PasiAgentInputError("tab_id must be a positive integer or null")
+        if target is not None and (not isinstance(target, str) or len(target) > 500):
+            raise PasiAgentInputError("target must be null or a bounded accessibility name")
+        if role is not None and (not isinstance(role, str) or len(role) > 80):
+            raise PasiAgentInputError("role must be null or a bounded accessibility role")
+        if value is not None and (not isinstance(value, str) or len(value) > 20000):
+            raise PasiAgentInputError("value must be null or at most 20000 characters")
+        if key is not None and (not isinstance(key, str) or len(key) > 30):
+            raise PasiAgentInputError("key must be null or a bounded string")
+        if not isinstance(modifiers, int) or modifiers < 0 or modifiers > 15:
+            raise PasiAgentInputError("modifiers must be between 0 and 15")
+        if not isinstance(delta_x, (int, float)) or not -5000 <= delta_x <= 5000:
+            raise PasiAgentInputError("delta_x must be between -5000 and 5000")
+        if not isinstance(delta_y, (int, float)) or not -5000 <= delta_y <= 5000:
+            raise PasiAgentInputError("delta_y must be between -5000 and 5000")
+        return {"result": self._browser_test_client().request(
+            action,
+            tab_id=tab_id,
+            params={
+                "target": target,
+                "role": role,
+                "value": value,
+                "key": key,
+                "modifiers": modifiers,
+                "delta_x": delta_x,
+                "delta_y": delta_y,
+                "max_elements": max_elements,
+                "max_text_chars": max_text_chars,
+                "limit": limit,
+                "url_contains": url_contains,
+                "resource_types": resource_types or [],
+            },
+        )}
 
     def get_browser_screenshot(self, tab_id: int | None = None) -> dict[str, Any]:
         if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):

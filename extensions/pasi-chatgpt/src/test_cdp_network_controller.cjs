@@ -171,6 +171,77 @@ test('CDP controller keeps prompt bindings exclusive and exposes idle state', as
   assert.equal(controller.isIdle(31), true);
 });
 
+test('bounded browser interactions use native CDP input and accessibility targets', async () => {
+  const debuggerApi = fakeDebugger();
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      return callback({
+        nodes: [
+          {
+            nodeId: 'ax-start',
+            backendDOMNodeId: 42,
+            role: {type: 'role', value: 'button'},
+            name: {type: 'computedString', value: 'Start'},
+            ignored: false,
+            properties: []
+          },
+          {
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 43,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: ''},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}}
+            ]
+          }
+        ]
+      });
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+  const controller = source.createController({debuggerApi});
+  controller.install();
+
+  const clicked = await controller.runBrowserTest(31, 'click', {target: 'Start', role: 'button'});
+  assert.equal(clicked.success, true);
+  assert.equal(clicked.action, 'click');
+
+  const filled = await controller.runBrowserTest(31, 'fill', {target: 'Message', role: 'textbox', value: 'PASI'});
+  assert.equal(filled.success, true);
+
+  const pressed = await controller.runBrowserTest(31, 'press_key', {key: 'Enter'});
+  assert.equal(pressed.success, true);
+
+  const scrolled = await controller.runBrowserTest(31, 'scroll', {delta_y: 400});
+  assert.equal(scrolled.success, true);
+
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Accessibility.getFullAXTree'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'DOM.getBoxModel' && command.params.backendNodeId === 42
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchMouseEvent' && command.params.type === 'mousePressed'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.insertText' && command.params.text === 'PASI'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+  ));
+  assert.ok(debuggerApi.commands.some((command) =>
+    command.method === 'Input.dispatchMouseEvent' && command.params.type === 'mouseWheel'
+  ));
+  assert.equal(debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate'), false);
+});
+
+
 test('CDP reasoning control verifies an existing Thinking state and can enable it', async () => {
   const debuggerApi = fakeDebugger();
   const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);

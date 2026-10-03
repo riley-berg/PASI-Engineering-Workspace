@@ -82,8 +82,23 @@
     }
 
     if (!response.ok) {
-      const detail = String(payload?.error || response.text || "").trim();
-      throw new Error(detail || "Bridge request failed (HTTP " + String(response.status || "unknown") + ").");
+      const detail = String(
+        payload?.error ||
+        response.error ||
+        response.text ||
+        ""
+      ).trim();
+      const status = Number(response.status);
+      if (Number.isFinite(status) && status > 0) {
+        throw new Error(
+          detail || "Bridge request failed (HTTP " + String(status) + ")."
+        );
+      }
+      throw new Error(
+        detail
+          ? "Bridge request failed: " + detail
+          : "Bridge request failed: no response from the PASI bridge."
+      );
     }
 
     return payload;

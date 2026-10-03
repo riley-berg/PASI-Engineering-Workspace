@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pasi.local/schemas/long-run-168h-v1.json",
+  "title": "PASI 168-hour Long-run Acceptance Evidence",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "milestone",
+    "run_id",
+    "started_at",
+    "ended_at",
+    "duration_seconds",
+    "git_commit",
+    "bridge_version",
+    "controller_version",
+    "policy",
+    "health",
+    "operations",
+    "recoveries",
+    "resources",
+    "automation",
+    "summary",
+    "integrity",
+    "final"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "milestone": {
+      "const": "LONG_RUN_168H"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "duration_seconds": {
+      "type": "number",
+      "minimum": 604800
+    },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "bridge_version": {
+      "type": "string"
+    },
+    "controller_version": {
+      "type": "string"
+    },
+    "policy": {
+      "type": "object"
+    },
+    "health": {
+      "type": "object"
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 168
+    },
+    "recoveries": {
+      "type": "array",
+      "minItems": 6
+    },
+    "resources": {
+      "type": "object"
+    },
+    "automation": {
+      "type": "object"
+    },
+    "summary": {
+      "type": "object"
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "canonical_sha256"
+      ],
+      "properties": {
+        "canonical_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "final": {
+      "type": "object",
+      "required": [
+        "status",
+        "verification_timestamp",
+        "failures"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "PASS",
+            "FAIL"
+          ]
+        },
+        "verification_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,6 +9,8 @@ let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 const cdpOperationTimings = new Map();
 const browserTestingWaiters = new Map();
+const MANAGED_TAB_STORAGE_KEY = 'pasi.managed_chatgpt_tab_id';
+const MANAGED_TAB_URL = 'https://chatgpt.com/';
 
 function cancelBrowserTestingWaiter(tabId) {
   const waiter = browserTestingWaiters.get(String(tabId));
@@ -814,33 +816,92 @@ async function attachAndObserveTab(tab, tabSelection = null) {
   }
 }
 
+async function getManagedTabId() {
+  try {
+    const result = await chrome.storage.local.get(MANAGED_TAB_STORAGE_KEY);
+    const value = result?.[MANAGED_TAB_STORAGE_KEY];
+    return Number.isInteger(value) && value > 0 ? value : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function setManagedTabId(tabId) {
+  if (!Number.isInteger(tabId) || tabId <= 0) return false;
+  try {
+    await chrome.storage.local.set({[MANAGED_TAB_STORAGE_KEY]: tabId});
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function clearManagedTabId(tabId = null) {
+  try {
+    const current = await getManagedTabId();
+    if (tabId == null || current === tabId) {
+      await chrome.storage.local.remove(MANAGED_TAB_STORAGE_KEY);
+    }
+  } catch (_) {}
+}
+
 async function attachExistingChatTabs() {
   const tabs = await chrome.tabs.query({
     url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
   });
-  const busyTabIds = tabs
+  const managedTabId = await getManagedTabId();
+  let trackedTab = null;
+  if (managedTabId != null) {
+    try {
+      trackedTab = await chrome.tabs.get(managedTabId);
+    } catch (_) {
+      trackedTab = null;
+    }
+  }
+
+  if (trackedTab && !isChatGPTUrl(trackedTab.url)) {
+    try {
+      await chrome.tabs.update(trackedTab.id, {url: MANAGED_TAB_URL, active: false});
+      await setManagedTabId(trackedTab.id);
+      return;
+    } catch (_) {
+      trackedTab = null;
+    }
+  }
+
+  const candidates = tabs;
+  const busyTabIds = candidates
     .filter((tab) => Number.isInteger(tab?.id) && cdpNetworkController?.isIdle?.(tab.id) === false)
     .map((tab) => tab.id);
-  const selection = globalThis.PASI_TAB_SELECTION_POLICY?.selectReusableTab?.(tabs, {
-    busyTabIds,
-    preferActive: false,
-  });
-  if (!selection?.selected_tab_id) return;
-  const selected = tabs.find((tab) => tab.id === selection.selected_tab_id);
+  const selection = globalThis.PASI_TAB_SELECTION_POLICY?.selectManagedTab?.(
+    candidates,
+    trackedTab && isChatGPTUrl(trackedTab.url) ? trackedTab.id : managedTabId,
+    {busyTabIds, preferActive: false},
+  );
+  if (!selection) return;
+
+  if (selection.mode === 'reuse_busy') {
+    await setManagedTabId(selection.selected_tab_id);
+    return;
+  }
+
+  if (selection.mode === 'create') {
+    try {
+      const created = await chrome.tabs.create({url: MANAGED_TAB_URL, active: false});
+      if (!Number.isInteger(created?.id)) return;
+      await setManagedTabId(created.id);
+      await attachAndObserveTab(created, selection);
+    } catch (_) {}
+    return;
+  }
+
+  const selected = candidates.find((tab) => tab.id === selection.selected_tab_id);
   if (!selected) return;
-  if (await attachAndObserveTab(selected, selection)) return;
+  await setManagedTabId(selected.id);
+  await attachAndObserveTab(selected, selection);
 }
 
 async function inspect() {
-  const tabs = await chrome.tabs.query({
-    active: true,
-    lastFocusedWindow: true,
-    url: ['https://chatgpt.com/*', 'https://www.chatgpt.com/*']
-  });
-  if (tabs[0]) {
-    await attachAndObserveTab(tabs[0]);
-    return;
-  }
   await attachExistingChatTabs();
 }
 
@@ -883,20 +944,29 @@ void attachExistingChatTabs();
 if (chrome.tabs?.onRemoved) {
   chrome.tabs.onRemoved.addListener((tabId) => {
     cancelBrowserTestingWaiter(tabId);
+    void clearManagedTabId(tabId);
     void cdpNetworkController?.detachTab?.(tabId);
   });
 }
 if (chrome.tabs?.onActivated) {
-  chrome.tabs.onActivated.addListener((activeInfo) => {
+  chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    const managedTabId = await getManagedTabId();
+    if (managedTabId !== activeInfo.tabId) return;
     void chrome.tabs.get(activeInfo.tabId)
       .then((tab) => attachAndObserveTab(tab))
       .catch(() => undefined);
   });
 }
 if (chrome.tabs?.onUpdated) {
-  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    if (changeInfo?.status === 'complete' && isChatGPTUrl(tab?.url)) {
+  chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+    if (changeInfo?.status !== 'complete' || !isChatGPTUrl(tab?.url)) return;
+    const managedTabId = await getManagedTabId();
+    if (managedTabId === tabId) {
       void attachAndObserveTab(tab);
+      return;
+    }
+    if (managedTabId == null) {
+      void attachExistingChatTabs();
     }
   });
 }

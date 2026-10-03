@@ -156,3 +156,43 @@ def test_registry_is_durable_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["schema_version"] == 1
     assert payload["runners"]["test-runner"]["stable"]["version"] == 1
+
+
+def test_automation_candidate_requires_validation_before_promotion(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    setup_registry(tmp_path, monkeypatch)
+    make_script(tmp_path, "runner.py")
+    make_script(tmp_path, "runner_v2.py", "print('runner v2')\\n")
+
+    runner_registry.create_runner(
+        "test-runner",
+        "Test Runner",
+        "scripts/runner.py",
+        project_root=tmp_path / "workspace",
+    )
+    runner_registry.create_revision(
+        "test-runner",
+        "scripts/runner_v2.py",
+        source="automation",
+        project_root=tmp_path / "workspace",
+    )
+
+    with pytest.raises(runner_registry.RunnerRegistryError):
+        runner_registry.promote_revision(
+            "test-runner",
+            2,
+            project_root=tmp_path / "workspace",
+        )
+
+    candidate = runner_registry.validate_revision(
+        "test-runner",
+        2,
+        {"proof": "browser-proof-123", "coverage_percent": 100},
+    )
+    assert candidate["validation_state"] == "passed"
+
+    promoted = runner_registry.promote_revision(
+        "test-runner",
+        2,
+        project_root=tmp_path / "workspace",
+    )
+    assert promoted["stable"]["version"] == 2

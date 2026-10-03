@@ -80,6 +80,7 @@ def test_promote_atomically_swaps_candidate_into_stable_and_keeps_previous_for_r
     runner_registry.create_revision(
         "test-runner",
         "scripts/runner_v2.py",
+        source="user",
         project_root=tmp_path / "workspace",
     )
     promoted = runner_registry.promote_revision(
@@ -108,6 +109,7 @@ def test_rollback_discards_candidate_before_touching_stable(tmp_path: Path, monk
     runner_registry.create_revision(
         "test-runner",
         "scripts/runner_v2.py",
+        source="user",
         project_root=tmp_path / "workspace",
     )
     discarded = runner_registry.rollback_runner("test-runner")
@@ -118,6 +120,7 @@ def test_rollback_discards_candidate_before_touching_stable(tmp_path: Path, monk
     runner_registry.create_revision(
         "test-runner",
         "scripts/runner_v2.py",
+        source="user",
         project_root=tmp_path / "workspace",
     )
     runner_registry.promote_revision(

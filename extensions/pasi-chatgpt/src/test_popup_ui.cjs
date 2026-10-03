@@ -119,6 +119,7 @@ test("popup connection badge reflects bridge reachability, not runner availabili
   assert.match(popupJs, /connected \? "Connected" : "Bridge unavailable"/);
   assert.match(popupJs, /PASI bridge is responding on 127\.0\.0\.1:8765\./);
   assert.doesNotMatch(popupJs, /textContent = state\?\.available \? "Connected" : "Disconnected";/);
+  assert.match(backgroundJs, /new Set\(\['\/health', '\/status'/);
   assert.match(popupJs, /state\.status === "starting"/);
   assert.match(popupJs, /state\.status === "stopping"/);
   assert.match(popupJs, /typeof state\.process_alive === "boolean"/);

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-PROFILE="${PASI_AGENT_TUNNEL_PROFILE:-$ROOT/config/pasi-agent.tunnel.yaml.example}"
+PROFILE="${PASI_AGENT_TUNNEL_PROFILE:-$ROOT/config/pasi-agent.tunnel.yaml}"
 
 if [[ -n "${PASI_TUNNEL_CLIENT_BIN:-}" ]]; then
   TUNNEL_CLIENT="$PASI_TUNNEL_CLIENT_BIN"

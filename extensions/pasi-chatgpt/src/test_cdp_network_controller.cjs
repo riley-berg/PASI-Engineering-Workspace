@@ -217,7 +217,7 @@ test('bounded browser interactions use native CDP input and selectors', async ()
   assert.equal(clicked.success, true);
   assert.equal(clicked.action, 'click');
 
-  const filled = await controller.runBrowserTest(31, 'fill', {target: 'Start', role: 'button', value: 'PASI'});
+  const filled = await controller.runBrowserTest(31, 'fill', {target: 'Message', role: 'textbox', value: 'PASI'});
   assert.equal(filled.success, true);
 
   const pressed = await controller.runBrowserTest(31, 'press_key', {key: 'Enter'});

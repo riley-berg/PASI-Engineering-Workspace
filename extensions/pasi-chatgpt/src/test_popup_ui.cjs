@@ -444,32 +444,32 @@ test("popup preserves open diagnostics while refreshing runner state", () => {
 
 
 test("popup preserves scroll position while runner state is re-rendered", () => {
-  assert.match(t, /function restorePopupScroll\(scrollTop\)/);
-  assert.match(t, /const scrollTop = .*scrollTop.*\|\| window\.scrollY/);
-  assert.match(t, /root\.replaceChildren\(\)/);
-  assert.match(t, /restorePopupScroll\(scrollTop\)/);
+  assert.match(popupJs, /function restorePopupScroll\(scrollTop\)/);
+  assert.match(popupJs, /const scrollTop = .*scrollTop.*\|\| window\.scrollY/);
+  assert.match(popupJs, /root\.replaceChildren\(\)/);
+  assert.match(popupJs, /restorePopupScroll\(scrollTop\)/);
 });
 
 test("popup runner cards come from the backend registry instead of a fixed two-runner list", () => {
-  assert.match(t, /function getRunnerRegistry\(\)/);
-  assert.match(t, /\/runner\/registry/);
-  assert.match(t, /for \(const entry of registryRunners\)/);
-  assert.match(t, /const registryEntry = registryRunners\.find/);
-  assert.match(t, /function runnerProfileMeta\(profileId/);
+  assert.match(popupJs, /function getRunnerRegistry\(\)/);
+  assert.match(popupJs, /\/runner\/registry/);
+  assert.match(popupJs, /for \(const entry of registryRunners\)/);
+  assert.match(popupJs, /const registryEntry = registryRunners\.find/);
+  assert.match(popupJs, /function runnerProfileMeta\(profileId/);
 });
 
 test("popup exposes user runner creation and candidate revision controls", () => {
-  assert.match(t, /id="createRunnerForm"/);
-  assert.match(t, /id="createRevisionForm"/);
-  assert.match(t, /\/runner\/registry\/create/);
-  assert.match(t, /\/runner\/registry\/revision/);
-  assert.match(t, /\/runner\/registry\/promote/);
-  assert.match(t, /\/runner\/registry\/rollback/);
+  assert.match(popupJs, /id="createRunnerForm"/);
+  assert.match(popupJs, /id="createRevisionForm"/);
+  assert.match(popupJs, /\/runner\/registry\/create/);
+  assert.match(popupJs, /\/runner\/registry\/revision/);
+  assert.match(popupJs, /\/runner\/registry\/promote/);
+  assert.match(popupJs, /\/runner\/registry\/rollback/);
 });
 
 
 test("popup recognizes arbitrary supervised runner profiles", () => {
-  assert.match(popupJs, /function activeProfileForState\(state\)[\s\S]*supervised_\)[\s\S]*derived/);
+  assert.match(popupJs, /function activeProfileForState\(state\)[\s\S]*mode\.startsWith\("supervised_"/);
   assert.match(popupJs, /\^\[a-z\]\[a-z0-9\.\_\-\]\{1,63\}\$/);
   assert.match(popupJs, /runnerProfileMeta\(profileId, state, registryEntry\)/);
 });

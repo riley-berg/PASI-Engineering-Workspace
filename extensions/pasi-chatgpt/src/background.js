@@ -8,6 +8,78 @@ const supervisedExecutionWaiters = new Map();
 let cachedBridgeToken = null;
 let bridgeTokenPromise = null;
 const cdpOperationTimings = new Map();
+const browserTestingWaiters = new Map();
+
+function cancelBrowserTestingWaiter(tabId) {
+  const waiter = browserTestingWaiters.get(String(tabId));
+  if (waiter) waiter.active = false;
+  browserTestingWaiters.delete(String(tabId));
+}
+
+function ensureBrowserTestingWaiter(tabId) {
+  if (typeof tabId !== 'number') return false;
+  const key = String(tabId);
+  const existing = browserTestingWaiters.get(key);
+  if (existing?.active) return true;
+  const state = {active: true};
+  browserTestingWaiters.set(key, state);
+
+  void (async () => {
+    while (state.active) {
+      let tab;
+      try {
+        tab = await chrome.tabs.get(tabId);
+      } catch (_) {
+        state.active = false;
+        break;
+      }
+      if (!isChatGPTUrl(tab?.url)) {
+        state.active = false;
+        break;
+      }
+
+      const response = await bridgeJson(
+        '/browser/testing/request?tab_id=' + encodeURIComponent(String(tabId)) + '&wait_ms=5000',
+        6500
+      );
+      if (!state.active) break;
+      const request = response?.request;
+      if (!request?.request_id) continue;
+
+      try {
+        const result = await cdpNetworkController.runBrowserTest(
+          tabId,
+          String(request.action || ''),
+          request.params && typeof request.params === 'object' ? request.params : {}
+        );
+        await bridgeFetch('/browser/testing/result', 'POST', {
+          request_id: String(request.request_id),
+          tab_id: tabId,
+          ok: true,
+          data: result
+        }, 10000);
+      } catch (error) {
+        await bridgeFetch('/browser/testing/result', 'POST', {
+          request_id: String(request.request_id),
+          tab_id: tabId,
+          ok: false,
+          error: {
+            code: 'BROWSER_TEST_FAILED',
+            message: String(error?.message || error).slice(0, 1000)
+          }
+        }, 10000);
+      }
+    }
+
+    if (browserTestingWaiters.get(key) === state) {
+      browserTestingWaiters.delete(key);
+    }
+  })().catch(() => {
+    if (browserTestingWaiters.get(key) === state) browserTestingWaiters.delete(key);
+  });
+
+  return true;
+}
 
 async function cdpNetworkObservation(event) {
   const terminal = ['COMPLETED', 'INTERRUPTED', 'FAILED'].includes(event?.eventType);
@@ -723,6 +795,7 @@ async function attachAndObserveTab(tab) {
     await cdpNetworkController.attachTab(tabId);
     ensureSupervisedExecutionWaiter(tabId);
     await reportWorkerHealth(tab);
+    ensureBrowserTestingWaiter(tabId);
     return true;
   } catch (_) {
     return false;
@@ -794,6 +867,7 @@ void attachExistingChatTabs();
 
 if (chrome.tabs?.onRemoved) {
   chrome.tabs.onRemoved.addListener((tabId) => {
+    cancelBrowserTestingWaiter(tabId);
     void cdpNetworkController?.detachTab?.(tabId);
   });
 }

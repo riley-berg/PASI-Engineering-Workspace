@@ -10,6 +10,9 @@
   const MAX_RESPONSE_TEXT_CHARS = 120_000;
   const MAX_REPLAY_BODY_BYTES = 8 * 1024 * 1024;
   const DEFAULT_STALL_MS = 8_000;
+  const MAX_BROWSER_TEST_ITEMS = 100;
+  const MAX_BROWSER_TEST_TEXT_CHARS = 4_000;
+  const MAX_BROWSER_TEST_SCREENSHOT_BYTES = 8 * 1024 * 1024;
 
   function requestUrlIsGeneration(url) {
     try {
@@ -287,7 +290,163 @@
     const stallMs = Number(options.stallMs) > 0 ? Number(options.stallMs) : DEFAULT_STALL_MS;
     const tabs = new Map();
     const requests = new Map();
+    const consoleErrors = new Map();
+    const networkEvents = new Map();
+    const networkRequests = new Map();
     let installed = false;
+
+    function pushBounded(map, tabId, value, limit = MAX_BROWSER_TEST_ITEMS) {
+      const list = map.get(tabId) || [];
+      list.push(value);
+      if (list.length > limit) list.splice(0, list.length - limit);
+      map.set(tabId, list);
+      return value;
+    }
+
+    function sanitizeNetworkUrl(url) {
+      try {
+        const parsed = new URL(String(url || ''), 'https://chatgpt.com');
+        return parsed.origin + parsed.pathname;
+      } catch (_) {
+        return String(url || '').slice(0, 2000);
+      }
+    }
+
+    function safeConsoleArgument(argument) {
+      if (argument == null) return null;
+      if (Object.prototype.hasOwnProperty.call(argument, 'value')) {
+        const value = argument.value;
+        return typeof value === 'string'
+          ? value.slice(0, MAX_BROWSER_TEST_TEXT_CHARS)
+          : typeof value === 'number' || typeof value === 'boolean'
+          ? value
+          : argument.type || null;
+      }
+      return String(argument.description || argument.unserializableValue || argument.type || '').slice(0, MAX_BROWSER_TEST_TEXT_CHARS);
+    }
+
+    function recordConsoleEvent(tabId, method, params = {}) {
+      if (!Number.isInteger(tabId)) return;
+      if (method === 'Runtime.consoleAPICalled') {
+        const type = String(params.type || '').toLowerCase();
+        if (type !== 'error' && type !== 'assert') return;
+        pushBounded(consoleErrors, tabId, {
+          kind: 'console_error',
+          type,
+          timestamp: Number(params.timestamp || 0) || null,
+          text: (Array.isArray(params.args) ? params.args : [])
+            .slice(0, 8)
+            .map(safeConsoleArgument)
+            .filter((value) => value != null),
+          stack_trace: params.stackTrace?.callFrames?.slice(0, 8).map((frame) => ({
+            function_name: String(frame.functionName || '').slice(0, 200),
+            url: sanitizeNetworkUrl(frame.url),
+            line_number: Number(frame.lineNumber || 0),
+            column_number: Number(frame.columnNumber || 0),
+          })) || [],
+        });
+        return;
+      }
+      if (method === 'Runtime.exceptionThrown') {
+        const details = params.exceptionDetails || {};
+        const exception = details.exception || {};
+        pushBounded(consoleErrors, tabId, {
+          kind: 'uncaught_exception',
+          timestamp: Number(details.timestamp || 0) || null,
+          text: String(details.text || exception.description || exception.value || 'Uncaught exception')
+            .slice(0, MAX_BROWSER_TEST_TEXT_CHARS),
+          url: sanitizeNetworkUrl(details.url || ''),
+          line_number: Number(details.lineNumber || 0),
+          column_number: Number(details.columnNumber || 0),
+          stack_trace: details.stackTrace?.callFrames?.slice(0, 8).map((frame) => ({
+            function_name: String(frame.functionName || '').slice(0, 200),
+            url: sanitizeNetworkUrl(frame.url),
+            line_number: Number(frame.lineNumber || 0),
+            column_number: Number(frame.columnNumber || 0),
+          })) || [],
+        });
+      }
+    }
+
+    function recordNetworkEvent(tabId, method, params = {}) {
+      if (!Number.isInteger(tabId)) return;
+      if (method === 'Network.requestWillBeSent') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        networkRequests.set(tabId + ':' + requestId, {
+          url: sanitizeNetworkUrl(params.request?.url),
+          method: String(params.request?.method || 'GET'),
+          resource_type: String(params.type || ''),
+          started_at: Number(params.timestamp || 0) || null,
+        });
+        pushBounded(networkEvents, tabId, {
+          kind: 'request',
+          request_id: requestId,
+          method: String(params.request?.method || 'GET'),
+          url: sanitizeNetworkUrl(params.request?.url),
+          resource_type: String(params.type || ''),
+          timestamp: Number(params.timestamp || 0) || null,
+        });
+        return;
+      }
+      if (method === 'Network.responseReceived') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        networkRequests.set(tabId + ':' + requestId, {...prior, response_url: sanitizeNetworkUrl(params.response?.url)});
+        pushBounded(networkEvents, tabId, {
+          kind: 'response',
+          request_id: requestId,
+          method: prior.method || null,
+          url: sanitizeNetworkUrl(params.response?.url || prior.url),
+          status: Number(params.response?.status || 0) || null,
+          mime_type: String(params.response?.mimeType || ''),
+          resource_type: prior.resource_type || String(params.type || ''),
+          timestamp: Number(params.timestamp || 0) || null,
+        });
+        return;
+      }
+      if (method === 'Network.loadingFinished') {
+        const requestId = String(params.requestId || '');
+        if (!requestId) return;
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        pushBounded(networkEvents, tabId, {
+          kind: 'finished',
+          request_id: requestId,
+          method: prior.method || null,
+          url: prior.response_url || prior.url || null,
+          resource_type: prior.resource_type || null,
+          timestamp: Number(params.timestamp || 0) || null,
+          encoded_data_length: Number(params.encodedDataLength || 0) || 0,
+        });
+        networkRequests.delete(tabId + ':' + requestId);
+        return;
+      }
+      if (method === 'Network.loadingFailed') {
+        const requestId = String(params.requestId || '');
+        const prior = networkRequests.get(tabId + ':' + requestId) || {};
+        pushBounded(networkEvents, tabId, {
+          kind: 'failed',
+          request_id: requestId,
+          method: prior.method || null,
+          url: prior.response_url || prior.url || null,
+          resource_type: prior.resource_type || null,
+          timestamp: Number(params.timestamp || 0) || null,
+          error_text: String(params.errorText || 'Network request failed').slice(0, 500),
+          canceled: params.canceled === true,
+        });
+        networkRequests.delete(tabId + ':' + requestId);
+      }
+    }
+
+    async function handleDebuggerEvent(source, method, params) {
+      const tabId = source?.tabId;
+      if (Number.isInteger(tabId)) {
+        recordConsoleEvent(tabId, method, params);
+        recordNetworkEvent(tabId, method, params);
+      }
+      return handlePaused(source, method, params);
+    }
 
     function sendCommand(tabId, method, params = {}) {
       return new Promise((resolve, reject) => {
@@ -341,6 +500,9 @@
             }
           }
           await sendCommand(tabId, 'Accessibility.enable');
+          await sendCommand(tabId, 'Runtime.enable');
+          await sendCommand(tabId, 'Network.enable');
+          await sendCommand(tabId, 'Page.enable');
           await sendCommand(tabId, 'Fetch.enable', {
             patterns: GENERATION_ENDPOINTS.flatMap((urlPattern) => ([
               {urlPattern: '*' + urlPattern, requestStage: 'Request'},
@@ -365,11 +527,25 @@
       for (const [requestId, request] of requests.entries()) {
         if (request.tabId === tabId) requests.delete(requestId);
       }
+      for (const [requestId] of networkRequests.entries()) {
+        if (requestId.startsWith(String(tabId) + ':')) networkRequests.delete(requestId);
+      }
+      consoleErrors.delete(tabId);
+      networkEvents.delete(tabId);
       try {
         if (state.enabled) await sendCommand(tabId, 'Fetch.disable');
       } catch (_) {}
       try {
         await sendCommand(tabId, 'Accessibility.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Runtime.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Network.disable');
+      } catch (_) {}
+      try {
+        await sendCommand(tabId, 'Page.disable');
       } catch (_) {}
       try {
         if (typeof debuggerApi?.detach === 'function') {
@@ -1327,10 +1503,166 @@
       }
     }
 
+    async function browserTestScreenshot(tabId) {
+      await attachTab(tabId);
+      const metrics = await sendCommand(tabId, 'Page.getLayoutMetrics');
+      const shot = await sendCommand(tabId, 'Page.captureScreenshot', {
+        format: 'png',
+        fromSurface: true,
+        captureBeyondViewport: false,
+      });
+      const base64 = String(shot?.data || '');
+      const byteLength = Math.floor((base64.length * 3) / 4);
+      if (!base64 || byteLength > MAX_BROWSER_TEST_SCREENSHOT_BYTES) {
+        throw new Error('browser screenshot is empty or exceeds the bounded size');
+      }
+      const viewport = metrics?.visualViewport || metrics?.layoutViewport || {};
+      return {
+        kind: 'screenshot',
+        tab_id: tabId,
+        mime_type: 'image/png',
+        width: Number(viewport.clientWidth || viewport.width || 1),
+        height: Number(viewport.clientHeight || viewport.height || 1),
+        byte_length: byteLength,
+        image_base64: base64,
+        captured_at: new Date().toISOString(),
+      };
+    }
+
+    async function browserTestDom(tabId, params = {}) {
+      await attachTab(tabId);
+      const selector = typeof params.selector === 'string' && params.selector.trim()
+        ? params.selector.trim()
+        : 'body';
+      const maxElements = Math.min(Math.max(Number(params.max_elements) || 50, 1), 100);
+      const maxTextChars = Math.min(Math.max(Number(params.max_text_chars) || 500, 50), MAX_BROWSER_TEST_TEXT_CHARS);
+      const expression = `(() => {
+        const selector = ${JSON.stringify(selector)};
+        const maxElements = ${maxElements};
+        const maxTextChars = ${maxTextChars};
+        const styleKeys = ['display','visibility','opacity','color','backgroundColor','borderColor','fontSize','fontWeight'];
+        const visible = (node, style, rect) =>
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0;
+        const nodes = [...document.querySelectorAll(selector)];
+        const elements = nodes.slice(0, maxElements).map((node) => {
+          const style = getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          return {
+            tag: node.tagName.toLowerCase(),
+            id: String(node.id || ''),
+            class_name: String(node.className || '').slice(0, 500),
+            role: node.getAttribute('role'),
+            aria_label: node.getAttribute('aria-label'),
+            title: node.getAttribute('title'),
+            test_id: node.getAttribute('data-testid'),
+            type: node.getAttribute('type'),
+            name: node.getAttribute('name'),
+            disabled: node instanceof HTMLButtonElement || node instanceof HTMLInputElement
+              ? node.disabled === true
+              : node.getAttribute('aria-disabled') === 'true',
+            checked: 'checked' in node ? node.checked === true : null,
+            selected: 'selected' in node ? node.selected === true : null,
+            visible: visible(node, style, rect),
+            text: String(node.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, maxTextChars),
+            bounds: {
+              x: Math.round(rect.x * 100) / 100,
+              y: Math.round(rect.y * 100) / 100,
+              width: Math.round(rect.width * 100) / 100,
+              height: Math.round(rect.height * 100) / 100
+            },
+            styles: Object.fromEntries(styleKeys.map((key) => [key, style[key]]))
+          };
+        });
+        return {
+          kind: 'dom',
+          tab_id: ${Number(tabId)},
+          url: location.href,
+          title: document.title,
+          ready_state: document.readyState,
+          selector,
+          matched_count: nodes.length,
+          truncated: nodes.length > maxElements,
+          elements
+        };
+      })()`;
+      const evaluated = await sendCommand(tabId, 'Runtime.evaluate', {
+        expression,
+        returnByValue: true,
+        awaitPromise: false,
+      });
+      if (evaluated?.exceptionDetails) {
+        throw new Error(
+          String(
+            evaluated.exceptionDetails.text ||
+            evaluated.exceptionDetails.exception?.description ||
+            'DOM inspection failed'
+          ).slice(0, 500)
+        );
+      }
+      return evaluated?.result?.value || {
+        kind: 'dom',
+        tab_id: tabId,
+        url: '',
+        title: '',
+        ready_state: 'unknown',
+        selector,
+        matched_count: 0,
+        truncated: false,
+        elements: [],
+      };
+    }
+
+    function browserTestConsoleErrors(tabId, params = {}) {
+      const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
+      const errors = (consoleErrors.get(tabId) || []).slice(-limit);
+      return {
+        kind: 'console',
+        tab_id: tabId,
+        errors,
+        count: errors.length,
+      };
+    }
+
+    function browserTestNetwork(tabId, params = {}) {
+      const limit = Math.min(Math.max(Number(params.limit) || 50, 1), 100);
+      const urlContains = typeof params.url_contains === 'string' ? params.url_contains : '';
+      const resourceTypes = new Set(
+        Array.isArray(params.resource_types) ? params.resource_types.map((value) => String(value)) : []
+      );
+      const all = networkEvents.get(tabId) || [];
+      const filtered = all.filter((event) => {
+        if (urlContains && !String(event.url || '').includes(urlContains)) return false;
+        if (resourceTypes.size && !resourceTypes.has(String(event.resource_type || ''))) return false;
+        return true;
+      });
+      return {
+        kind: 'network',
+        tab_id: tabId,
+        events: filtered.slice(-limit),
+        count: Math.min(filtered.length, limit),
+        captured_since: all[0]?.timestamp || null,
+      };
+    }
+
+    async function runBrowserTest(tabId, action, params = {}) {
+      if (!Number.isInteger(tabId) || tabId < 1) throw new Error('tabId is required');
+      await attachTab(tabId);
+      const normalized = String(action || '').trim();
+      if (normalized === 'screenshot') return browserTestScreenshot(tabId);
+      if (normalized === 'dom') return browserTestDom(tabId, params);
+      if (normalized === 'console_errors') return browserTestConsoleErrors(tabId, params);
+      if (normalized === 'network') return browserTestNetwork(tabId, params);
+      throw new Error('Unsupported browser-test action');
+    }
+
     function install() {
       if (installed) return false;
       if (!debuggerApi?.onEvent?.addListener) throw new Error('chrome.debugger.onEvent is unavailable');
-      debuggerApi.onEvent.addListener(handlePaused);
+      debuggerApi.onEvent.addListener(handleDebuggerEvent);
       if (debuggerApi.onDetach?.addListener) {
         debuggerApi.onDetach.addListener((source, reason) => {
           const tabId = source?.tabId;
@@ -1354,6 +1686,11 @@
           for (const [requestId, request] of requests.entries()) {
             if (request.tabId === tabId) requests.delete(requestId);
           }
+          consoleErrors.delete(tabId);
+          networkEvents.delete(tabId);
+          for (const [requestId] of networkRequests.entries()) {
+            if (requestId.startsWith(String(tabId) + ':')) networkRequests.delete(requestId);
+          }
         });
       }
       installed = true;
@@ -1371,6 +1708,8 @@
       ensureReasoningMode,
       ensureGithubRepository,
       handlePaused,
+      handleDebuggerEvent,
+      runBrowserTest,
       findComposerAXNode,
       currentBinding,
       isIdle,
@@ -1390,6 +1729,11 @@
             operationId: request.operationId,
             controllerId: request.controllerId,
             assistantMessageId: request.assistantMessageId || null
+          })),
+          browserTesting: [...tabs.keys()].map((tabId) => ({
+            tabId,
+            consoleErrorCount: (consoleErrors.get(tabId) || []).length,
+            networkEventCount: (networkEvents.get(tabId) || []).length
           }))
         };
       }

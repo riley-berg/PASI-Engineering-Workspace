@@ -35,7 +35,30 @@ function fakeDebugger() {
     detach(_debuggee, callback) { callback(); },
     sendCommand(_debuggee, method, params, callback) {
       commands.push({method, params});
-      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus') return callback({});
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus' ||
+          method === 'Runtime.enable' || method === 'Runtime.disable' ||
+          method === 'Network.enable' || method === 'Network.disable' ||
+          method === 'Page.enable' || method === 'Page.disable') return callback({});
+      if (method === 'Page.getLayoutMetrics') return callback({visualViewport: {clientWidth: 1280, clientHeight: 720}});
+      if (method === 'Page.captureScreenshot') return callback({data: Buffer.from('PASI_SCREENSHOT').toString('base64')});
+      if (method === 'Runtime.evaluate') {
+        return callback({result: {type: 'object', value: {
+          kind: 'dom',
+          tab_id: 31,
+          url: 'https://chatgpt.com/c/test',
+          title: 'PASI Test',
+          ready_state: 'complete',
+          selector: '#start',
+          matched_count: 1,
+          truncated: false,
+          elements: [{
+            tag: 'button',
+            id: 'start',
+            text: 'Start',
+            visible: true,
+            styles: {backgroundColor: 'rgb(69, 70, 74)', color: 'rgb(244, 241, 236)'}
+          }]
+        }}});
       if (method === 'DOM.getBoxModel') {
         return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
       }
@@ -831,4 +854,61 @@ test('network-health exposes the request-to-task map and controller fence', asyn
   assert.equal(health.attachedTabs[0].operationId, 'op-11');
   assert.equal(health.attachedTabs[0].controllerId, 'controller-11');
   assert.equal(health.activeRequests.length, 0);
+});
+
+
+test('browser testing exposes screenshot and bounded DOM inspection', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  const screenshot = await controller.runBrowserTest(31, 'screenshot');
+  assert.equal(screenshot.mime_type, 'image/png');
+  assert.equal(screenshot.width, 1280);
+  assert.equal(screenshot.height, 720);
+  assert.ok(screenshot.image_base64);
+
+  const dom = await controller.runBrowserTest(31, 'dom', {
+    selector: '#start',
+    max_elements: 1,
+    max_text_chars: 100,
+  });
+  assert.equal(dom.matched_count, 1);
+  assert.equal(dom.elements[0].id, 'start');
+  assert.equal(dom.elements[0].text, 'Start');
+});
+
+test('browser testing records console errors and sanitizes network URLs', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.attachTab(44);
+
+  await debuggerApi.emit({tabId: 44}, 'Runtime.consoleAPICalled', {
+    type: 'error',
+    timestamp: 1,
+    args: [{value: 'UI failure'}],
+  });
+  await debuggerApi.emit({tabId: 44}, 'Network.requestWillBeSent', {
+    requestId: 'req-ui',
+    request: {url: 'https://chatgpt.com/backend-api/ui?token=secret', method: 'GET'},
+    type: 'Fetch',
+    timestamp: 2,
+  });
+  await debuggerApi.emit({tabId: 44}, 'Network.responseReceived', {
+    requestId: 'req-ui',
+    response: {
+      url: 'https://chatgpt.com/backend-api/ui?token=secret',
+      status: 200,
+      mimeType: 'application/json',
+    },
+    type: 'Fetch',
+    timestamp: 3,
+  });
+
+  const consoleResult = await controller.runBrowserTest(44, 'console_errors', {limit: 10});
+  assert.equal(consoleResult.errors[0].text[0], 'UI failure');
+
+  const networkResult = await controller.runBrowserTest(44, 'network', {limit: 10});
+  assert.equal(networkResult.events[0].url, 'https://chatgpt.com/backend-api/ui');
+  assert.equal(networkResult.events.some((event) => String(event.url).includes('token=secret')), false);
 });

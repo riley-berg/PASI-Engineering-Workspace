@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -15,7 +16,7 @@ from automation.orchestrator.state import StateCorruptionError, StateManager
 
 SCHEMA_VERSION = "pasi-agent-v1"
 SERVER_NAME = "pasi-agent"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 MAX_ERROR_MESSAGE = 2000
 MAX_RESPONSE_TEXT = 120_000
 DEFAULT_STALE_MS = 30_000
@@ -263,6 +264,90 @@ _OPERATION_DATA_SCHEMA = {
     },
 }
 
+
+_BROWSER_SCREENSHOT_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["screenshot"],
+    "properties": {
+        "screenshot": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["tab_id", "mime_type", "width", "height", "byte_length", "sha256"],
+            "properties": {
+                "tab_id": {"type": "integer", "minimum": 1},
+                "mime_type": {"type": "string", "const": "image/png"},
+                "width": {"type": "integer", "minimum": 1},
+                "height": {"type": "integer", "minimum": 1},
+                "byte_length": {"type": "integer", "minimum": 1},
+                "sha256": {"type": "string"},
+                "captured_at": {"type": "string"},
+                "image_base64": {"type": "string"},
+            },
+        },
+    },
+}
+
+_BROWSER_DOM_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["dom"],
+    "properties": {
+        "dom": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["tab_id", "url", "title", "selector", "matched_count", "elements"],
+            "properties": {
+                "tab_id": {"type": "integer", "minimum": 1},
+                "url": {"type": "string"},
+                "title": {"type": "string"},
+                "ready_state": {"type": "string"},
+                "selector": {"type": "string"},
+                "matched_count": {"type": "integer", "minimum": 0},
+                "truncated": {"type": "boolean"},
+                "elements": {"type": "array", "items": {"type": "object"}},
+            },
+        },
+    },
+}
+
+_BROWSER_CONSOLE_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["console"],
+    "properties": {
+        "console": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["tab_id", "errors"],
+            "properties": {
+                "tab_id": {"type": "integer", "minimum": 1},
+                "errors": {"type": "array", "items": {"type": "object"}},
+                "count": {"type": "integer", "minimum": 0},
+            },
+        },
+    },
+}
+
+_BROWSER_NETWORK_DATA_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["network"],
+    "properties": {
+        "network": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["tab_id", "events"],
+            "properties": {
+                "tab_id": {"type": "integer", "minimum": 1},
+                "events": {"type": "array", "items": {"type": "object"}},
+                "count": {"type": "integer", "minimum": 0},
+                "captured_since": {"type": ["string", "null"]},
+            },
+        },
+    },
+}
+
 _ENVIRONMENT_DATA_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -391,6 +476,45 @@ TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
             "include_previous_safe": {"type": "boolean", "default": True},
         },
     },
+    "pasi.get_browser_screenshot": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "tab_id": {"type": ["integer", "null"], "minimum": 1},
+        },
+    },
+    "pasi.get_browser_dom": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "tab_id": {"type": ["integer", "null"], "minimum": 1},
+            "selector": {"type": "string", "maxLength": 500, "default": "body"},
+            "max_elements": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            "max_text_chars": {"type": "integer", "minimum": 50, "maximum": 4000, "default": 500},
+        },
+    },
+    "pasi.get_browser_console_errors": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "tab_id": {"type": ["integer", "null"], "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+        },
+    },
+    "pasi.get_browser_network": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "tab_id": {"type": ["integer", "null"], "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50},
+            "url_contains": {"type": ["string", "null"], "maxLength": 200},
+            "resource_types": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {"type": "string", "maxLength": 40},
+            },
+        },
+    },
     "pasi.get_acceptance_evidence": {
         "type": "object",
         "additionalProperties": False,
@@ -404,6 +528,10 @@ TOOL_INPUT_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
+    "pasi.get_browser_screenshot": _envelope(_BROWSER_SCREENSHOT_DATA_SCHEMA),
+    "pasi.get_browser_dom": _envelope(_BROWSER_DOM_DATA_SCHEMA),
+    "pasi.get_browser_console_errors": _envelope(_BROWSER_CONSOLE_DATA_SCHEMA),
+    "pasi.get_browser_network": _envelope(_BROWSER_NETWORK_DATA_SCHEMA),
     "pasi.get_runner_state": _envelope({
         "type": "object",
         "additionalProperties": False,
@@ -434,6 +562,10 @@ TOOL_OUTPUT_SCHEMAS: dict[str, dict[str, Any]] = {
 }
 
 TOOL_DESCRIPTIONS: dict[str, str] = {
+    "pasi.get_browser_screenshot": "Capture a fresh visible-tab screenshot through the attached PASI CDP browser authority. Observation only.",
+    "pasi.get_browser_dom": "Inspect bounded rendered DOM metadata and computed visual state for CSS selectors through the attached PASI CDP browser authority. Observation only.",
+    "pasi.get_browser_console_errors": "Read recent browser console errors and uncaught exceptions captured by the PASI CDP browser authority. Observation only.",
+    "pasi.get_browser_network": "Read recent sanitized browser network lifecycle events captured by the PASI CDP browser authority. Observation only.",
     "pasi.get_runner_state": "Read authoritative PASI runner lifecycle and progress state. Observation only.",
     "pasi.get_process_state": "Inspect actual live PASI processes from the host process table. Observation only.",
     "pasi.get_browser_state": "Read the latest persisted PASI browser/CDP health and network-authority observation. Observation only.",
@@ -489,7 +621,15 @@ class PasiAgentObservationService:
             self._validate_arguments(tool_name, arguments or {})
             args = dict(arguments or {})
             args.pop("_request_id", None)
-            if tool_name == "pasi.get_runner_state":
+            if tool_name == "pasi.get_browser_screenshot":
+                data = self.get_browser_screenshot(**args)
+            elif tool_name == "pasi.get_browser_dom":
+                data = self.get_browser_dom(**args)
+            elif tool_name == "pasi.get_browser_console_errors":
+                data = self.get_browser_console_errors(**args)
+            elif tool_name == "pasi.get_browser_network":
+                data = self.get_browser_network(**args)
+            elif tool_name == "pasi.get_runner_state":
                 data = self.get_runner_state(**args)
             elif tool_name == "pasi.get_process_state":
                 data = self.get_process_state(**args)
@@ -551,6 +691,91 @@ class PasiAgentObservationService:
                 source="agent_interface",
                 details={},
             )
+
+    def _browser_test_client(self):
+        from automation.pasi_agent_browser_testing import BrowserTestingClient
+        return BrowserTestingClient()
+
+    def get_browser_screenshot(self, tab_id: int | None = None) -> dict[str, Any]:
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise PasiAgentInputError("tab_id must be a positive integer or null")
+        screenshot = self._browser_test_client().request("screenshot", tab_id=tab_id)
+        image_base64 = screenshot.get("image_base64")
+        if isinstance(image_base64, str) and image_base64:
+            try:
+                screenshot["sha256"] = hashlib.sha256(base64.b64decode(image_base64)).hexdigest()
+            except (ValueError, TypeError):
+                raise PasiAgentInputError("browser screenshot returned invalid image data")
+        return {"screenshot": screenshot}
+
+    def get_browser_dom(
+        self,
+        tab_id: int | None = None,
+        selector: str = "body",
+        max_elements: int = 50,
+        max_text_chars: int = 500,
+    ) -> dict[str, Any]:
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise PasiAgentInputError("tab_id must be a positive integer or null")
+        if not isinstance(selector, str) or not selector.strip() or len(selector) > 500:
+            raise PasiAgentInputError("selector must be a bounded nonblank CSS selector")
+        if not isinstance(max_elements, int) or max_elements < 1 or max_elements > 100:
+            raise PasiAgentInputError("max_elements must be between 1 and 100")
+        if not isinstance(max_text_chars, int) or max_text_chars < 50 or max_text_chars > 4000:
+            raise PasiAgentInputError("max_text_chars must be between 50 and 4000")
+        return {"dom": self._browser_test_client().request(
+            "dom",
+            tab_id=tab_id,
+            params={
+                "selector": selector.strip(),
+                "max_elements": max_elements,
+                "max_text_chars": max_text_chars,
+            },
+        )}
+
+    def get_browser_console_errors(
+        self,
+        tab_id: int | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise PasiAgentInputError("tab_id must be a positive integer or null")
+        if not isinstance(limit, int) or limit < 1 or limit > 100:
+            raise PasiAgentInputError("limit must be between 1 and 100")
+        return {"console": self._browser_test_client().request(
+            "console_errors",
+            tab_id=tab_id,
+            params={"limit": limit},
+        )}
+
+    def get_browser_network(
+        self,
+        tab_id: int | None = None,
+        limit: int = 50,
+        url_contains: str | None = None,
+        resource_types: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if tab_id is not None and (not isinstance(tab_id, int) or tab_id < 1):
+            raise PasiAgentInputError("tab_id must be a positive integer or null")
+        if not isinstance(limit, int) or limit < 1 or limit > 100:
+            raise PasiAgentInputError("limit must be between 1 and 100")
+        if url_contains is not None and (not isinstance(url_contains, str) or len(url_contains) > 200):
+            raise PasiAgentInputError("url_contains must be null or a bounded string")
+        if resource_types is not None and (
+            not isinstance(resource_types, list)
+            or len(resource_types) > 12
+            or any(not isinstance(item, str) or len(item) > 40 for item in resource_types)
+        ):
+            raise PasiAgentInputError("resource_types must be a bounded string list")
+        return {"network": self._browser_test_client().request(
+            "network",
+            tab_id=tab_id,
+            params={
+                "limit": limit,
+                "url_contains": url_contains,
+                "resource_types": resource_types or [],
+            },
+        )}
 
     def get_runner_state(
         self,

@@ -116,4 +116,15 @@ Observation failures use the same envelope with `ok=false`, `data=null`, and a s
 
 The interface is observation-only. It never receives or returns the bridge token and does not expose runner-control, queue mutation, or chat mutation operations.
 
+### Browser testing through PASI MCP
+
+The PASI Agent MCP app also exposes four strictly observational browser-testing tools. They reuse the extension's existing native CDP authority and do not add click, typing, navigation, runner control, queue mutation, or arbitrary JavaScript execution.
+
+- `pasi.get_browser_screenshot` — captures the current visible tab.
+- `pasi.get_browser_dom` — inspects bounded DOM metadata and computed visual properties for a CSS selector.
+- `pasi.get_browser_console_errors` — reads recent console errors and uncaught exceptions.
+- `pasi.get_browser_network` — reads recent sanitized network request/response/failure events.
+
+The MCP server requests these captures through the authenticated localhost bridge. The extension performs the CDP operation against its already-attached ChatGPT tab, then returns the read-only result to the MCP caller.
+
 The Streamable HTTP application is also available from `automation.pasi_agent_mcp.create_streamable_http_app()`, but it is not started or exposed by the default launcher. Local deployment should use an explicit authenticated transport or native host boundary rather than creating an unauthenticated network listener.

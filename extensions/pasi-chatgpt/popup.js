@@ -166,9 +166,9 @@
   function runnerStatusLabel(state, profileId) {
     if (!state?.available) return "Unavailable";
     const activeProfile = activeProfileForState(state);
-    const processActive = runnerProcessIsActive(state);
+    const processLive = runnerProcessIsLive(state);
 
-    if (processActive) {
+    if (processLive) {
       if (activeProfile !== profileId) return "Another runner active";
       if (state.status === "running" && state.ready === true) return "Running";
       if (state.status === "stopping") return "Stopping";

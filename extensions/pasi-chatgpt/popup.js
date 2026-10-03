@@ -116,6 +116,38 @@
     return chrome.permissions.request({origins});
   }
 
+  async function getBridgeHealth() {
+    try {
+      const response = await bridgeRequest("GET", "/health");
+      const payload = parseBridgeResponse(response);
+      return {
+        connected: payload?.status === "ok",
+        message: payload?.status === "ok"
+          ? "PASI bridge is responding on 127.0.0.1:8765."
+          : "PASI bridge responded without a healthy status.",
+      };
+    } catch (error) {
+      const message = String(error?.message || error || "bridge unavailable").trim();
+      return {
+        connected: false,
+        message: message || "PASI bridge is unavailable.",
+      };
+    }
+  }
+
+  function renderBridgeBadge(health) {
+    const badge = $("connectionBadge");
+    if (!badge) return;
+    const connected = health?.connected === true;
+    badge.textContent = connected ? "Connected" : "Bridge unavailable";
+    badge.title = connected
+      ? "PASI bridge is responding on 127.0.0.1:8765."
+      : String(health?.message || "PASI bridge is unavailable.");
+    badge.setAttribute("aria-label", badge.title);
+    badge.classList.toggle("error", !connected);
+    badge.classList.remove("active");
+  }
+
   async function getRunnerState() {
     try {
       const response = await bridgeRequest("GET", "/runner/state");
@@ -181,7 +213,7 @@
   }
 
   function runnerStatusLabel(state, profileId) {
-    if (!state?.available) return "Unavailable";
+    if (!state?.available) return "";
     const activeProfile = activeProfileForState(state);
     const processLive = runnerProcessIsLive(state);
 
@@ -286,12 +318,7 @@
     if (status === "Active process") {
       return "Runner process is alive, but its state is not ready.";
     }
-    if (status === "Unavailable") {
-      const reason = String(state?.reason || state?.error || "").trim();
-      return reason
-        ? "Runner state unavailable: " + reason
-        : "Runner state unavailable.";
-    }
+    if (status === "Unavailable") return "";
     if (status === "Another runner active") return "Another runner is active.";
     if (status === "Completed") return "Last run completed.";
     if (status === "Failed") {
@@ -412,9 +439,16 @@
   function diagnosticText(state, aggregateState, profileId) {
     const process = state?.process;
     const processes = Array.isArray(aggregateState?.processes) ? aggregateState.processes : [];
+    const evidence = state?.evidence && typeof state.evidence === "object"
+      ? state.evidence
+      : null;
+    const failureConfirmed = evidence?.failure_confirmed === true;
     const lines = [
       "Profile: " + profileId,
       "State: " + String(state?.status || "unavailable"),
+      "Failure evidence: " + (failureConfirmed ? "confirmed" : "not confirmed"),
+      "Live process evidence: " + (evidence?.live_process_present ? "present" : "absent"),
+      "State file evidence: " + (evidence?.state_file_present ? "present" : "absent"),
       "State consistency: " + String(state?.state_consistency || "unknown"),
       "Diagnostic warning: " + String(state?.diagnostic_warning || "none"),
       "Phase: " + String(state?.phase || "n/a"),
@@ -979,10 +1013,11 @@
     try {
       applyTheme();
 
-      const [activeResult, runnerState, runnerRegistry] = await Promise.all([
+      const [activeResult, runnerState, runnerRegistry, bridgeHealth] = await Promise.all([
         send(TYPES.active),
         getRunnerState(),
         getRunnerRegistry(),
+        getBridgeHealth(),
       ]);
 
       // Resolve authorization from the live active tab on every render.
@@ -997,6 +1032,7 @@
       if (!currentUrl.parentElement) document.body.append(currentUrl);
 
       runnerState._runnerRegistry = runnerRegistry;
+      renderBridgeBadge(bridgeHealth);
       renderRunnerDashboard(runnerState, runnerSupported);
       await renderRunnerRegistry(runnerRegistry);
       await renderUserscripts(activeResult);

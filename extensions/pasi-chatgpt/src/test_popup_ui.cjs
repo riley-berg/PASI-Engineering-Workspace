@@ -362,7 +362,11 @@ test("popup surfaces actual background-process diagnostics per runner profile", 
 });
 
 test("popup renders terminal diagnostics from the matching profile state", () => {
-  assert.match(popupJs, /root\.append\(createRunnerCard\(\s*profileId,\s*profileState/);
+  assert.match(
+    popupJs,
+    /const card = createRunnerCard\(\s*profileId,\s*profileState,/
+  );
+  assert.match(popupJs, /root\.append\(card\)/);
   assert.match(popupJs, /String\(state\?\.error \|\| "none"\)/);
 });
 

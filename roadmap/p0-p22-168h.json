@@ -1,32 +1,170 @@
 {
   "schema_version": 1,
-  "name": "PASI Engineering Workspace 168-hour acceptance schedule",
-  "source_repository": "th3-st0v3/PASI-Engineering-Workspace",
+  "name": "PASI Unified Agent Kernel 168-hour acceptance schedule",
+  "source_repository": "riley-berg/PASI-Engineering-Workspace",
   "source_of_truth": "canonical backend phase issues",
   "duration_hours": 168,
   "phases": [
-    {"id":"P0","issue":108,"quarter":"Q3-2026","start":"2026-09-22","end":"2026-10-04"},
-    {"id":"P1","issue":109,"quarter":"Q4-2026","start":"2026-10-04","end":"2026-10-12"},
-    {"id":"P2","issue":111,"quarter":"Q4-2026","start":"2026-10-13","end":"2026-10-24"},
-    {"id":"P3","issue":112,"quarter":"Q4-2026","start":"2026-10-25","end":"2026-11-07"},
-    {"id":"P4","issue":113,"quarter":"Q4-2026","start":"2026-11-08","end":"2026-11-21"},
-    {"id":"P5","issue":54,"quarter":"Q4-2026","start":"2026-11-22","end":"2026-12-05"},
-    {"id":"P6","issue":53,"quarter":"Q4-2026","start":"2026-12-06","end":"2026-12-19"},
-    {"id":"P7","issue":52,"quarter":"Q4-2026","start":"2026-12-20","end":"2027-01-09"},
-    {"id":"P8","issue":51,"quarter":"Q1-2027","start":"2027-01-10","end":"2027-01-30"},
-    {"id":"P9","issue":50,"quarter":"Q1-2027","start":"2027-01-31","end":"2027-02-20"},
-    {"id":"P10","issue":49,"quarter":"Q1-2027","start":"2027-02-21","end":"2027-03-20"},
-    {"id":"P11","issue":48,"quarter":"Q1-2027","start":"2027-03-21","end":"2027-04-10"},
-    {"id":"P12","issue":47,"quarter":"Q2-2027","start":"2027-04-11","end":"2027-05-08"},
-    {"id":"P13","issue":46,"quarter":"Q2-2027","start":"2027-05-09","end":"2027-05-29"},
-    {"id":"P14","issue":42,"quarter":"Q2-2027","start":"2027-05-30","end":"2027-06-19"},
-    {"id":"P15","issue":41,"quarter":"Q2-2027","start":"2027-06-20","end":"2027-07-10"},
-    {"id":"P16","issue":40,"quarter":"Q3-2027","start":"2027-07-11","end":"2027-08-07"},
-    {"id":"P17","issue":39,"quarter":"Q3-2027","start":"2027-08-08","end":"2027-08-28"},
-    {"id":"P18","issue":38,"quarter":"Q3-2027","start":"2027-08-29","end":"2027-09-25"},
-    {"id":"P19","issue":37,"quarter":"Q3-2027","start":"2027-09-26","end":"2027-10-16"},
-    {"id":"P20","issue":36,"quarter":"Q4-2027","start":"2027-10-17","end":"2027-11-13"},
-    {"id":"P21","issue":33,"quarter":"Q4-2027","start":"2027-11-14","end":"2027-12-11"},
-    {"id":"P22","issue":32,"quarter":"Q4-2027","start":"2027-12-12","end":"2028-01-15"}
+    {
+      "id": "P0",
+      "issue": 108,
+      "quarter": "Q3-2026",
+      "start": "2026-09-22",
+      "end": "2026-10-04"
+    },
+    {
+      "id": "P1",
+      "issue": 109,
+      "quarter": "Q4-2026",
+      "start": "2026-10-04",
+      "end": "2026-10-12"
+    },
+    {
+      "id": "P2",
+      "issue": 111,
+      "quarter": "Q4-2026",
+      "start": "2026-10-13",
+      "end": "2026-10-24"
+    },
+    {
+      "id": "P3",
+      "issue": 112,
+      "quarter": "Q4-2026",
+      "start": "2026-10-25",
+      "end": "2026-11-07"
+    },
+    {
+      "id": "P4",
+      "issue": 113,
+      "quarter": "Q4-2026",
+      "start": "2026-11-08",
+      "end": "2026-11-21"
+    },
+    {
+      "id": "P5",
+      "issue": 54,
+      "quarter": "Q4-2026",
+      "start": "2026-11-22",
+      "end": "2026-12-05"
+    },
+    {
+      "id": "P6",
+      "issue": 53,
+      "quarter": "Q4-2026",
+      "start": "2026-12-06",
+      "end": "2026-12-19"
+    },
+    {
+      "id": "P7",
+      "issue": 52,
+      "quarter": "Q4-2026",
+      "start": "2026-12-20",
+      "end": "2027-01-09"
+    },
+    {
+      "id": "P8",
+      "issue": 51,
+      "quarter": "Q1-2027",
+      "start": "2027-01-10",
+      "end": "2027-01-30"
+    },
+    {
+      "id": "P9",
+      "issue": 50,
+      "quarter": "Q1-2027",
+      "start": "2027-01-31",
+      "end": "2027-02-20"
+    },
+    {
+      "id": "P10",
+      "issue": 49,
+      "quarter": "Q1-2027",
+      "start": "2027-02-21",
+      "end": "2027-03-20"
+    },
+    {
+      "id": "P11",
+      "issue": 48,
+      "quarter": "Q1-2027",
+      "start": "2027-03-21",
+      "end": "2027-04-10"
+    },
+    {
+      "id": "P12",
+      "issue": 47,
+      "quarter": "Q2-2027",
+      "start": "2027-04-11",
+      "end": "2027-05-08"
+    },
+    {
+      "id": "P13",
+      "issue": 46,
+      "quarter": "Q2-2027",
+      "start": "2027-05-09",
+      "end": "2027-05-29"
+    },
+    {
+      "id": "P14",
+      "issue": 42,
+      "quarter": "Q2-2027",
+      "start": "2027-05-30",
+      "end": "2027-06-19"
+    },
+    {
+      "id": "P15",
+      "issue": 41,
+      "quarter": "Q2-2027",
+      "start": "2027-06-20",
+      "end": "2027-07-10"
+    },
+    {
+      "id": "P16",
+      "issue": 40,
+      "quarter": "Q3-2027",
+      "start": "2027-07-11",
+      "end": "2027-08-07"
+    },
+    {
+      "id": "P17",
+      "issue": 39,
+      "quarter": "Q3-2027",
+      "start": "2027-08-08",
+      "end": "2027-08-28"
+    },
+    {
+      "id": "P18",
+      "issue": 38,
+      "quarter": "Q3-2027",
+      "start": "2027-08-29",
+      "end": "2027-09-25"
+    },
+    {
+      "id": "P19",
+      "issue": 37,
+      "quarter": "Q3-2027",
+      "start": "2027-09-26",
+      "end": "2027-10-16"
+    },
+    {
+      "id": "P20",
+      "issue": 36,
+      "quarter": "Q4-2027",
+      "start": "2027-10-17",
+      "end": "2027-11-13"
+    },
+    {
+      "id": "P21",
+      "issue": 33,
+      "quarter": "Q4-2027",
+      "start": "2027-11-14",
+      "end": "2027-12-11"
+    },
+    {
+      "id": "P22",
+      "issue": 32,
+      "quarter": "Q4-2027",
+      "start": "2027-12-12",
+      "end": "2028-01-15"
+    }
   ]
 }

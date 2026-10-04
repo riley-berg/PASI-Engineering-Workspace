@@ -1,67 +1,111 @@
 {
-  "name": "PASI Engineering Workspace roadmap",
+  "name": "PASI Unified Agent Kernel roadmap",
+  "version": 5,
   "source_of_truth": "canonical phase GitHub issues",
+  "architecture": {
+    "supervisor": "autonomous_supervisor",
+    "kernel": [
+      "virtual_scheduler",
+      "state_and_evidence_matrix",
+      "runtime_revision_engine",
+      "routing_core",
+      "stateless_agent_worker_contract"
+    ],
+    "capabilities": [
+      "workspace_os",
+      "browser_engine",
+      "integration_platform"
+    ]
+  },
   "phases": [
     {
       "id": "P0",
-      "title": "Runtime proof and delivery infrastructure",
+      "title": "Runtime proof and kernel readiness",
       "depends_on": [],
       "status": "in_progress",
-      "promotion_gate": "Current-CDP M0/M1/M2 browser/restart recovery plus just-in-time supervised runner validation required before P0.4; M1 is capped at 20 operations and P0.4 removes the operation-count cap.",
-      "execution_model": {
-        "orchestration": "just_in_time_supervised_runner",
-        "queue_role": "transport_handoff_only",
-        "operation_generation": "one_at_a_time_after_terminal_response_and_processing_ack",
-        "m1": {
-          "max_operations": 20,
-          "uses_common_runner": true
-        },
-        "p0_4": {
-          "max_operations": null,
-          "duration_hours": 168,
-          "stops": [
-            "deadline",
-            "explicit_pause_or_stop",
-            "terminal_condition"
-          ]
-        },
-        "control_surface": "single_runner_start_resume_pause_stop_control"
-      }
+      "promotion_gate": "Current-CDP M0/M1/M2 and 168-hour evidence plus kernel migration audit."
     },
     {
       "id": "P1",
-      "title": "Control-plane consolidation",
+      "title": "Unified Agent Kernel and State Matrix",
       "depends_on": [
-        "P0.3",
-        "P0.4"
+        "P0"
       ],
       "status": "planned",
-      "promotion_gate": "Current-CDP P0 recovery gates accepted."
+      "promotion_gate": "Kernel state is authoritative for live operations and worker restart/resume."
     },
     {
       "id": "P2",
-      "title": "Planner, scheduler, and engineering memory",
+      "title": "Capability System and Integration Platform",
       "depends_on": [
         "P1"
       ],
-      "status": "planned"
+      "status": "planned",
+      "promotion_gate": "Real agent actions execute only through typed Kernel-granted capabilities."
     },
     {
       "id": "P3",
-      "title": "Provider-neutral model infrastructure",
+      "title": "Autonomous Supervisor and Evidence-Driven Recovery",
       "depends_on": [
+        "P1",
         "P2"
+      ],
+      "status": "planned",
+      "promotion_gate": "Supervisor can classify, recover, stop loops, quarantine candidates, and rollback runtime."
+    },
+    {
+      "id": "P4",
+      "title": "Agent Workers, Model Routing and Engineering Memory",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3"
+      ],
+      "status": "planned",
+      "promotion_gate": "Workers are replaceable and model routing preserves operation identity and evidence."
+    },
+    {
+      "id": "P5",
+      "title": "Trust, Security and Autonomous-Action Policy",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "status": "planned",
+      "promotion_gate": "Privileged actions are explicitly authorized, bounded, audited, and reversible."
+    },
+    {
+      "id": "P6",
+      "title": "Engineering data plane",
+      "depends_on": [
+        "P5"
       ],
       "status": "planned"
     },
     {
-      "id": "P4",
-      "title": "Typed computer integration",
+      "id": "P7",
+      "title": "Engineering runtime and workload scheduler",
       "depends_on": [
-        "P1",
-        "P3"
+        "P6"
       ],
       "status": "planned"
     }
+  ],
+  "acceptance_workloads": {
+    "m1": "kernel_browser_acceptance_workload",
+    "long_run_168h": "kernel_endurance_acceptance_workload"
+  },
+  "rules": [
+    "one_control_plane",
+    "one_capability_boundary",
+    "evidence_over_assertion",
+    "source_separate_from_runtime",
+    "transactional_candidate_promotion",
+    "replaceable_stateless_workers",
+    "deterministic_self_healing_first",
+    "remove_obsolete_architecture",
+    "acceptance_workloads_are_not_control_planes"
   ]
 }

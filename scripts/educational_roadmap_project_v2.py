@@ -202,9 +202,27 @@ mutation CreateField(
     dataType: $dataType
   }) {
     projectV2Field {
-      id
-      name
-      dataType
+      __typename
+      ... on ProjectV2Field {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2IterationField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2SingleSelectField {
+        id
+        name
+        dataType
+      }
+      ... on ProjectV2MultiSelectField {
+        id
+        name
+        dataType
+      }
     }
   }
 }

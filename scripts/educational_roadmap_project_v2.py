@@ -76,6 +76,10 @@ GROUP_OPTIONS = (
     "All Paths — PASI Interdisciplinary Engineering Portfolio",
 )
 
+CHILD_LABEL_KEYS = {
+    "PASI Interdisciplinary Engineering Portfolio": "pasi-portfolio",
+}
+
 GROUP_LABEL_KEYS = {
     "All Paths — Common Foundation": "all-paths-common-foundation",
     "All Paths — Credit-Elimination Strategy": "all-paths-credit-strategy",
@@ -603,7 +607,7 @@ def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
             f"Educational Roadmap parent group: {parent}",
         ),
         (
-            f"roadmap-child:{label_slug(child)}",
+            f"roadmap-child:{CHILD_LABEL_KEYS.get(child, label_slug(child))}",
             LABEL_COLORS["child"],
             f"Educational Roadmap child group: {child}",
         ),

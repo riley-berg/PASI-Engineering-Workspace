@@ -129,12 +129,20 @@ class SQLiteWorkspacePreferenceStore:
                 "SELECT key, value_json, revision FROM workspace_preference WHERE scope = ? ORDER BY key",
                 (scope,),
             ).fetchall()
-        return tuple(
-            WorkspacePreference(
+
+        stored = {
+            key: WorkspacePreference(
                 scope,
                 key,
                 json.loads(value_json),
                 int(revision),
             )
             for key, value_json, revision in rows
+        }
+        return tuple(
+            stored.get(
+                key,
+                WorkspacePreference(scope, key, default_value, 0),
+            )
+            for key, default_value in sorted(ALLOWED_PREFERENCES.items())
         )

@@ -486,7 +486,7 @@
       type: "basic",
       title: message.title || "PASI",
       message: message.message || "",
-      iconUrl: message.iconUrl || "icons/icon128.png",
+      iconUrl: message.iconUrl || PASI_NOTIFICATION_ICON,
     });
     return {ok: true, notification_id: id};
   }

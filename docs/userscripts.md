@@ -1,37 +1,85 @@
-# PASI userscript product surface
+# PASI userscript platform
 
-PASI uses Chrome's native MV3 User Scripts API. The default execution world is `USER_SCRIPT`; requesting `@grant unsafeWindow` also requires `@grant mainWorld` and moves the script to Chrome's `MAIN` world.
+PASI provides a native Chromium MV3 userscript platform built around the browser's User Scripts API. Chrome 120+ provides the USER_SCRIPT execution world, dedicated user-script messaging handlers, and durable registration support through the extension install/update lifecycle. Chrome 135+ additionally exposes userScripts.execute(), which PASI uses opportunistically for live-tab recovery after an extension context refresh. See the Chrome User Scripts API documentation.
 
-## Developer experience
+## Runtime architecture
 
-The extension ships `pasi-userscript.d.ts` with declarations for the PASI and GM-compatible APIs, plus `.eslintrc.userscript.json` for modern ECMAScript linting without a custom global list.
+1. A privileged service worker owns registration, grants, storage, network requests, DNR rules, backups, VCS access, sync, and recovery.
+2. A generated bootstrap wrapper exposes only the declared PASI/GM APIs and keeps the private broker authorization token inside its closure.
+3. User code is injected as a separate code unit into Chrome's USER_SCRIPT world by default. MAIN is opt-in through the unsafeWindow/mainWorld grants.
 
-External `@require` and `@resource` dependencies remain intentionally unsupported. Bundle dependencies before registration so runtime code is deterministic and does not depend on remote JavaScript.
+The wrapper watches runtime.onDisconnect, catches runtime.lastError/context failures, rejects pending calls, and runs bounded lifecycle cleanup. pagehide/beforeunload cleanup removes value watchers and menu registrations on the service-worker side.
 
-A full TypeScript compiler is not embedded in the runtime. The declarations provide editor completion and type checking; compilation is a build-time concern rather than executable extension payload.
+Chrome can invalidate an extension context during extension updates; PASI cannot prevent that browser event, so recovery is explicit. After reinstall/upgrade the service worker restores registered scripts, and on browsers with userScripts.execute() it also attempts a live-tab recovery injection.
 
-## Performance
+## APIs
 
-PASI registers enabled scripts in batches during restore instead of performing one registration call per script. It also avoids the repeated external-`@require` source scanning that can make multi-frame user-script injection expensive.
+Supported metadata: @match, @exclude, @run-at, @grant, @connect, @noframes.
 
-## State, backup, and sync
+External @require and @resource are intentionally rejected so the runtime does not fetch arbitrary remote JavaScript.
 
-PASI stores script definitions in `chrome.storage.local` and user values under an isolated per-script namespace. The dashboard can export a versioned JSON backup containing script source, metadata, tags, groups, and stored values.
+Supported grants include storage, HTTP, tabs, menus, clipboard, notifications, downloads, unsafeWindow, mainWorld, and webRequest.
 
-Chrome Sync is optional and intentionally bounded. PASI chunks sync snapshots below Chrome Sync's per-item quota and caps the aggregate snapshot at 90 KB. When local and synced definitions differ, the dashboard shows a conflict state and lets the user choose `replace` or `keep-local`.
+The runtime exposes GM_getValue / GM_setValue and related value APIs, GM_xmlhttpRequest, GM_fetch, GM_webRequest, GM_openInTab, GM_notification, GM_setClipboard, GM_download, GM_registerMenuCommand, PASIUserScript.network.*, and PASIUserScript.trackCleanup().
 
-## Management UI
+GM_fetch and HTTP APIs run through the service worker and enforce @connect. User-script request headers are normalized against the PASI HTTP contract before the privileged fetch.
 
-Open the extension options page to search, filter by group, enable/disable, remove, tag, and group scripts. The host-access action requests only the origins derived from the script's match/connect declarations.
+## MV3 network rules
 
-Host permissions are separate from the userscript registry. A registered script can remain disabled until the required host access is granted.
+@grant webRequest can register declarative network rules. PASI translates user-script rule definitions into Chrome declarativeNetRequest dynamic rules and removes those rules when scripts are disabled, deleted, or replaced.
 
-## Safety boundaries
+MV3 does not expose the old blocking webRequestBlocking model to ordinary extensions; declarativeNetRequest is the native mechanism for browser-side request blocking/modification.
 
-The privileged bootstrap and the userscript source are injected as separate JavaScript units. The private RPC authorization token stays inside the bootstrap closure and is never part of the userscript's lexical environment.
+PASI intentionally supports a bounded subset of DNR actions rather than exposing arbitrary interception logic.
 
-- Privileged APIs are mediated by the service worker.
-- Each script gets a private authorization token that is not exposed in the management UI or backup.
-- `@connect` is enforced before cross-origin HTTP.
-- `unsafeWindow` is an explicit opt-in to the host page world.
-- Sync and backup omit the private authorization token.
+## Storage, sync, and backups
+
+Every userscript gets a private storage namespace. Chrome Sync is bounded to a safe subset of its approximately 100 KB total / 8 KB per-item limits. PASI stores the snapshot as several sub-8 KB chunks and now avoids rewriting unchanged chunks.
+
+The backup format contains script source, authoring source when TypeScript is used, metadata, tags/groups, host scope, network rules, and script values.
+
+Private broker authorization tokens are never included.
+
+Sync conflicts return the local and cloud snapshots. The dashboard renders a per-script diff and lets the user select local or cloud before resolving. For source-level manual merging, the editor provides a side-by-side diff workflow.
+
+## Remote backup
+
+A provider abstraction currently ships with WebDAV support. Credentials are held in chrome.storage.session and are not included in backups.
+
+The dashboard exposes endpoint and filename configuration, connection/auth status, push, pull, and automatic retry for transient connection failures.
+
+Google Drive and Dropbox are intentionally provider slots rather than partial OAuth implementations; adding those providers should reuse the same snapshot contract.
+
+## Developer tooling
+
+The dashboard has a source editor with TypeScript mode, PASI/GM declarations in pasi-userscript.d.ts, and a modern ECMAScript ESLint environment.
+
+The editor uses the full TypeScript compiler API when src/vendor/typescript.js has been produced by the build tool. The repository pins the current TypeScript 7.0.2 package and builds its browser compiler artifact during CI.
+
+When that artifact is absent, PASI falls back to a small built-in TypeScript syntax lowering path so source-only development remains usable. The full compiler artifact is the intended distribution path.
+
+## Repository integration
+
+The editor supports GitHub and GitLab-compatible repositories: pull a script file, preview remote changes, apply remote changes, and push authored source as a repository commit.
+
+Repository tokens are kept in extension session storage and are never exported with backups.
+
+## Permissions
+
+Host access is deliberately user-controlled. The extension keeps broad host patterns optional and requests them at runtime from the management UI. Chrome's Permissions API supports optional host permissions and runtime requests from user gestures.
+
+The active-site popup shows which PASI scripts match the current tab, whether host access is granted, and which match patterns are currently allowed by that script's own host scope.
+
+## Installation and performance
+
+Remote script installation is serialized through an install queue. Downloads are capped at the PASI userscript source limit and pass through the same metadata validation/compiler/registration path as local installs.
+
+Restore registers enabled scripts in batches. The service worker does not maintain a permanent page context, and user-script IPC only keeps bounded per-tab watcher/menu state while a script is connected.
+
+## Limits and non-goals
+
+PASI does not attempt to force JavaScript garbage collection because extension APIs do not provide a supported portable GC control. Memory reduction is therefore handled through smaller runtime state, teardown of broker registrations, bounded queues, and prompt cleanup of disconnected contexts.
+
+The platform is intentionally native-Chromium first. Firefox/Safari portability is a separate transport/execution-world project.
+
+Validation includes authoritative Python/JS parsing, Pyright, Markdown lint, userscript ESLint, and the generated TypeScript compiler bundle.

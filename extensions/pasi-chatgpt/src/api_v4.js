@@ -23,6 +23,15 @@
   }
 
   const userScripts = Object.freeze({
+    install(url, options = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_INSTALL, {
+        url: String(url),
+        enabled: options.enabled !== false,
+        typeScript: options.typeScript === true,
+        replace: options.replace === true,
+        confirmUnsafeMainWorld: options.confirmUnsafeMainWorld === true,
+      }).then((result) => result.script);
+    },
     register(source, options = {}) {
       return send(c.MESSAGE_TYPES.USERSCRIPT_REGISTER, {
         source: String(source || ""),
@@ -32,6 +41,10 @@
         replace: options.replace === true,
         tags: options.tags,
         group: options.group,
+        typeScript: options.typeScript === true,
+        host_allowlist: options.hostAllowlist,
+        network_rules: options.networkRules,
+        confirmUnsafeMainWorld: options.confirmUnsafeMainWorld === true,
       }).then((result) => result.script);
     },
     unregister(id) {
@@ -57,6 +70,7 @@
         tags: changes.tags,
         group: changes.group,
         enabled: changes.enabled,
+        confirmUnsafeMainWorld: changes.confirmUnsafeMainWorld === true,
       }).then((result) => result.script);
     },
     backup() {
@@ -67,6 +81,71 @@
     },
     sync(mode = "preview") {
       return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC, {mode}).then((result) => result);
+    },
+    networkAdd(id, rule) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_ADD, {id: String(id), rule}).then((result) => result.rules);
+    },
+    networkRemove(id, ruleId) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_REMOVE, {id: String(id), rule_id: String(ruleId)}).then((result) => result.rules);
+    },
+    networkList(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_NETWORK_LIST, {id: String(id)}).then((result) => result.rules);
+    },
+    setHostAllowlist(id, hostAllowlist) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_HOSTS, {
+        id: String(id),
+        host_allowlist: Array.isArray(hostAllowlist) ? hostAllowlist.map(String) : [],
+      }).then((result) => result.script);
+    },
+    activeTab() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_ACTIVE_TAB).then((result) => result);
+    },
+    activeMenu() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_MENU_LIST).then((result) => result.commands);
+    },
+    invokeMenu(commandId) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_MENU_INVOKE, {command_id: String(commandId)}).then((result) => result);
+    },
+    source(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SOURCE_GET, {id: String(id)}).then((result) => result);
+    },
+    saveSource(id, source, options = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SOURCE_SAVE, {
+        id: String(id),
+        source: String(source || ""),
+        compile: options.compile !== false,
+        typeScript: options.typeScript === true,
+      }).then((result) => result.script);
+    },
+    vcsConfig(config = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_CONFIG, {config}).then((result) => result.config);
+    },
+    vcsFetch(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_FETCH, {id: String(id)}).then((result) => result);
+    },
+    vcsPull(id) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_PULL, {id: String(id)}).then((result) => result);
+    },
+    vcsPush(id, message) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_VCS_PUSH, {id: String(id), message: String(message || "")}).then((result) => result);
+    },
+    syncStatus() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_STATUS).then((result) => result.status);
+    },
+    syncResolve(decisions) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_SYNC_RESOLVE, {decisions}).then((result) => result);
+    },
+    cloudConfig(config = {}) {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_CONFIG, {config}).then((result) => result);
+    },
+    cloudStatus() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_STATUS).then((result) => result.status);
+    },
+    cloudPush() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PUSH).then((result) => result);
+    },
+    cloudPull() {
+      return send(c.MESSAGE_TYPES.USERSCRIPT_CLOUD_PULL).then((result) => result);
     },
   });
 
@@ -84,6 +163,13 @@
       userscript_backup_restore: true,
       userscript_sync: true,
       userscript_tags_groups: true,
+      userscript_network_rules: true,
+      userscript_context_recovery: true,
+      userscript_host_scoping: true,
+      userscript_editor: true,
+      userscript_vcs: true,
+      userscript_sync_status: true,
+      userscript_remote_backup: true,
     }),
   });
 })();

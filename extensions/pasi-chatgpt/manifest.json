@@ -12,7 +12,8 @@
     "scripting",
     "webRequest",
     "declarativeNetRequest",
-    "userScripts"
+    "userScripts",
+    "alarms"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -48,7 +49,8 @@
     }
   ],
   "action": {
-    "default_title": "PASI ChatGPT Handoff"
+    "default_title": "PASI ChatGPT Handoff",
+    "default_popup": "popup.html"
   },
   "minimum_chrome_version": "120"
 }

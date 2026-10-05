@@ -56,6 +56,13 @@ declare namespace PASIUserScript {
     onload?: (response: HttpResponse) => void;
     onerror?: (error: unknown) => void;
   }): Promise<HttpResponse>;
+  function fetch(input: string | {url: string; method?: string; headers?: Record<string, string>; body?: string}, init?: {method?: string; headers?: Record<string, string>; body?: string; timeout?: number}): Promise<HttpResponse & {text(): Promise<string>; json<T = unknown>(): Promise<T>}>;
+  const network: {
+    addRule(rule: unknown): Promise<unknown>;
+    removeRule(ruleId: string): Promise<unknown>;
+    listRules(): Promise<unknown>;
+  };
+  function trackCleanup(callback: () => void): () => boolean;
   const unsafeWindow: Window & typeof globalThis;
 }
 
@@ -72,3 +79,7 @@ declare const GM_setClipboard: typeof PASIUserScript.setClipboard;
 declare const GM_download: typeof PASIUserScript.download;
 declare const GM_registerMenuCommand: typeof PASIUserScript.registerMenuCommand;
 declare const GM_xmlhttpRequest: typeof PASIUserScript.xmlhttpRequest;
+
+
+declare const GM_fetch: typeof PASIUserScript.fetch;
+declare const GM_webRequest: typeof PASIUserScript.network;

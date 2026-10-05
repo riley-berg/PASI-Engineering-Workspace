@@ -7,6 +7,7 @@
   const GRANTS = Object.freeze([
     "storage",
     "http",
+    "webRequest",
     "tabs",
     "menu",
     "clipboard",

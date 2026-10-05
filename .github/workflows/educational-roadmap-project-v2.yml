@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/educational-roadmap-project-v2.yml"
       - "scripts/educational_roadmap_project_v2.py"
+      - "scripts/test_educational_roadmap_project_v2.py"
   workflow_dispatch:
     inputs:
       dry_run:

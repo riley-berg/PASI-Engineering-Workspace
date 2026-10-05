@@ -43,40 +43,51 @@ FIELD_SPECS = {
 }
 
 PARENT_GROUPS = (
-    "Foundation",
-    "Credit Optimization",
-    "Major Branches",
-    "Cross-Disciplinary",
-    "Decision",
-    "PASI Portfolio",
-)
-
-CHILD_GROUPS = (
-    "Control Framework & Common Foundation",
-    "CLEP & Credit-Elimination Strategy",
-    "Blinn Engineering Academy Common Path",
+    "All Paths",
     "Computer Science",
     "Computer Engineering",
     "Electrical Engineering",
     "Mechanical Engineering / Robotics",
     "Mechatronics / Automation",
+    "Decision Gate",
+)
+
+CHILD_GROUPS = (
+    "Common Foundation",
+    "Credit-Elimination Strategy",
+    "Engineering Academy Common Path",
+    "Optimized Major Strategy",
     "AI / ML / Automation Layer",
     "Major Decision / ETAM Selection",
     "PASI Interdisciplinary Engineering Portfolio",
 )
 
+GROUP_OPTIONS = (
+    "All Paths — Common Foundation",
+    "All Paths — Credit-Elimination Strategy",
+    "All Paths — Engineering Academy Common Path",
+    "Computer Science — Optimized Strategy",
+    "Computer Engineering — Optimized Strategy",
+    "Electrical Engineering — Optimized Strategy",
+    "Mechanical Engineering / Robotics — Optimized Strategy",
+    "Mechatronics / Automation — Optimized Strategy",
+    "All Paths — AI / ML / Automation Layer",
+    "Decision Gate — Major Decision / ETAM Selection",
+    "All Paths — PASI Interdisciplinary Engineering Portfolio",
+)
+
 GROUP_BY_ISSUE: dict[int, tuple[str, str, str]] = {
-    37: ("Foundation", "Control Framework & Common Foundation", "common-foundation"),
-    38: ("Credit Optimization", "CLEP & Credit-Elimination Strategy", "credit-strategy"),
-    39: ("Foundation", "Blinn Engineering Academy Common Path", "academy-common"),
-    40: ("Major Branches", "Computer Science", "computer-science"),
-    41: ("Major Branches", "Computer Engineering", "computer-engineering"),
-    42: ("Major Branches", "Electrical Engineering", "electrical-engineering"),
-    43: ("Major Branches", "Mechanical Engineering / Robotics", "mechanical-robotics"),
-    44: ("Major Branches", "Mechatronics / Automation", "mechatronics-automation"),
-    45: ("Cross-Disciplinary", "AI / ML / Automation Layer", "cross-disciplinary"),
-    46: ("Decision", "Major Decision / ETAM Selection", "major-decision"),
-    47: ("PASI Portfolio", "PASI Interdisciplinary Engineering Portfolio", "pasi-portfolio"),
+    37: ("All Paths", "Common Foundation", "All Paths — Common Foundation"),
+    38: ("All Paths", "Credit-Elimination Strategy", "All Paths — Credit-Elimination Strategy"),
+    39: ("All Paths", "Engineering Academy Common Path", "All Paths — Engineering Academy Common Path"),
+    40: ("Computer Science", "Optimized Major Strategy", "Computer Science — Optimized Strategy"),
+    41: ("Computer Engineering", "Optimized Major Strategy", "Computer Engineering — Optimized Strategy"),
+    42: ("Electrical Engineering", "Optimized Major Strategy", "Electrical Engineering — Optimized Strategy"),
+    43: ("Mechanical Engineering / Robotics", "Optimized Major Strategy", "Mechanical Engineering / Robotics — Optimized Strategy"),
+    44: ("Mechatronics / Automation", "Optimized Major Strategy", "Mechatronics / Automation — Optimized Strategy"),
+    45: ("All Paths", "AI / ML / Automation Layer", "All Paths — AI / ML / Automation Layer"),
+    46: ("Decision Gate", "Major Decision / ETAM Selection", "Decision Gate — Major Decision / ETAM Selection"),
+    47: ("All Paths", "PASI Interdisciplinary Engineering Portfolio", "All Paths — PASI Interdisciplinary Engineering Portfolio"),
 }
 
 DEPENDENCIES: dict[int, tuple[int, ...]] = {
@@ -468,7 +479,7 @@ def ensure_fields(project_id: str, fields: list[dict[str, Any]]) -> dict[str, di
     select_specs = {
         "Parent Group": (PARENT_GROUPS, "parent group"),
         "Child Group": (CHILD_GROUPS, "child group"),
-        "Group": (CHILD_GROUPS, "group"),
+        "Group": (GROUP_OPTIONS, "group"),
     }
     ensured: dict[str, dict[str, Any]] = {}
     for name, data_type in FIELD_SPECS.items():
@@ -735,7 +746,7 @@ def reconcile(dry_run: bool) -> None:
             project_id,
             str(item["id"]),
             fields_by_name["Group"],
-            {"singleSelectOptionId": option_id(fields_by_name["Group"], child)},
+            {"singleSelectOptionId": option_id(fields_by_name["Group"], group)},
         )
         sync_issue_labels(n)
 
@@ -750,7 +761,12 @@ def reconcile(dry_run: bool) -> None:
             raise RoadmapError(f"final verification failed for field {field_name!r}")
 
         if expected_type == "SINGLE_SELECT":
-            expected_options = PARENT_GROUPS if field_name == "Parent Group" else CHILD_GROUPS
+            if field_name == "Parent Group":
+                expected_options = PARENT_GROUPS
+            elif field_name == "Child Group":
+                expected_options = CHILD_GROUPS
+            else:
+                expected_options = GROUP_OPTIONS
             actual_options = {
                 str(option.get("name", "")).casefold()
                 for option in (field.get("options") or [])

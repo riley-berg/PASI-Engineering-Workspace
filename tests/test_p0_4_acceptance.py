@@ -96,3 +96,55 @@ def test_chat_session_identity_is_persisted_for_idempotent_restart():
     assert 'STATE_PATH=RUNTIME_DIR/"chat-session.json"' in source
     assert 'session_id=state.get("session_id")' in source
     assert 'session_id=session_id' in source
+
+
+def test_p0_4_acceptance_is_run_level_gate_not_model_task():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'task.task_id != "P0.4"' in runner
+    assert 'p0_4_status' in runner
+    assert 'mark_checked(p0_4)' in runner
+    assert 'def ensure_evidence_pr' in runner
+
+
+def test_p0_4_runner_recovers_branch_and_worktree_from_durable_state():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'existing.get("branch")' in runner
+    assert 'existing.get("worktree")' in runner
+    assert 'existing.get("run_id")' in runner
+
+
+def test_chat_recovers_terminal_empty_context_exhaustion():
+    from scripts import pasi_chat as chat
+
+    source = Path(chat.__file__).read_text(encoding="utf-8")
+    assert 'exhausted_without_contract=response.chat_exhausted' in source
+    assert 'response.completion!="complete" or not bool(response.text.strip())' in source
+
+
+def test_p0_4_branch_selection_uses_cli_branch_on_new_run():
+    runner = Path(acceptance.__file__).read_text(encoding="utf-8")
+    assert 'branch = str(args.branch or existing.get("branch")' in runner
+
+
+def test_executor_feeds_failures_back_into_bounded_repair_prompt():
+    runner = Path(acceptance.__file__).with_name("pasi_engineering_executor.py").read_text(encoding="utf-8")
+    assert 'MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))' in runner
+    assert 'PREVIOUS EXECUTION FEEDBACK:' in runner
+    assert 'cleanup_failed_attempt(root)' in runner
+    assert 'Completion-contract or patch validation failed:' in runner
+    assert 'Patch application failed.' in runner
+    assert 'Python verification failed after applying the patch.' in runner
+    assert 'Frontend verification failed after applying the patch.' in runner
+
+
+def test_executor_repair_prompt_requires_resolution_not_explanation():
+    from scripts import pasi_engineering_executor as executor
+
+    task = "Acceptance evidence registry"
+    feedback = "missing/duplicate markers: summary, evidence"
+    rendered = executor.repair_feedback(task, feedback, 2)
+    assert "CURRENT" not in rendered
+    assert "PREVIOUS EXECUTION FEEDBACK:" in rendered
+    assert feedback in rendered
+    assert "Resolve the reported failure in the next attempt" in rendered
+    assert "do not merely explain it" in rendered

@@ -37,10 +37,13 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
             self.assertIn(child, CHILD_GROUPS)
             self.assertIn(group, GROUP_OPTIONS)
 
-    def test_common_work_is_independent_and_major_strategies_are_separate(self) -> None:
+    def test_common_work_shares_one_all_paths_group_and_major_strategies_are_separate(self) -> None:
         common = [37, 38, 39, 45, 47]
         branches = [40, 41, 42, 43, 44]
         self.assertTrue(all(GROUP_BY_ISSUE[n][0] == "All Paths" for n in common))
+        self.assertTrue(
+            all(GROUP_BY_ISSUE[n][2] == "All Paths — Shared Strategy" for n in common)
+        )
         self.assertEqual(
             [GROUP_BY_ISSUE[n][0] for n in branches],
             [
@@ -54,6 +57,7 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         self.assertTrue(
             all(GROUP_BY_ISSUE[n][1] == "Optimized Major Strategy" for n in branches)
         )
+        self.assertEqual(len({GROUP_BY_ISSUE[n][2] for n in branches}), 5)
 
     def test_dates_and_quarter_are_deterministic(self) -> None:
         start, end, duration, quarter = roadmap_values(37)
@@ -69,6 +73,9 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
             self.assertEqual(DEPENDENCIES[number], (39,))
         self.assertEqual(DEPENDENCIES[46], (39, 40, 41, 42, 43, 44))
         self.assertEqual(DEPENDENCIES[47], (45, 46))
+        for number in (37, 38, 39, 45, 47):
+            self.assertEqual(GROUP_BY_ISSUE[number][0], "All Paths")
+            self.assertEqual(GROUP_BY_ISSUE[number][2], "All Paths — Shared Strategy")
         for number in (40, 41, 42, 43, 44):
             self.assertEqual(GROUP_BY_ISSUE[number][1], "Optimized Major Strategy")
 
@@ -92,6 +99,8 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         self.assertIn("roadmap-parent:computer-science", labels)
         self.assertIn("roadmap-child:optimized-major-strategy", labels)
         self.assertIn("roadmap-group:computer-science-optimized", labels)
+        shared_labels = {name for name, _, _ in roadmap_labels(37)}
+        self.assertIn("roadmap-group:all-paths-shared-strategy", shared_labels)
         self.assertIn("roadmap-quarter:q3-2027-q1-2029", labels)
         self.assertIn("roadmap-start:2027-08-23", labels)
         self.assertIn("roadmap-end:2029-01-31", labels)

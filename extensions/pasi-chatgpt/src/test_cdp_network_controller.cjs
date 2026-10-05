@@ -59,7 +59,7 @@ function fakeDebugger() {
       if (method === 'Fetch.takeResponseBodyAsStream') {
         streams.set('stream-1', [
           {data: 'data: {"p":"","o":"add","v":{"message":{"id":"old","author":{"role":"assistant"},"content":{"parts":["OLD"]}}}}\n\n'},
-          {data: 'data: {"p":"","o":"add","v":{"message":{"id":"new","author":{"role":"assistant"},"content":{"parts":["NETWORK_PATCH_OK_2026"]}}}}\n\n'},
+          {data: 'data: {"p":"","o":"add","v":{"message":{"id":"new","author":{"role":"assistant"},"content":{"parts":["NETWORK_PATCH_OK_2026"]},"status":"finished_successfully"}}}\n\n'},
           {data: 'data: [DONE]\n\n', eof: true}
         ]);
         return callback({stream: 'stream-1'});

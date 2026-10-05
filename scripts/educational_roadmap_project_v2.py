@@ -589,14 +589,14 @@ def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
             f"Educational Roadmap parent group: {parent}",
         ),
         (
-            f"roadmap-child:{group}",
+            f"roadmap-child:{label_slug(child)}",
             LABEL_COLORS["child"],
             f"Educational Roadmap child group: {child}",
         ),
         (
-            f"roadmap-group:{group}",
+            f"roadmap-group:{label_slug(group)}",
             LABEL_COLORS["group"],
-            f"Educational Roadmap group: {child}",
+            f"Educational Roadmap group: {group}",
         ),
         (
             f"roadmap-quarter:{label_slug(quarter)}",

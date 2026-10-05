@@ -1,4 +1,4 @@
-importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/background-userscripts.js", "src/background-api.js");
+importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/userscript_backup.js", "src/background-userscripts.js", "src/background-api.js");
 
 (() => {
   "use strict";

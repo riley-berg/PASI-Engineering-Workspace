@@ -52,6 +52,10 @@
     USERSCRIPT_ENABLE: "pasi.userscript.enable",
     USERSCRIPT_DISABLE: "pasi.userscript.disable",
     USERSCRIPT_INFO: "pasi.userscript.info",
+    USERSCRIPT_UPDATE: "pasi.userscript.update",
+    USERSCRIPT_BACKUP: "pasi.userscript.backup",
+    USERSCRIPT_RESTORE: "pasi.userscript.restore",
+    USERSCRIPT_SYNC: "pasi.userscript.sync",
     USERSCRIPT_RPC: "pasi.userscript.rpc",
   });
 

@@ -1,4 +1,4 @@
-importScripts("src/api_contract.js", "src/background-api.js");
+importScripts("src/api_contract.js", "src/userscript_contract.js", "src/userscript_runtime.js", "src/background-userscripts.js", "src/background-api.js");
 
 (() => {
   "use strict";
@@ -64,6 +64,12 @@ importScripts("src/api_contract.js", "src/background-api.js");
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (String(message?.type || "").startsWith("pasi.userscript.") && message?.type !== "pasi.userscript.rpc") {
+      globalThis.PASIUserScriptManager.handle(message)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ok: false, error: String(error?.message || error)}));
+      return true;
+    }
     if (String(message?.type || "").startsWith("pasi.api.")) {
       globalThis.PASIBackgroundAPI.handle(message, sender)
         .then(sendResponse)
@@ -82,11 +88,13 @@ importScripts("src/api_contract.js", "src/background-api.js");
     });
   });
 
-  chrome.runtime.onInstalled.addListener(() => {
+  chrome.runtime.onInstalled.addListener((details) => {
+    if (details.reason === "update" || details.reason === "install") void globalThis.PASIUserScriptManager.restore();
     void safeStorageSet({
       installed_at: new Date().toISOString(),
       protocol_version: "m0-v2",
       pasi_api_version: globalThis.PASIExtensionAPIContract.VERSION,
+      userscript_manager: true,
     });
   });
 })();

@@ -2,8 +2,9 @@
 from __future__ import annotations
 import json,os,re,subprocess,sys
 from pathlib import Path
-import subprocess
 REPO="th3-st0v3/PASI-Engineering-Workspace";BEGIN="PASI_RESULT_PATCH_BEGIN";END="PASI_RESULT_PATCH_END"
+MAX_MODEL_REPAIR_ATTEMPTS=int(os.environ.get("PASI_MODEL_REPAIR_ATTEMPTS","4"))
+MAX_FEEDBACK_CHARS=12000
 MARKERS={k:re.compile(p,re.MULTILINE|re.IGNORECASE if k=="allow_delete" else re.MULTILINE) for k,p in {
 "status":r"^PASI_RESULT_STATUS:\s*(.+)$","summary":r"^PASI_RESULT_SUMMARY:\s*(.+)$","requirements":r"^PASI_RESULT_REQUIREMENTS:\s*(.+)$","limitations":r"^PASI_RESULT_LIMITATIONS:\s*(.+)$","research":r"^PASI_RESULT_RESEARCH:\s*(.+)$","ux":r"^PASI_RESULT_UX:\s*(.+)$","backend":r"^PASI_RESULT_BACKEND:\s*(.+)$","evidence":r"^PASI_RESULT_EVIDENCE:\s*(.+)$","repository_progress":r"^PASI_RESULT_REPOSITORY_PROGRESS:\s*(.+)$","allow_delete":r"^PASI_RESULT_ALLOW_DELETE:\s*(true|false)$"}.items()}
 def run(cmd,cwd,timeout,input_text=None,env=None):
@@ -29,6 +30,25 @@ def validate(vals):
     if vals["ux"].lower() not in {"verified","not_applicable"}:raise RuntimeError("invalid ux")
     if vals["backend"].lower() not in {"verified","not_applicable"}:raise RuntimeError("invalid backend")
     if len(vals["evidence"].strip())<48:raise RuntimeError("evidence too short")
+def repair_feedback(base_task:str,feedback:str,attempt:int)->str:
+    if not feedback.strip():
+        return base_task
+    return f"""{base_task}
+
+PREVIOUS EXECUTION FEEDBACK:
+This is verifier feedback from repair attempt {attempt - 1}. Treat it as authoritative evidence about what failed. Resolve the reported failure in the next attempt; do not merely explain it. Re-check the exact required completion contract, patch syntax, repository paths, and verification results before returning the contract.
+
+{feedback[-MAX_FEEDBACK_CHARS:]}
+
+Return the normal PASI completion contract and a corrected unified patch for the same task.
+"""
+
+
+def cleanup_failed_attempt(root:Path)->None:
+    run(["git","reset","--hard","HEAD"],root,60)
+    run(["git","clean","-fd"],root,60)
+
+
 def validate_paths(root,patch):
     paths=set()
     for l in patch.splitlines():
@@ -43,6 +63,19 @@ def validate_paths(root,patch):
         try:p.relative_to(root.resolve())
         except ValueError:raise RuntimeError("patch escapes worktree")
         if ".git" in p.parts:raise RuntimeError("patch touches git metadata")
+TASK_CHECKBOX_RE=re.compile(r"^\s*- \[([ xX])\] \*\*(P\d+\.\d+)\b.*$",re.MULTILINE)
+
+
+def unfinished_issue_context(body: str) -> str:
+    lines=[]
+    for line in str(body or "").splitlines():
+        match=TASK_CHECKBOX_RE.match(line)
+        if match and match.group(1).lower()=="x":
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def canonical_issue_context() -> str:
     import urllib.request
     token=os.environ.get("PASI_GITHUB_TOKEN","").strip() or os.environ.get("GITHUB_TOKEN","").strip()
@@ -60,7 +93,7 @@ def canonical_issue_context() -> str:
     except Exception:
         return ""
     body=payload.get("body") if isinstance(payload,dict) else ""
-    return str(body or "")[:30000]
+    return unfinished_issue_context(str(body or ""))[:30000]
 
 
 def main():
@@ -86,31 +119,102 @@ def main():
     previous = os.environ.get("PASI_TASK_PREVIOUS_CONTEXT", "").strip()
     continuity = f"\n\nRUN CONTINUITY CONTEXT:\n{previous}" if previous else ""
     task=os.environ["PASI_TASK_TITLE"]+f"\n\nCanonical task {task_id}; phase {task_phase}; source issue #{task_issue}. Work only in PASI Engineering Workspace.\n\nCANONICAL ISSUE CONTEXT:\n{canonical_issue_context()}{continuity}"
-    code,out=run([sys.executable,"-m","scripts.pasi_chat_guard",task,"--repo",str(root),"--extension-root",str(ext),"--timeout",os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")],Path(__file__).resolve().parents[1],float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800"))+60);(runtime/"last-executor-output.txt").write_text(out+"\n",encoding="utf-8")
-    if code:print(out,file=sys.stderr);return code
-    response=out.split("=== CHATGPT RESPONSE ===",1)[1] if "=== CHATGPT RESPONSE ===" in out else out
-    status,vals,patch=parse(response);vals["status"]=status;validate(vals);validate_paths(root,patch)
     before=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip()
-    for args,input_text in [(["git","apply","--check","--whitespace=nowarn","-"],patch),(["git","apply","--whitespace=nowarn","-"],patch)]:
-        code,msg=run(args,root,60,input_text); 
-        if code:print(msg,file=sys.stderr);return 1
-    code,msg=run(["git","diff","--check"],root,60)
-    if code:return 1
-    # The acceptance worktree is the task source of truth. Keep pytest from
-    # importing an editable install that points at another checkout.
-    test_env=os.environ.copy()
-    worktree_src=root/"src"
-    inherited=test_env.get("PYTHONPATH","")
-    inherited_parts=[p for p in inherited.split(os.pathsep) if p and Path(p).resolve()!=worktree_src.resolve()]
-    test_env["PYTHONPATH"]=os.pathsep.join([str(worktree_src),*inherited_parts])
-    code,msg=run([sys.executable,"-m","pytest","-q"],root,900,env=test_env)
-    if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1
-    code,msg=run(["node","--test","web/app.test.js"],root,300)
-    if code:run(["git","reset","--hard","HEAD"],root,60);run(["git","clean","-fd"],root,60);print(msg,file=sys.stderr);return 1
-    run(["git","add","--all"],root,60);msg=re.sub(r"[^A-Za-z0-9 .:_/-]+","",os.environ["PASI_TASK_ID"]+" "+os.environ["PASI_TASK_TITLE"]).strip()[:120]
-    code,out=run(["git","commit","-m",f"pasi: {msg}"],root,120)
-    if code:print(out,file=sys.stderr);return 1
-    after=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip();code,status=run(["git","status","--porcelain","--untracked-files=all"],root,30)
-    if code or status.strip() or after==before:return 1
-    print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"])},indent=2));return 0
+    feedback=""
+    vals={}
+    patch=""
+    for attempt in range(1,MAX_MODEL_REPAIR_ATTEMPTS+1):
+        task_prompt=repair_feedback(task,feedback,attempt)
+        code,out=run([sys.executable,"-m","scripts.pasi_chat_guard",task_prompt,"--repo",str(root),"--extension-root",str(ext),"--timeout",os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800")],Path(__file__).resolve().parents[1],float(os.environ.get("PASI_TASK_TIMEOUT_SECONDS","1800"))+60)
+        (runtime/"last-executor-output.txt").write_text(out+"\n",encoding="utf-8")
+        if code:
+            feedback=f"Chat guard failed with exit code {code}.\n\nVerifier/process output:\n{out[-MAX_FEEDBACK_CHARS:]}"
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: chat guard exit {code}",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(out,file=sys.stderr)
+                return code or 1
+            continue
+        response=out.split("=== CHATGPT RESPONSE ===",1)[1] if "=== CHATGPT RESPONSE ===" in out else out
+        try:
+            status,vals,patch=parse(response)
+            vals["status"]=status
+            validate(vals)
+            validate_paths(root,patch)
+        except Exception as exc:
+            feedback=f"Completion-contract or patch validation failed: {exc}\n\nPrevious model response:\n{response[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: {exc}",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(response,file=sys.stderr)
+                return 1
+            continue
+        patch_error=None
+        for args,input_text in [(["git","apply","--check","--whitespace=nowarn","-"],patch),(["git","apply","--whitespace=nowarn","-"],patch)]:
+            code,msg=run(args,root,60,input_text)
+            if code:
+                patch_error=msg
+                break
+        if patch_error is not None:
+            feedback=f"Patch application failed. Correct the unified diff and return a complete replacement patch.\n\nGit verifier output:\n{patch_error[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: patch application",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(patch_error,file=sys.stderr)
+                return 1
+            continue
+        code,msg=run(["git","diff","--check"],root,60)
+        if code:
+            feedback=f"Git diff validation failed after applying the patch. Repair the patch and return a corrected unified diff.\n\nGit verifier output:\n{msg[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: git diff --check",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(msg,file=sys.stderr)
+                return 1
+            continue
+        test_env=os.environ.copy()
+        worktree_src=root/"src"
+        inherited=test_env.get("PYTHONPATH","")
+        inherited_parts=[p for p in inherited.split(os.pathsep) if p and Path(p).resolve()!=worktree_src.resolve()]
+        test_env["PYTHONPATH"]=os.pathsep.join([str(worktree_src),*inherited_parts])
+        code,msg=run([sys.executable,"-m","pytest","-q"],root,900,env=test_env)
+        if code:
+            feedback=f"Python verification failed after applying the patch. Fix the reported tests and return a corrected unified diff.\n\nPytest output:\n{msg[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: pytest",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(msg,file=sys.stderr)
+                return 1
+            continue
+        code,msg=run(["node","--test","web/app.test.js"],root,300)
+        if code:
+            feedback=f"Frontend verification failed after applying the patch. Fix the reported tests and return a corrected unified diff.\n\nFrontend test output:\n{msg[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: frontend tests",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(msg,file=sys.stderr)
+                return 1
+            continue
+        run(["git","add","--all"],root,60)
+        msg=re.sub(r"[^A-Za-z0-9 .:_/-]+","",os.environ["PASI_TASK_ID"]+" "+os.environ["PASI_TASK_TITLE"]).strip()[:120]
+        code,out=run(["git","commit","-m",f"pasi: {msg}"],root,120)
+        if code:
+            feedback=f"Git commit failed after all verification passed. Preserve the intended patch and fix the commit-stage failure.\n\nGit output:\n{out[-MAX_FEEDBACK_CHARS:]}"
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: git commit",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                print(out,file=sys.stderr)
+                return 1
+            continue
+        after=subprocess.check_output(["git","rev-parse","HEAD"],cwd=root,text=True).strip()
+        code,status=run(["git","status","--porcelain","--untracked-files=all"],root,30)
+        if code or status.strip() or after==before:
+            feedback=f"Post-commit verification failed. Expected a new clean commit from {before}, got {after!r}; status was {status!r}. Preserve the task intent and repair the repository state."
+            cleanup_failed_attempt(root)
+            print(f"PASI model repair attempt {attempt}/{MAX_MODEL_REPAIR_ATTEMPTS} failed: post-commit verification",file=sys.stderr)
+            if attempt==MAX_MODEL_REPAIR_ATTEMPTS:
+                return 1
+            continue
+        print(json.dumps({"executor":"pasi-engineering-executor","repository":REPO,"task_id":os.environ["PASI_TASK_ID"],"commit_before":before,"commit_after":after,"pytest":"passed","frontend":"passed","evidence_chars":len(vals["evidence"]),"repair_attempt":attempt},indent=2))
+        return 0
+    return 1
 if __name__=="__main__":raise SystemExit(main())

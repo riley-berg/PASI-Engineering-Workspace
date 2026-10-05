@@ -28,6 +28,16 @@
   let progressTracker = null;
   let progressOperationId = null;
   let progressObserverHandle = null;
+  let legacyRecoveryTimerId = null;
+  let networkRecoveryTimerId = null;
+  let networkPingTimerId = null;
+  let networkRecoveryAvailable = false;
+  let networkLastReadyAtMs = 0;
+  let networkRecoveryModeStarted = false;
+  let legacyRecoveryModeStarted = false;
+  const NETWORK_READY_WAIT_MS = 2500;
+  const NETWORK_HEALTH_STALE_MS = 45000;
+  const NETWORK_PING_MS = 15000;
   const progressNodeIds = new WeakMap();
   let nextProgressNodeId = 1;
   let lastProgressPersistMs = 0;
@@ -35,6 +45,196 @@
   const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function postNetworkCommand(command, operationId = null) {
+    try {
+      window.postMessage({
+        source: 'pasi-network-controller',
+        target: 'pasi-network-interceptor',
+        command: String(command || ''),
+        operation_id: operationId == null ? null : String(operationId)
+      }, location.origin);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function stopLegacyRecoveryMode() {
+    if (legacyRecoveryTimerId !== null) {
+      clearInterval(legacyRecoveryTimerId);
+      legacyRecoveryTimerId = null;
+    }
+    if (progressObserverHandle?.disconnect) {
+      try { progressObserverHandle.disconnect(); } catch (_) {}
+    }
+    progressObserverHandle = null;
+    legacyRecoveryModeStarted = false;
+  }
+
+  function startLegacyRecoveryMode() {
+    if (legacyRecoveryModeStarted) return;
+    legacyRecoveryModeStarted = true;
+    legacyRecoveryTimerId = setInterval(() => { runInspection().catch(() => {}); }, POLL_MS);
+    if (RECOVERY_PROGRESS?.attachProgressObserver && document.documentElement) {
+      const config = recoveryProgressConfig();
+      if (config) {
+        progressObserverHandle = RECOVERY_PROGRESS.attachProgressObserver({
+          root: document.documentElement,
+          readSample: assistantProgressSample,
+          onSample: (sample, nowMs) => {
+            if (!progressOperationId || !progressTracker || !sample) return;
+            progressTracker.observe(sample, nowMs);
+            const state = readRecoveryState();
+            if (state?.operation_id === progressOperationId && state.phase === 'monitoring') {
+              persistProgressState(state);
+            }
+          },
+          config
+        });
+      }
+    }
+  }
+
+  function networkOperationId() {
+    const state = readRecoveryState();
+    if (state?.operation_id) return String(state.operation_id);
+    return activeOperationId();
+  }
+
+  function handleNetworkRecoveryMessage(event) {
+    if (event?.source !== window) return;
+    const data = event?.data;
+    if (!data || data.source !== 'pasi-network-interceptor' || data.version !== 'pasi-network-v1') return;
+
+    if (data.kind === 'ready') {
+      networkRecoveryAvailable = true;
+      networkLastReadyAtMs = Date.now();
+      networkRecoveryModeStarted = true;
+      stopLegacyRecoveryMode();
+      return;
+    }
+
+    if (data.kind !== 'event') return;
+    const operationId = typeof data.operation_id === 'string' ? data.operation_id : '';
+    if (!operationId) return;
+    networkRecoveryAvailable = true;
+    networkLastReadyAtMs = Date.now();
+
+    const state = String(data.state || '');
+    if (state === 'progress') {
+      const current = readRecoveryState();
+      if (current?.operation_id === operationId &&
+          current.verification_source === 'network_interceptor' &&
+          current.network_stalled === true) {
+        const next = { ...current };
+        delete next.network_stalled;
+        delete next.stalled_at_ms;
+        next.network_progress_at_ms = Number(data.progress_at_ms || Date.now());
+        next.recovery_reason = null;
+        writeRecoveryState(next);
+        void report('chatgpt_recovery', {
+          phase: 'network_stall_cleared',
+          operation_id: operationId,
+          recovery_action: 'resume_network_monitoring',
+          network_request_id: data.request_id || null,
+          network_progress_at_ms: next.network_progress_at_ms,
+          verification_source: 'network_interceptor'
+        });
+      }
+      return;
+    }
+
+    if (state === 'context_exhausted' || state === 'usage_limited' || state === 'auth_required' || state === 'interrupted' || state === 'provider_error' || state === 'unknown_failure') {
+      const current = readRecoveryState();
+      if (!current || current.operation_id === operationId) {
+        writeRecoveryState({
+          ...(current || {
+            operation_id: operationId,
+            operation_type: 'prompt',
+            reload_count: 0,
+            phase: 'monitoring'
+          }),
+          operation_id: operationId,
+          verification_source: 'network_interceptor',
+          network_state: state,
+          network_reason: data.reason || null,
+          ...(state === 'context_exhausted' ? { phase: 'context_exhausted' } : {}),
+          ...(state === 'interrupted' ? {
+            phase: 'monitoring',
+            network_recovery: true,
+            recovery_reason: data.reason || 'connection_error',
+            response_stopped_on_loss: true,
+            checkpoint_preserved: true
+          } : {})
+        });
+      }
+      if (state === 'context_exhausted') {
+        void report('chatgpt_recovery', {
+          phase: 'network_context_exhausted',
+          operation_id: operationId,
+          recovery_action: 'verified_context_exhaustion',
+          replacement_reason: 'context_exhausted',
+          verification_source: 'network_interceptor'
+        });
+      }
+    }
+
+    if (state === 'stalled') {
+      const current = readRecoveryState();
+      if (!current || current.operation_id === operationId) {
+        writeRecoveryState({
+          ...(current || {
+            operation_id: operationId,
+            operation_type: 'prompt',
+            reload_count: 0,
+            phase: 'monitoring'
+          }),
+          operation_id: operationId,
+          phase: 'monitoring',
+          network_stalled: true,
+          stalled_at_ms: Number(data.stalled_at_ms || Date.now()),
+          network_request_id: data.request_id || null,
+          verification_source: 'network_interceptor',
+          recovery_reason: 'network_stall'
+        });
+      }
+      void report('chatgpt_recovery', {
+        phase: 'network_stalled',
+        operation_id: operationId,
+        recovery_action: 'monitor_network_stall',
+        network_request_id: data.request_id || null,
+        stalled_at_ms: Number(data.stalled_at_ms || Date.now()),
+        recovery_stall_ms: RECOVERY_STALL_MS,
+        verification_source: 'network_interceptor'
+      });
+      return;
+    }
+
+    if (['interrupted', 'context_exhausted', 'usage_limited', 'auth_required', 'provider_error', 'unknown_failure'].includes(state)) {
+      void report('chatgpt_recovery', {
+        phase: 'network_terminal',
+        operation_id: operationId,
+        recovery_action: 'network_state_persisted',
+        network_state: state,
+        reason: data.reason || null,
+        verification_source: 'network_interceptor'
+      });
+    }
+  }
+
+  window.addEventListener('message', handleNetworkRecoveryMessage);
+
+  async function waitForNetworkReady(timeoutMs = NETWORK_READY_WAIT_MS) {
+    if (networkRecoveryAvailable) return true;
+    const started = Date.now();
+    postNetworkCommand('ping');
+    while (!networkRecoveryAvailable && Date.now() - started < timeoutMs) {
+      await sleep(25);
+      postNetworkCommand('ping');
+    }
+    return networkRecoveryAvailable;
+  }
 
   async function bridge(path, options = {}) {
     if (!globalThis.chrome?.runtime?.sendMessage) {
@@ -591,11 +791,16 @@
       return;
     }
 
-    if (!contextExhausted()) {
+    const networkVerifiedExhaustion =
+      state.verification_source === 'network_interceptor' &&
+      state.network_state === 'context_exhausted';
+
+    if (!networkVerifiedExhaustion && !contextExhausted()) {
       await report('chatgpt_recovery', {
         phase: 'context_recovery_waiting',
         operation_id: operationId,
-        recovery_action: 'wait_for_verified_exhaustion'
+        recovery_action: 'wait_for_verified_exhaustion',
+        verification_source: 'dom_fallback'
       });
       return;
     }
@@ -1060,44 +1265,146 @@
     await preserveOrReload(operationId, stateForTimer);
   }
 
+  async function inspectNetworkOnly() {
+    const state = readRecoveryState();
+    const operationId = networkOperationId();
+    if (!operationId) return;
+
+    const current = await operation(operationId);
+    if (!current) {
+      await report('chatgpt_recovery', {
+        phase: 'operation_lookup_unavailable',
+        operation_id: operationId,
+        recovery_action: 'wait_for_operation_state',
+        recovery_source: 'network_interceptor'
+      });
+      return;
+    }
+
+    if (current.status === 'completed' || current.status === 'failed' || current.status === 'cancelled') {
+      if (current.status === 'completed' && await finishPersistedResponse(current)) {
+        clearInterruptedState();
+      } else {
+        clearInterruptedState();
+      }
+      return;
+    }
+
+    if (state?.phase === 'context_exhausted' &&
+        (state.verification_source === 'network_interceptor' || state.network_state === 'context_exhausted')) {
+      await handleContextExhausted(state);
+      return;
+    }
+
+    if (state?.network_recovery === true && state.verification_source === 'network_interceptor') {
+      const accepted = await markRetryableFailure(
+        operationId,
+        'PASI_NETWORK: generation was interrupted by the transport layer; current ChatGPT conversation preserved for bounded retry.',
+        state.recovery_context || null
+      );
+      const afterRetry = await operation(operationId);
+      if (accepted && afterRetry?.status === 'queued') {
+        clearRecoveryState();
+        await report('chatgpt_recovery', {
+          phase: 'ready_for_retry',
+          operation_id: operationId,
+          recovery_action: 'same_operation_requeued',
+          recovery_reason: state.recovery_reason || 'connection_error',
+          recovery_source: 'network_interceptor',
+          same_operation_resumed: true,
+          response_stopped_on_loss: state.response_stopped_on_loss === true,
+          checkpoint_preserved: state.checkpoint_preserved === true
+        });
+      }
+      return;
+    }
+
+    if (state?.network_stalled === true &&
+        state.verification_source === 'network_interceptor') {
+      const stalledAt = Number(state.stalled_at_ms || 0);
+      if (stalledAt > 0 && Date.now() - stalledAt >= RECOVERY_STALL_MS) {
+        const accepted = await markRetryableFailure(
+          operationId,
+          'PASI_NETWORK: generation remained stalled at the transport layer beyond the bounded recovery window; current ChatGPT conversation preserved for retry.',
+          state.recovery_context || null
+        );
+        const afterRetry = await operation(operationId);
+        if (accepted && afterRetry?.status === 'queued') {
+          clearRecoveryState();
+          await report('chatgpt_recovery', {
+            phase: 'ready_for_retry',
+            operation_id: operationId,
+            recovery_action: 'same_operation_requeued',
+            recovery_reason: 'network_stall',
+            recovery_source: 'network_interceptor',
+            stall_age_ms: Math.max(0, Date.now() - stalledAt),
+            recovery_stall_ms: RECOVERY_STALL_MS
+          });
+        }
+      }
+    }
+  }
+
   async function runInspection() {
     if (inspecting) return;
     inspecting = true;
     try {
-      await inspect();
+      if (networkRecoveryAvailable) await inspectNetworkOnly();
+      else await inspect();
     } finally {
       inspecting = false;
     }
+  }
+
+  async function startNetworkRecoveryMode() {
+    if (networkRecoveryModeStarted && networkRecoveryTimerId !== null) return;
+    networkRecoveryModeStarted = true;
+    stopLegacyRecoveryMode();
+    networkRecoveryTimerId = setInterval(() => {
+      if (!networkRecoveryAvailable) return;
+      if (Date.now() - networkLastReadyAtMs > NETWORK_HEALTH_STALE_MS) {
+        networkRecoveryAvailable = false;
+        startLegacyRecoveryMode();
+        return;
+      }
+      runInspection().catch(() => {});
+    }, POLL_MS);
+    networkPingTimerId = setInterval(() => {
+      postNetworkCommand('ping');
+    }, NETWORK_PING_MS);
+    await runInspection();
   }
 
   async function start() {
     await report('chatgpt_recovery', {
       phase: 'started',
       recovery_action: 'monitor',
+      recovery_mode: 'network_preferred',
       generation_timeout_ms: GENERATION_TIMEOUT_MS,
       recovery_grace_ms: RECOVERY_GRACE_MS,
       recovery_stall_ms: RECOVERY_STALL_MS,
       recovery_hard_ceiling_ms: RECOVERY_HARD_CEILING_MS
     });
-    if (RECOVERY_PROGRESS?.attachProgressObserver && document.documentElement) {
-      const config = recoveryProgressConfig();
-      if (config) {
-        progressObserverHandle = RECOVERY_PROGRESS.attachProgressObserver({
-          root: document.documentElement,
-          readSample: assistantProgressSample,
-          onSample: (sample, nowMs) => {
-            if (!progressOperationId || !progressTracker || !sample) return;
-            progressTracker.observe(sample, nowMs);
-            const state = readRecoveryState();
-            if (state?.operation_id === progressOperationId && state.phase === 'monitoring') {
-              persistProgressState(state);
-            }
-          },
-          config
-        });
-      }
+
+    const networkReady = await waitForNetworkReady();
+    if (networkReady) {
+      await report('chatgpt_recovery', {
+        phase: 'network_recovery_enabled',
+        operation_id: networkOperationId(),
+        recovery_action: 'network_first',
+        recovery_source: 'network_interceptor'
+      });
+      await startNetworkRecoveryMode();
+      return;
     }
-    setInterval(() => { runInspection().catch(() => {}); }, POLL_MS);
+
+    await report('chatgpt_recovery', {
+      phase: 'network_recovery_unavailable',
+      operation_id: networkOperationId(),
+      recovery_action: 'legacy_dom_fallback',
+      recovery_source: 'dom'
+    });
+    startLegacyRecoveryMode();
     await runInspection();
   }
 

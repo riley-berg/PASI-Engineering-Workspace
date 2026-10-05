@@ -36,11 +36,11 @@ jobs:
 
       - name: Reconcile Educational Roadmap project
         env:
-          PASI_PROJECTS_TOKEN: \${{ secrets.PASI_PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+          PASI_PROJECTS_TOKEN: ${{ secrets.PASI_PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           args=(python scripts/educational_roadmap_project_v2.py)
-          if [[ "\${{ github.event_name }}" == "workflow_dispatch" && "\${{ inputs.dry_run }}" == "true" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
             args+=(--dry-run)
           fi
-          "\${args[@]}"
+          "${args[@]}"

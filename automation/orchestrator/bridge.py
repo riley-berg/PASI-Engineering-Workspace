@@ -73,6 +73,7 @@ MAX_RUNNER_CAPABILITIES_BYTES = 256_000
 _TRANSIENT_BROWSER_ERROR_PREFIXES = (
     "PASI_CDP: CONTEXT_EXHAUSTED",
     "PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED",
+    "PASI_CDP: NETWORK_RESPONSE_INCOMPLETE",
     "PASI_CDP: RESPONSE_MARKER_NOT_FOUND",
     "PASI_CDP: network failure",
     "PASI_CDP: CDP_DEBUGGER_DETACHED",
@@ -1003,8 +1004,16 @@ class BridgeState:
                     item["network_failure_source"] = "cdp"
 
             response_text = data.get("response_text")
+            cdp_response_complete = (
+                network_source != "cdp_fetch"
+                or (
+                    str(data.get("event_type") or "") == "COMPLETED"
+                    and data.get("stream_complete") is True
+                )
+            )
             response_verified = (
-                isinstance(response_text, str)
+                cdp_response_complete
+                and isinstance(response_text, str)
                 and len(response_text) <= MAX_RESPONSE_TEXT_CHARS
                 and bool(response_text.strip())
                 and completion_markers_satisfied(
@@ -1063,6 +1072,13 @@ class BridgeState:
         if data.get("active_operation_id") != item.get("operation_id"):
             return False
 
+        network_source = data.get("network_source")
+        if network_source == "cdp_fetch" and not (
+            str(data.get("event_type") or "") == "COMPLETED"
+            and data.get("stream_complete") is True
+        ):
+            return False
+
         response_text = data.get("response_text")
         if (
             not isinstance(response_text, str)
@@ -1101,6 +1117,7 @@ class BridgeState:
             error.startswith("PASI_NATIVE: ChatGPT generation timed out")
             or error.startswith("PASI_NATIVE: response text unavailable")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_CAPTURE_FAILED")
+            or error.startswith("PASI_CDP: NETWORK_RESPONSE_INCOMPLETE")
             or error.startswith("PASI_CDP: NETWORK_RESPONSE_TIMEOUT")
             or error.startswith("PASI_CDP: RESPONSE_MARKER_NOT_FOUND")
             or error.startswith("PASI_CDP: network failure")
@@ -1162,6 +1179,7 @@ class BridgeState:
 
                 if (
                     item.get("operation_type") == "prompt"
+                    and item.get("network_response_authoritative") is True
                     and item.get("response_text_available") is True
                     and isinstance(item.get("response_text"), str)
                     and bool(str(item.get("response_text")).strip())

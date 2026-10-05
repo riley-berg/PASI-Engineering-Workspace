@@ -4,6 +4,7 @@ import unittest
 
 from scripts.educational_roadmap_project_v2 import (
     CHILD_GROUPS,
+    DEPENDENCIES,
     FIELD_SPECS,
     GROUP_BY_ISSUE,
     PARENT_GROUPS,
@@ -40,6 +41,29 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         self.assertEqual((start, end), ROADMAP_PLAN[37])
         self.assertEqual(duration, 322)
         self.assertEqual(quarter, "Q4 2026 - Q3 2027")
+
+    def test_dependency_graph_matches_roadmap_hierarchy(self) -> None:
+        self.assertEqual(DEPENDENCIES[37], ())
+        self.assertEqual(DEPENDENCIES[38], ())
+        self.assertEqual(DEPENDENCIES[39], (37, 38))
+        for number in (40, 41, 42, 43, 44, 45):
+            self.assertEqual(DEPENDENCIES[number], (39,))
+        self.assertEqual(DEPENDENCIES[46], (39, 40, 41, 42, 43, 44))
+        self.assertEqual(DEPENDENCIES[47], (45, 46))
+
+        for number, prerequisites in DEPENDENCIES.items():
+            parent, child, _ = GROUP_BY_ISSUE[number]
+            self.assertIn(parent, PARENT_GROUPS)
+            self.assertIn(child, CHILD_GROUPS)
+            for prerequisite in prerequisites:
+                self.assertIn(prerequisite, GROUP_BY_ISSUE)
+                self.assertNotEqual(number, prerequisite)
+
+    def test_dependency_labels_are_explicit(self) -> None:
+        labels = {name for name, _, _ in roadmap_labels(46)}
+        self.assertIn("roadmap-depends-on:39", labels)
+        self.assertIn("roadmap-depends-on:40", labels)
+        self.assertIn("roadmap-depends-on:44", labels)
 
     def test_issue_labels_mirror_the_roadmap_metadata(self) -> None:
         labels = {name for name, _, _ in roadmap_labels(40)}

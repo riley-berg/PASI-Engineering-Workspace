@@ -7,6 +7,7 @@ from scripts.educational_roadmap_project_v2 import (
     DEPENDENCIES,
     FIELD_SPECS,
     GROUP_BY_ISSUE,
+    GROUP_OPTIONS,
     PARENT_GROUPS,
     ROADMAP_PLAN,
     roadmap_labels,
@@ -34,7 +35,25 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         for number, (parent, child, group) in GROUP_BY_ISSUE.items():
             self.assertIn(parent, PARENT_GROUPS)
             self.assertIn(child, CHILD_GROUPS)
-            self.assertTrue(group)
+            self.assertIn(group, GROUP_OPTIONS)
+
+    def test_common_work_is_independent_and_major_strategies_are_separate(self) -> None:
+        common = [37, 38, 39, 45, 47]
+        branches = [40, 41, 42, 43, 44]
+        self.assertTrue(all(GROUP_BY_ISSUE[n][0] == "All Paths" for n in common))
+        self.assertEqual(
+            [GROUP_BY_ISSUE[n][0] for n in branches],
+            [
+                "Computer Science",
+                "Computer Engineering",
+                "Electrical Engineering",
+                "Mechanical Engineering / Robotics",
+                "Mechatronics / Automation",
+            ],
+        )
+        self.assertTrue(
+            all(GROUP_BY_ISSUE[n][1] == "Optimized Major Strategy" for n in branches)
+        )
 
     def test_dates_and_quarter_are_deterministic(self) -> None:
         start, end, duration, quarter = roadmap_values(37)
@@ -50,6 +69,8 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
             self.assertEqual(DEPENDENCIES[number], (39,))
         self.assertEqual(DEPENDENCIES[46], (39, 40, 41, 42, 43, 44))
         self.assertEqual(DEPENDENCIES[47], (45, 46))
+        for number in (40, 41, 42, 43, 44):
+            self.assertEqual(GROUP_BY_ISSUE[number][1], "Optimized Major Strategy")
 
         for number, prerequisites in DEPENDENCIES.items():
             parent, child, _ = GROUP_BY_ISSUE[number]
@@ -70,7 +91,7 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         self.assertIn("roadmap", labels)
         self.assertIn("roadmap-parent:major-branches", labels)
         self.assertIn("roadmap-child:computer-science", labels)
-        self.assertIn("roadmap-group:computer-science", labels)
+        self.assertIn("roadmap-group:Computer Science — Optimized Strategy", labels)
         self.assertIn("roadmap-quarter:q3-2027-q1-2029", labels)
         self.assertIn("roadmap-start:2027-08-23", labels)
         self.assertIn("roadmap-end:2029-01-31", labels)

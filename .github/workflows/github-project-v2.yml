@@ -1,72 +1,46 @@
-name: github-project-v2
+name: PASI Project roadmap reconciliation
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/github-project-v2.yml"
+      - "scripts/github_project_v2.py"
   workflow_dispatch:
     inputs:
-      owner:
-        description: "Project owner login, or owner/name for a repository-owned project"
+      dry_run:
+        description: "Preview without changing the Project"
         required: true
-        default: "th3-st0v3"
-      owner_type:
-        description: "Project owner type"
-        required: true
-        type: choice
-        options:
-          - user
-          - organization
-          - repository
-        default: user
-      project_number:
-        description: "GitHub Project v2 number"
-        required: true
-        default: "1"
-      item_repo:
-        description: "Repository containing the issue/PR"
-        required: true
-        default: "th3-st0v3/PASI-Engineering-Workspace"
-      item_number:
-        description: "Issue or pull request number"
-        required: true
-      field:
-        description: "Project field name"
-        required: true
-      kind:
-        description: "Field value type"
-        required: true
-        type: choice
-        options:
-          - auto
-          - date
-          - iteration
-          - single-select
-          - number
-          - text
-        default: auto
-      value:
-        description: "Human-readable value (date, iteration title, or option name)"
-        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-project-v2
+  group: pasi-project-roadmap-reconcile
   cancel-in-progress: false
 
 jobs:
-  update:
+  reconcile:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           ref: main
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Update Project v2 field
+
+      - name: Reconcile canonical PASI roadmap Project
         env:
           PASI_PROJECTS_TOKEN: ${{ secrets.PASI_PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python scripts/github_project_v2.py             --owner "${{ inputs.owner }}"             --owner-type "${{ inputs.owner_type }}"             --project-number "${{ inputs.project_number }}"             set             --item-repo "${{ inputs.item_repo }}"             --item-number "${{ inputs.item_number }}"             --field "${{ inputs.field }}"             --kind "${{ inputs.kind }}"             --value "${{ inputs.value }}"
+          args=(python scripts/github_project_v2.py)
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.dry_run }}" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          "${args[@]}"

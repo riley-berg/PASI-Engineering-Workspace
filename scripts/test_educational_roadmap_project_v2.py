@@ -91,7 +91,7 @@ class TestEducationalRoadmapReconciliation(unittest.TestCase):
         self.assertIn("roadmap", labels)
         self.assertIn("roadmap-parent:computer-science", labels)
         self.assertIn("roadmap-child:optimized-major-strategy", labels)
-        self.assertIn("roadmap-group:computer-science-optimized-strategy", labels)
+        self.assertIn("roadmap-group:computer-science-optimized", labels)
         self.assertIn("roadmap-quarter:q3-2027-q1-2029", labels)
         self.assertIn("roadmap-start:2027-08-23", labels)
         self.assertIn("roadmap-end:2029-01-31", labels)

@@ -100,10 +100,14 @@ query Project($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: S
         pageInfo { hasNextPage endCursor }
         nodes {
           __typename
-          id
-          name
-          dataType
+          ... on ProjectV2Field {
+            id
+            name
+            dataType
+          }
           ... on ProjectV2IterationField {
+            id
+            name
             configuration {
               iterations { id title startDate duration }
               completedIterations { id title startDate duration }

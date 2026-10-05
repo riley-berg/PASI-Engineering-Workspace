@@ -1,157 +1,127 @@
 {
   "roadmap_id": "pasi-frontend",
-  "version": 4,
+  "version": 5,
   "revision": 0,
   "phases": [
     {
       "id": "FE-P0",
-      "title": "Runtime proof, live operations, recovery and evidence UI",
+      "title": "Runtime proof and operator observability",
       "depends_on": [],
       "status": "completed",
       "revision": 0
     },
     {
       "id": "FE-P1",
-      "title": "Unified operation state, event ledger and recovery console",
-      "depends_on": ["FE-P0"],
-      "status": "completed",
-      "revision": 0
-    },
-    {
-      "id": "FE-P2",
-      "title": "Roadmap manager, task intake, planning and project memory UI",
-      "depends_on": ["FE-P1"],
+      "title": "Kernel State Matrix and operation ledger console",
+      "depends_on": [
+        "FE-P0"
+      ],
       "status": "active",
       "revision": 0
     },
     {
+      "id": "FE-P2",
+      "title": "Capability and trust control surfaces",
+      "depends_on": [
+        "FE-P1"
+      ],
+      "status": "planned",
+      "revision": 0
+    },
+    {
       "id": "FE-P3",
-      "title": "Provider setup, model routing, health, fallback and benchmarks",
-      "depends_on": ["FE-P2"],
+      "title": "Supervisor recovery, candidate and promotion console",
+      "depends_on": [
+        "FE-P1",
+        "FE-P2"
+      ],
       "status": "planned",
       "revision": 0
     },
     {
       "id": "FE-P4",
-      "title": "Computer integration, capability control and host telemetry UI",
-      "depends_on": ["FE-P2", "FE-P3"],
+      "title": "Agent workers, model routing, memory and engineering views",
+      "depends_on": [
+        "FE-P2",
+        "FE-P3"
+      ],
       "status": "planned",
       "revision": 0
     }
+  ],
+  "design_rules": [
+    "UI reads authoritative Kernel projections rather than local runner heuristics.",
+    "Readiness, recovery, and promotion states are evidence-backed.",
+    "Capability and trust state are explicit; model suggestions are not authorization.",
+    "M1 and 168-hour runs are represented as acceptance workloads, not separate control planes."
   ],
   "tasks": [
     {
-      "id": "FE-P0.1",
-      "title": "Runtime operator dashboard",
-      "phase_id": "FE-P0",
-      "depends_on": [],
-      "acceptance_requirements": ["real runtime API integration", "operator can inspect authoritative runtime state"],
-      "evidence_requirements": ["hosted frontend tests", "loopback runtime API proof"],
-      "parent_task_id": "",
-      "source_issue_number": 30,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/30",
-      "source_title": "FE-P0 — Runtime proof, live operations, recovery & evidence UI",
-      "status": "completed",
-      "revision": 0
-    },
-    {
       "id": "FE-P1.1",
-      "title": "Operation ledger and recovery console",
+      "title": "Kernel State Matrix and operation ledger",
       "phase_id": "FE-P1",
-      "depends_on": ["FE-P0.1"],
-      "acceptance_requirements": ["real durable control-plane integration", "recovery and failure state is distinguishable from model suggestions"],
-      "evidence_requirements": ["hosted Python and Node tests", "runtime API integration evidence"],
-      "parent_task_id": "",
-      "source_issue_number": 29,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/29",
-      "source_title": "FE-P1 — Unified operation state, event ledger & recovery console",
-      "status": "completed",
-      "revision": 0
+      "depends_on": [],
+      "acceptance_requirements": [
+        "authoritative Kernel state is visible",
+        "identity, lifecycle, evidence, runtime revision, and decision state remain distinct",
+        "historical failures do not overwrite current operation state"
+      ],
+      "evidence_requirements": [
+        "runtime API integration proof",
+        "deterministic frontend tests"
+      ]
     },
     {
       "id": "FE-P2.1",
-      "title": "Roadmap manager and dependency graph",
+      "title": "Capability and trust matrix",
       "phase_id": "FE-P2",
-      "depends_on": ["FE-P1.1"],
-      "acceptance_requirements": ["roadmap version/validation/status is visible", "dependency graph and eligibility are derived from authoritative roadmap state", "roadmap edits are revision-safe"],
-      "evidence_requirements": ["loopback planner API proof", "deterministic frontend tests", "reproducible hosted validation"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "active",
-      "revision": 0
+      "depends_on": [
+        "FE-P1.1"
+      ],
+      "acceptance_requirements": [
+        "capability scope and trust level are visible",
+        "approval/denial is distinguishable from execution failure",
+        "capability actions retain operation identity and evidence"
+      ],
+      "evidence_requirements": [
+        "capability contract tests",
+        "runtime projection tests"
+      ]
     },
     {
-      "id": "FE-P2.2",
-      "title": "GitHub issue intake preview",
-      "phase_id": "FE-P2",
-      "depends_on": ["FE-P2.1"],
-      "acceptance_requirements": ["source issue remains traceable", "acceptance and evidence requirements are validated before persistence"],
-      "evidence_requirements": ["deterministic intake tests", "loopback preview evidence"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "planned",
-      "revision": 0
+      "id": "FE-P3.1",
+      "title": "Supervisor recovery and promotion console",
+      "phase_id": "FE-P3",
+      "depends_on": [
+        "FE-P2.1"
+      ],
+      "acceptance_requirements": [
+        "recover/retry/escalate/quarantine/promote/rollback states are evidence-backed",
+        "candidate and stable runtime revisions are distinguishable",
+        "failed candidates remain inspectable without becoming active"
+      ],
+      "evidence_requirements": [
+        "live supervisor projection proof",
+        "deterministic interaction tests"
+      ]
     },
     {
-      "id": "FE-P2.3",
-      "title": "Task detail, selection and queue state",
-      "phase_id": "FE-P2",
-      "depends_on": ["FE-P2.1"],
-      "acceptance_requirements": ["task dependencies and acceptance/evidence requirements are visible", "selection remains bound to roadmap revision"],
-      "evidence_requirements": ["task read-model proof", "selection API tests"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "planned",
-      "revision": 0
-    },
-    {
-      "id": "FE-P2.4",
-      "title": "Project memory and provenance browser",
-      "phase_id": "FE-P2",
-      "depends_on": ["FE-P2.3"],
-      "acceptance_requirements": ["memory is scoped and provenance is visible", "archived memory is not presented as active"],
-      "evidence_requirements": ["memory restart tests", "provenance retrieval proof"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "planned",
-      "revision": 0
-    },
-    {
-      "id": "FE-P2.5",
-      "title": "Context preview and planning evidence",
-      "phase_id": "FE-P2",
-      "depends_on": ["FE-P2.4"],
-      "acceptance_requirements": ["compiled context lists its sources and provenance", "context selection is deterministic and bounded"],
-      "evidence_requirements": ["context compiler tests", "source provenance evidence"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "planned",
-      "revision": 0
-    },
-    {
-      "id": "FE-P2.6",
-      "title": "GitHub Projects sync and workspace state",
-      "phase_id": "FE-P2",
-      "depends_on": ["FE-P2.2"],
-      "acceptance_requirements": ["sync status/conflicts are explicit", "workspace preferences are revision-safe"],
-      "evidence_requirements": ["Projects sync contract tests", "workspace preference revision tests"],
-      "parent_task_id": "",
-      "source_issue_number": 28,
-      "source_url": "https://github.com/th3-st0v3/PASI-Engineering-Workspace/issues/28",
-      "source_title": "FE-P2 — Roadmap manager, task intake, planning & project memory UI",
-      "status": "planned",
-      "revision": 0
+      "id": "FE-P4.1",
+      "title": "Agent worker and routing view",
+      "phase_id": "FE-P4",
+      "depends_on": [
+        "FE-P2.1",
+        "FE-P3.1"
+      ],
+      "acceptance_requirements": [
+        "worker identity is ephemeral and separate from operation identity",
+        "model/provider selection and escalation are visible",
+        "memory/context provenance is inspectable"
+      ],
+      "evidence_requirements": [
+        "routing projection tests",
+        "worker substitution acceptance"
+      ]
     }
-  ],
-  "canonical_sha256": "f7e0c823753fc1ce52fa66ddd2f5f5778541c3056d179c63cd9bace273b8d86c"
+  ]
 }

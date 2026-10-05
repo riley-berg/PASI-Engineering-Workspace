@@ -15,7 +15,7 @@ from pasi.core.roadmap import PhaseStatus, Roadmap, RoadmapPhase, RoadmapTask, T
 def make_roadmap() -> Roadmap:
     return Roadmap(
         roadmap_id="pasi-main",
-        version=3,
+        version=4,
         revision=0,
         phases=(RoadmapPhase("P2", "Planner", status=PhaseStatus.ACTIVE),),
         tasks=(

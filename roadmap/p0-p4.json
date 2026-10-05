@@ -1,10 +1,111 @@
 {
-  "name": "PASI Engineering Workspace roadmap",
+  "name": "PASI Unified Agent Kernel roadmap",
+  "version": 5,
+  "source_of_truth": "canonical phase GitHub issues",
+  "architecture": {
+    "supervisor": "autonomous_supervisor",
+    "kernel": [
+      "virtual_scheduler",
+      "state_and_evidence_matrix",
+      "runtime_revision_engine",
+      "routing_core",
+      "stateless_agent_worker_contract"
+    ],
+    "capabilities": [
+      "workspace_os",
+      "browser_engine",
+      "integration_platform"
+    ]
+  },
   "phases": [
-    {"id": "P0", "title": "Runtime proof and delivery infrastructure", "depends_on": [], "status": "completed"},
-    {"id": "P1", "title": "Control-plane consolidation", "depends_on": ["P0"], "status": "completed"},
-    {"id": "P2", "title": "Planner, scheduler, and engineering memory", "depends_on": ["P1"], "status": "in_progress"},
-    {"id": "P3", "title": "Provider-neutral model infrastructure", "depends_on": ["P2"], "status": "planned"},
-    {"id": "P4", "title": "Typed computer integration", "depends_on": ["P1", "P3"], "status": "planned"}
+    {
+      "id": "P0",
+      "title": "Runtime proof and kernel readiness",
+      "depends_on": [],
+      "status": "in_progress",
+      "promotion_gate": "Current-CDP M0/M1/M2 and 168-hour evidence plus kernel migration audit."
+    },
+    {
+      "id": "P1",
+      "title": "Unified Agent Kernel and State Matrix",
+      "depends_on": [
+        "P0"
+      ],
+      "status": "planned",
+      "promotion_gate": "Kernel state is authoritative for live operations and worker restart/resume."
+    },
+    {
+      "id": "P2",
+      "title": "Capability System and Integration Platform",
+      "depends_on": [
+        "P1"
+      ],
+      "status": "planned",
+      "promotion_gate": "Real agent actions execute only through typed Kernel-granted capabilities."
+    },
+    {
+      "id": "P3",
+      "title": "Autonomous Supervisor and Evidence-Driven Recovery",
+      "depends_on": [
+        "P1",
+        "P2"
+      ],
+      "status": "planned",
+      "promotion_gate": "Supervisor can classify, recover, stop loops, quarantine candidates, and rollback runtime."
+    },
+    {
+      "id": "P4",
+      "title": "Agent Workers, Model Routing and Engineering Memory",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3"
+      ],
+      "status": "planned",
+      "promotion_gate": "Workers are replaceable and model routing preserves operation identity and evidence."
+    },
+    {
+      "id": "P5",
+      "title": "Trust, Security and Autonomous-Action Policy",
+      "depends_on": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "status": "planned",
+      "promotion_gate": "Privileged actions are explicitly authorized, bounded, audited, and reversible."
+    },
+    {
+      "id": "P6",
+      "title": "Engineering data plane",
+      "depends_on": [
+        "P5"
+      ],
+      "status": "planned"
+    },
+    {
+      "id": "P7",
+      "title": "Engineering runtime and workload scheduler",
+      "depends_on": [
+        "P6"
+      ],
+      "status": "planned"
+    }
+  ],
+  "acceptance_workloads": {
+    "m1": "kernel_browser_acceptance_workload",
+    "long_run_168h": "kernel_endurance_acceptance_workload"
+  },
+  "rules": [
+    "one_control_plane",
+    "one_capability_boundary",
+    "evidence_over_assertion",
+    "source_separate_from_runtime",
+    "transactional_candidate_promotion",
+    "replaceable_stateless_workers",
+    "deterministic_self_healing_first",
+    "remove_obsolete_architecture",
+    "acceptance_workloads_are_not_control_planes"
   ]
 }

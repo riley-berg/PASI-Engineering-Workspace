@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildViewModel, healthTone, normalizeFailures, normalizeLedger, normalizeNotifications, normalizeRecoveryDecision } from "./app.js";
 import { normalizePlannerMemory, normalizeRoadmapSummary, plannerTaskStatusClass } from "./planner.js";
+import { getJson } from "./request.js";
 
 test("health tone maps authoritative runtime states", () => {
   assert.equal(healthTone("connected"), "success");
@@ -179,4 +180,17 @@ test("planner view models preserve roadmap authority and memory provenance", () 
   ]);
   assert.equal(memories[0].memory_id, "mem-1");
   assert.deepEqual(memories[0].provenance_refs, ["evidence://1"]);
+});
+
+
+test("dashboard modules share one JSON request helper", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    let seenOptions;
+    globalThis.fetch = async (_url, options) => { seenOptions = options; return { ok: true, json: async () => ({ ok: true }) }; };
+    assert.deepEqual(await getJson("/v1/runtime/health"), { ok: true });
+    assert.equal(seenOptions.headers.Accept, "application/json");
+    globalThis.fetch = async () => ({ ok: false, json: async () => ({ error: "server rejected request" }) });
+    await assert.rejects(() => getJson("/v1/runtime/health"), /server rejected request/);
+  } finally { globalThis.fetch = originalFetch; }
 });

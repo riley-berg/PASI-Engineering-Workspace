@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import argparse
-import datetime
+import datetime as dt
 import json
 import os
 import sys
@@ -12,108 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 GRAPHQL_URL = "https://api.github.com/graphql"
-API_VERSION = "2022-11-28"
-
-PROJECT_FRAGMENT = """
-fragment ProjectDetails on ProjectV2 {
-  id
-  number
-  title
-  url
-  fields(first: 100, after: $fieldAfter) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      __typename
-      id
-      name
-      dataType
-      ... on ProjectV2SingleSelectField {
-        options { id name }
-      }
-      ... on ProjectV2IterationField {
-        configuration {
-          iterations {
-            id
-            title
-            startDate
-            duration
-          }
-          completedIterations {
-            id
-            title
-            startDate
-            duration
-          }
-        }
-      }
-    }
-  }
-  items(first: 100, after: $itemAfter) {
-    pageInfo { hasNextPage endCursor }
-    nodes {
-      id
-      content {
-        __typename
-        ... on Issue {
-          number
-          title
-          repository { nameWithOwner }
-        }
-        ... on PullRequest {
-          number
-          title
-          repository { nameWithOwner }
-        }
-      }
-    }
-  }
-}
-"""
-
-PROJECT_QUERY_USER = """
-query ProjectDetails($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: String) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      __PROJECT_FRAGMENT__
-    }
-  }
-}
-""".replace("__PROJECT_FRAGMENT__", PROJECT_FRAGMENT)
-
-PROJECT_QUERY_ORGANIZATION = """
-query ProjectDetails($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: String) {
-  organization(login: $login) {
-    projectV2(number: $number) {
-      __PROJECT_FRAGMENT__
-    }
-  }
-}
-""".replace("__PROJECT_FRAGMENT__", PROJECT_FRAGMENT)
-
-PROJECT_QUERY_REPOSITORY = """
-query ProjectDetails($owner: String!, $repo: String!, $number: Int!, $fieldAfter: String, $itemAfter: String) {
-  repository(owner: $owner, name: $repo) {
-    projectV2(number: $number) {
-      __PROJECT_FRAGMENT__
-    }
-  }
-}
-""".replace("__PROJECT_FRAGMENT__", PROJECT_FRAGMENT)
-
-UPDATE_ITEM_FIELD_MUTATION = """
-mutation UpdateProjectItemField($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
-  updateProjectV2ItemFieldValue(
-    input: {
-      projectId: $projectId
-      itemId: $itemId
-      fieldId: $fieldId
-      value: $value
-    }
-  ) {
-    projectV2Item { id }
-  }
-}
-"""
+API_VERSION = "2026-03-10"
+CANONICAL_REPO = "riley-berg/PASI"
+ALLOWED_ISSUES = [1, *range(19, 36)]
+PROJECT_TITLE_HINT = "PASI"
 
 
 class ProjectV2Error(RuntimeError):
@@ -123,408 +25,396 @@ class ProjectV2Error(RuntimeError):
 @dataclass(frozen=True)
 class ProjectContext:
     project_id: str
-    project_number: int
-    project_title: str
-    project_url: str
+    number: int
+    title: str
+    url: str
     fields: tuple[dict[str, Any], ...]
     items: tuple[dict[str, Any], ...]
 
 
-def token_from_environment() -> str:
+def token() -> str:
     for name in ("PASI_PROJECTS_TOKEN", "PASI_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"):
         value = os.environ.get(name, "").strip()
         if value:
             return value
-    raise ProjectV2Error(
-        "set PASI_PROJECTS_TOKEN, PASI_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN"
-    )
+    raise ProjectV2Error("no GitHub token available")
 
 
-def graphql_request(query: str, variables: dict[str, Any], *, token: str) -> dict[str, Any]:
-    payload = json.dumps({"query": query, "variables": variables}).encode("utf-8")
-    request = urllib.request.Request(
-        GRAPHQL_URL,
-        method="POST",
-        data=payload,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "X-GitHub-Api-Version": API_VERSION,
-            "User-Agent": "pasi-engineering-workspace-project-v2",
-        },
-    )
+def request_json(url: str, *, method: str = "GET", payload: bytes | None = None) -> Any:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token()}",
+        "X-GitHub-Api-Version": API_VERSION,
+        "User-Agent": "pasi-project-reconciler",
+        "Content-Type": "application/json",
+    }
+    request = urllib.request.Request(url, method=method, data=payload, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
-            body = json.load(response)
+            return json.load(response)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")
-        raise ProjectV2Error(f"GitHub GraphQL HTTP {exc.code}: {detail}") from exc
+        raise ProjectV2Error(f"GitHub API HTTP {exc.code}: {detail}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise ProjectV2Error(f"GitHub GraphQL request failed: {exc}") from exc
+        raise ProjectV2Error(f"GitHub API request failed: {exc}") from exc
 
-    errors = body.get("errors")
-    if errors:
-        messages = "; ".join(str(error.get("message", error)) for error in errors)
-        raise ProjectV2Error(f"GitHub GraphQL error: {messages}")
-    data = body.get("data")
+
+def graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
+    payload = json.dumps({"query": query, "variables": variables}).encode()
+    response = request_json(GRAPHQL_URL, method="POST", payload=payload)
+    if response.get("errors"):
+        raise ProjectV2Error(
+            "GraphQL: " + "; ".join(str(e.get("message", e)) for e in response["errors"])
+        )
+    data = response.get("data")
     if not isinstance(data, dict):
-        raise ProjectV2Error("GitHub GraphQL response did not contain an object in data")
+        raise ProjectV2Error("GraphQL response had no data object")
     return data
 
 
-def _project_from_data(data: dict[str, Any], owner_type: str) -> dict[str, Any] | None:
-    if owner_type == "user":
-        return ((data.get("user") or {}).get("projectV2"))
-    if owner_type == "organization":
-        return ((data.get("organization") or {}).get("projectV2"))
-    return ((data.get("repository") or {}).get("projectV2"))
+PROJECTS_QUERY = """
+query UserProjects($login: String!) {
+  user(login: $login) {
+    projectsV2(first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        id
+        number
+        title
+        url
+        updatedAt
+      }
+    }
+  }
+}
+"""
+
+PROJECT_QUERY = """
+query Project($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: String) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      id
+      number
+      title
+      url
+      fields(first: 100, after: $fieldAfter) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          __typename
+          id
+          name
+          dataType
+          ... on ProjectV2IterationField {
+            configuration {
+              iterations { id title startDate duration }
+              completedIterations { id title startDate duration }
+            }
+          }
+        }
+      }
+      items(first: 100, after: $itemAfter) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          content {
+            __typename
+            ... on Issue {
+              number
+              title
+              repository { nameWithOwner }
+              state
+            }
+            ... on PullRequest {
+              number
+              title
+              repository { nameWithOwner }
+              state
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+ISSUE_ID_QUERY = """
+query Issue($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    issue(number: $number) { id }
+  }
+}
+"""
+
+ADD_ITEM = """
+mutation Add($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(input: {projectId: $projectId, contentId: $contentId}) {
+    item { id }
+  }
+}
+"""
+
+DELETE_ITEM = """
+mutation Delete($projectId: ID!, $itemId: ID!) {
+  deleteProjectV2Item(input: {projectId: $projectId, itemId: $itemId}) {
+    deletedItemId
+  }
+}
+"""
+
+SET_FIELD = """
+mutation SetField($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+  updateProjectV2ItemFieldValue(input: {
+    projectId: $projectId
+    itemId: $itemId
+    fieldId: $fieldId
+    value: $value
+  }) {
+    projectV2Item { id }
+  }
+}
+"""
 
 
-def fetch_project(
-    *,
-    owner: str,
-    owner_type: str,
-    project_number: int,
-    token: str,
-) -> ProjectContext:
-    owner_type = owner_type.lower().strip()
-    field_cursor: str | None = None
-    item_cursor: str | None = None
+def choose_project(login: str, title_hint: str = PROJECT_TITLE_HINT) -> dict[str, Any]:
+    data = graphql(PROJECTS_QUERY, {"login": login})
+    projects = ((data.get("user") or {}).get("projectsV2") or {}).get("nodes") or []
+    if not projects:
+        raise ProjectV2Error(f"no Projects v2 found for {login}")
+
+    ranked = []
+    for project in projects:
+        title = str(project.get("title", ""))
+        lower = title.casefold()
+        score = 0
+        if title_hint.casefold() in lower:
+            score += 100
+        if "engineering workspace" in lower:
+            score -= 100
+        if "roadmap" in lower:
+            score += 10
+        ranked.append((score, str(project.get("updatedAt", "")), project))
+
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    score, _, selected = ranked[0]
+    if score < 100:
+        raise ProjectV2Error(
+            "could not uniquely identify the new PASI Project; candidates: "
+            + ", ".join(f"{p.get('number')}:{p.get('title')}" for _, _, p in ranked[:10])
+        )
+    print(f"Selected Project #{selected['number']}: {selected['title']} ({selected['url']})")
+    return selected
+
+
+def fetch_project(login: str, number: int) -> ProjectContext:
+    field_after = None
+    item_after = None
     fields: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
-    project_meta: dict[str, Any] | None = None
+    meta: dict[str, Any] | None = None
 
-    while project_meta is None or field_cursor is not None or item_cursor is not None:
-        variables: dict[str, Any] = {
-            "number": project_number,
-            "fieldAfter": field_cursor,
-            "itemAfter": item_cursor,
-        }
-        if owner_type == "repository":
-            if "/" not in owner:
-                raise ProjectV2Error("repository owner must be owner/name")
-            repo_owner, repo_name = owner.split("/", 1)
-            variables.update({"owner": repo_owner, "repo": repo_name})
-            query = PROJECT_QUERY_REPOSITORY
-        elif owner_type == "user":
-            variables["login"] = owner
-            query = PROJECT_QUERY_USER
-        elif owner_type == "organization":
-            variables["login"] = owner
-            query = PROJECT_QUERY_ORGANIZATION
-        else:
-            raise ProjectV2Error("owner type must be user, organization, or repository")
-
-        data = graphql_request(query, variables, token=token)
-        project = _project_from_data(data, owner_type)
+    while meta is None or field_after is not None or item_after is not None:
+        data = graphql(
+            PROJECT_QUERY,
+            {
+                "login": login,
+                "number": number,
+                "fieldAfter": field_after,
+                "itemAfter": item_after,
+            },
+        )
+        project = ((data.get("user") or {}).get("projectV2"))
         if not project:
-            raise ProjectV2Error(
-                f"project {project_number} was not found for {owner_type} {owner}"
-            )
+            raise ProjectV2Error(f"Project #{number} not found for {login}")
 
-        if project_meta is None:
-            project_meta = {
-                "id": project["id"],
-                "number": int(project["number"]),
-                "title": project["title"],
-                "url": project["url"],
-            }
+        if meta is None:
+            meta = project
 
-        fields.extend(node for node in (project.get("fields", {}).get("nodes") or []) if node)
-        items.extend(node for node in (project.get("items", {}).get("nodes") or []) if node)
+        fields.extend(x for x in (project.get("fields", {}).get("nodes") or []) if x)
+        items.extend(x for x in (project.get("items", {}).get("nodes") or []) if x)
 
-        field_page = project.get("fields", {}).get("pageInfo") or {}
-        item_page = project.get("items", {}).get("pageInfo") or {}
-        field_cursor = field_page.get("endCursor") if field_page.get("hasNextPage") else None
-        item_cursor = item_page.get("endCursor") if item_page.get("hasNextPage") else None
+        fp = project.get("fields", {}).get("pageInfo") or {}
+        ip = project.get("items", {}).get("pageInfo") or {}
+        field_after = fp.get("endCursor") if fp.get("hasNextPage") else None
+        item_after = ip.get("endCursor") if ip.get("hasNextPage") else None
 
-        if field_cursor is None and item_cursor is None:
+        if field_after is None and item_after is None:
             break
 
+    assert meta is not None
     return ProjectContext(
-        project_id=str(project_meta["id"]),
-        project_number=int(project_meta["number"]),
-        project_title=str(project_meta["title"]),
-        project_url=str(project_meta["url"]),
+        project_id=str(meta["id"]),
+        number=int(meta["number"]),
+        title=str(meta["title"]),
+        url=str(meta["url"]),
         fields=tuple(fields),
         items=tuple(items),
     )
 
 
-def resolve_field(context: ProjectContext, name: str) -> dict[str, Any]:
-    wanted = name.strip().casefold()
-    matches = [
-        field for field in context.fields
-        if str(field.get("name", "")).strip().casefold() == wanted
-    ]
-    if not matches:
-        available = ", ".join(
-            str(field.get("name", "")) for field in context.fields if field.get("name")
-        )
-        raise ProjectV2Error(f"field {name!r} not found; available fields: {available}")
-    if len(matches) > 1:
-        raise ProjectV2Error(f"field {name!r} matched more than one project field")
-    return matches[0]
+def item_key(item: dict[str, Any]) -> tuple[str, int] | None:
+    content = item.get("content") or {}
+    repo = str(((content.get("repository") or {}).get("nameWithOwner") or "")).strip()
+    number = content.get("number")
+    if not repo or not isinstance(number, int):
+        return None
+    return repo.casefold(), number
 
 
-def resolve_item(context: ProjectContext, repository: str, number: int) -> dict[str, Any]:
-    matches: list[dict[str, Any]] = []
-    wanted_repo = repository.strip().casefold()
-    for item in context.items:
-        content = item.get("content") or {}
-        repo = ((content.get("repository") or {}).get("nameWithOwner") or "").strip().casefold()
-        raw_number = content.get("number")
-        if repo == wanted_repo and isinstance(raw_number, int) and raw_number == number:
-            matches.append(item)
-    if not matches:
-        raise ProjectV2Error(
-            f"issue/PR {repository}#{number} is not present in the project"
-        )
-    if len(matches) > 1:
-        raise ProjectV2Error(f"issue/PR {repository}#{number} matched multiple items")
-    return matches[0]
+def issue_node_id(number: int) -> str:
+    owner, repo = CANONICAL_REPO.split("/", 1)
+    data = graphql(ISSUE_ID_QUERY, {"owner": owner, "repo": repo, "number": number})
+    issue = ((data.get("repository") or {}).get("issue"))
+    if not issue or not issue.get("id"):
+        raise ProjectV2Error(f"{CANONICAL_REPO}#{number} not found")
+    return str(issue["id"])
 
 
-def resolve_option(field: dict[str, Any], name: str) -> str:
-    wanted = name.strip().casefold()
-    for option in field.get("options") or []:
-        if str(option.get("name", "")).strip().casefold() == wanted:
-            return str(option["id"])
-    available = ", ".join(
-        str(option.get("name", "")) for option in field.get("options") or []
-    )
-    raise ProjectV2Error(
-        f"single-select option {name!r} not found; available options: {available}"
-    )
+def add_item(project: ProjectContext, number: int) -> None:
+    data = graphql(ADD_ITEM, {"projectId": project.project_id, "contentId": issue_node_id(number)})
+    if not ((data.get("addProjectV2ItemById") or {}).get("item") or {}).get("id"):
+        raise ProjectV2Error(f"failed to add {CANONICAL_REPO}#{number}")
 
 
-def resolve_iteration(field: dict[str, Any], title: str) -> str:
-    configuration = field.get("configuration") or {}
-    wanted = title.strip().casefold()
-    all_iterations = list(configuration.get("iterations") or []) + list(
-        configuration.get("completedIterations") or []
-    )
-    matches = [
-        iteration
-        for iteration in all_iterations
-        if str(iteration.get("title", "")).strip().casefold() == wanted
-    ]
-    if not matches:
-        available = ", ".join(
-            str(iteration.get("title", "")) for iteration in all_iterations
-        )
-        raise ProjectV2Error(
-            f"iteration {title!r} not found; available iterations: {available}"
-        )
-    if len(matches) > 1:
-        raise ProjectV2Error(f"iteration {title!r} matched multiple iterations")
-    return str(matches[0]["id"])
+def delete_item(project: ProjectContext, item_id: str) -> None:
+    data = graphql(DELETE_ITEM, {"projectId": project.project_id, "itemId": item_id})
+    if not (data.get("deleteProjectV2Item") or {}).get("deletedItemId"):
+        raise ProjectV2Error(f"failed to remove Project item {item_id}")
 
 
-def build_value(field: dict[str, Any], kind: str, raw_value: str) -> dict[str, Any]:
-    data_type = str(field.get("dataType", "")).upper()
-    kind = kind.strip().lower()
-    if kind == "auto":
-        mapping = {
-            "DATE": "date",
-            "ITERATION": "iteration",
-            "SINGLE_SELECT": "single-select",
-            "NUMBER": "number",
-            "TEXT": "text",
-        }
-        kind = mapping.get(data_type, "")
-        if not kind:
-            raise ProjectV2Error(
-                f"cannot auto-select a writable kind for field type {data_type or 'unknown'}"
-            )
+def ensure_date_field(project: ProjectContext, name: str) -> dict[str, Any]:
+    wanted = name.casefold()
+    for field in project.fields:
+        if str(field.get("name", "")).casefold() == wanted:
+            if str(field.get("dataType", "")).upper() != "DATE":
+                raise ProjectV2Error(
+                    f"Project field {field.get('name')} exists but is not DATE"
+                )
+            return field
 
-    if kind == "date":
-        try:
-            datetime.date.fromisoformat(raw_value)
-        except ValueError as exc:
-            raise ProjectV2Error("date value must be YYYY-MM-DD") from exc
-        return {"date": raw_value}
-    if kind == "iteration":
-        return {"iterationId": resolve_iteration(field, raw_value)}
-    if kind == "single-select":
-        return {"singleSelectOptionId": resolve_option(field, raw_value)}
-    if kind == "number":
-        try:
-            return {"number": float(raw_value)}
-        except ValueError as exc:
-            raise ProjectV2Error("number value must be numeric") from exc
-    if kind == "text":
-        return {"text": raw_value}
-    raise ProjectV2Error(
-        "kind must be auto, date, iteration, single-select, number, or text"
-    )
+    owner = "riley-berg"
+    url = f"https://api.github.com/users/{owner}/projectsV2/{project.number}/fields"
+    payload = json.dumps({"name": name, "data_type": "date"}).encode()
+    created = request_json(url, method="POST", payload=payload)
+    print(f"Created DATE field {name!r}: {created.get('id')}")
+    refreshed = fetch_project(owner, project.number)
+    for field in refreshed.fields:
+        if str(field.get("name", "")).casefold() == wanted:
+            if str(field.get("dataType", "")).upper() != "DATE":
+                raise ProjectV2Error(f"new field {name} was not DATE")
+            return field
+    raise ProjectV2Error(f"DATE field {name!r} was not visible after creation")
 
 
-def update_item_field(
-    context: ProjectContext,
-    *,
-    item: dict[str, Any],
-    field: dict[str, Any],
-    value: dict[str, Any],
-    token: str,
-) -> str:
-    variables = {
-        "projectId": context.project_id,
-        "itemId": str(item["id"]),
-        "fieldId": str(field["id"]),
-        "value": value,
-    }
-    data = graphql_request(UPDATE_ITEM_FIELD_MUTATION, variables, token=token)
-    result = data.get("updateProjectV2ItemFieldValue") or {}
-    project_item = result.get("projectV2Item") or {}
-    result_id = project_item.get("id")
-    if not result_id:
-        raise ProjectV2Error("GraphQL mutation returned no projectV2Item id")
-    return str(result_id)
-
-
-def print_context(context: ProjectContext) -> None:
-    print(json.dumps(
+def set_date(project: ProjectContext, item_id: str, field: dict[str, Any], value: str) -> None:
+    dt.date.fromisoformat(value)
+    graphql(
+        SET_FIELD,
         {
-            "project": {
-                "id": context.project_id,
-                "number": context.project_number,
-                "title": context.project_title,
-                "url": context.project_url,
-            },
-            "fields": [
-                {
-                    "id": field.get("id"),
-                    "name": field.get("name"),
-                    "type": field.get("__typename"),
-                    "dataType": field.get("dataType"),
-                    "options": field.get("options") or None,
-                    "iterations": [
-                        {
-                            "id": iteration.get("id"),
-                            "title": iteration.get("title"),
-                            "startDate": iteration.get("startDate"),
-                            "duration": iteration.get("duration"),
-                        }
-                        for iteration in (
-                            list((field.get("configuration") or {}).get("iterations") or [])
-                            + list((field.get("configuration") or {}).get("completedIterations") or [])
-                        )
-                    ] or None,
-                }
-                for field in context.fields
-            ],
-            "items": [
-                {
-                    "id": item.get("id"),
-                    "type": (item.get("content") or {}).get("__typename"),
-                    "number": (item.get("content") or {}).get("number"),
-                    "title": (item.get("content") or {}).get("title"),
-                    "repository": (
-                        ((item.get("content") or {}).get("repository") or {}).get("nameWithOwner")
-                    ),
-                }
-                for item in context.items
-            ],
+            "projectId": project.project_id,
+            "itemId": item_id,
+            "fieldId": field["id"],
+            "value": {"date": value},
         },
-        indent=2,
-        sort_keys=True,
-    ))
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Resolve and update GitHub Projects v2 fields through GraphQL v4."
-    )
-    parser.add_argument(
-        "--owner",
-        default="th3-st0v3",
-        help="Project owner login, or owner/name for repository projects.",
-    )
-    parser.add_argument(
-        "--owner-type",
-        choices=("user", "organization", "repository"),
-        default="user",
-    )
-    parser.add_argument("--project-number", type=int, default=1)
-    parser.add_argument(
-        "--token-env",
-        default="",
-        help="Environment variable containing the GitHub token.",
-    )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    sub.add_parser(
-        "inspect",
-        help="Print project, field, option, iteration, and item IDs.",
     )
 
-    update = sub.add_parser(
-        "set",
-        help="Update one writable ProjectV2 field value.",
-    )
-    update.add_argument("--item-repo", required=True, help="Repository containing the issue/PR.")
-    update.add_argument("--item-number", required=True, type=int)
-    update.add_argument("--field", required=True)
-    update.add_argument(
-        "--kind",
-        default="auto",
-        choices=("auto", "date", "iteration", "single-select", "number", "text"),
-    )
-    update.add_argument("--value", required=True)
-    return parser
+
+DATE_RANGES = {
+    19: ("2026-10-05", "2026-10-18"),
+    20: ("2026-10-19", "2026-11-08"),
+    21: ("2026-11-09", "2026-11-29"),
+    22: ("2026-11-30", "2026-12-20"),
+    23: ("2026-12-21", "2027-01-10"),
+    24: ("2027-01-11", "2027-01-31"),
+    25: ("2027-02-01", "2027-02-21"),
+    26: ("2027-02-22", "2027-03-14"),
+    27: ("2027-03-15", "2027-04-11"),
+    28: ("2027-04-12", "2027-05-02"),
+    29: ("2027-05-03", "2027-06-13"),
+    30: ("2027-06-14", "2027-07-11"),
+    31: ("2027-07-12", "2027-08-08"),
+    32: ("2027-08-09", "2027-09-05"),
+    33: ("2027-09-06", "2027-09-26"),
+    34: ("2027-09-27", "2027-10-17"),
+    35: ("2027-10-18", "2027-11-14"),
+}
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def reconcile(login: str, dry_run: bool) -> None:
+    selected = choose_project(login)
+    project = fetch_project(login, int(selected["number"]))
+
+    allowed = {(CANONICAL_REPO.casefold(), n) for n in ALLOWED_ISSUES}
+    existing = {key: item for item in project.items if (key := item_key(item)) is not None}
+
+    remove = [item for key, item in existing.items() if key not in allowed]
+    add = [n for n in ALLOWED_ISSUES if (CANONICAL_REPO.casefold(), n) not in existing]
+
+    print(f"Project contains {len(project.items)} items.")
+    print(f"Will remove {len(remove)} non-canonical items and add {len(add)} canonical items.")
+
+    if dry_run:
+        for item in remove:
+            content = item.get("content") or {}
+            print("REMOVE", item["id"], ((content.get("repository") or {}).get("nameWithOwner")), content.get("number"), content.get("title"))
+        for n in add:
+            print("ADD", f"{CANONICAL_REPO}#{n}")
+        return
+
+    for item in remove:
+        delete_item(project, str(item["id"]))
+
+    # Re-fetch after deletions so item IDs/fields are current.
+    project = fetch_project(login, project.number)
+
+    for n in add:
+        add_item(project, n)
+
+    # Re-fetch once more so all canonical items have stable IDs.
+    project = fetch_project(login, project.number)
+    start_field = ensure_date_field(project, "Start date")
+    project = fetch_project(login, project.number)
+    target_field = ensure_date_field(project, "Target date")
+
+    canonical = {
+        item_key(item): item
+        for item in project.items
+        if item_key(item) is not None and item_key(item)[0] == CANONICAL_REPO.casefold()
+    }
+
+    for n, (start, end) in DATE_RANGES.items():
+        item = canonical.get((CANONICAL_REPO.casefold(), n))
+        if not item:
+            raise ProjectV2Error(f"canonical Project item missing after sync: {CANONICAL_REPO}#{n}")
+        set_date(project, str(item["id"]), start_field, start)
+        set_date(project, str(item["id"]), target_field, end)
+
+    final = fetch_project(login, project.number)
+    final_keys = sorted(key for item in final.items if (key := item_key(item)) is not None)
+    expected = sorted(allowed)
+    if final_keys != expected:
+        raise ProjectV2Error(
+            f"Project reconciliation verification failed. Expected {len(expected)} items, found {len(final_keys)}."
+        )
+
+    print("SYNC PASS")
+    print(f"Project: {final.url}")
+    print(f"Items: {len(final.items)}")
+    print("Allowed: riley-berg/PASI#1 and #19-#35")
+    print("Date fields: Start date [DATE], Target date [DATE]")
+    print("Roadmap dates populated for T1-T17.")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--login", default="riley-berg")
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
     try:
-        if args.token_env:
-            token = os.environ.get(args.token_env, "").strip()
-            if not token:
-                raise ProjectV2Error(f"environment variable {args.token_env} is empty")
-        else:
-            token = token_from_environment()
-
-        context = fetch_project(
-            owner=args.owner,
-            owner_type=args.owner_type,
-            project_number=args.project_number,
-            token=token,
-        )
-
-        if args.command == "inspect":
-            print_context(context)
-            return 0
-
-        item = resolve_item(context, args.item_repo, args.item_number)
-        field = resolve_field(context, args.field)
-        value = build_value(field, args.kind, args.value)
-        result_id = update_item_field(
-            context,
-            item=item,
-            field=field,
-            value=value,
-            token=token,
-        )
-        print(json.dumps(
-            {
-                "updated": True,
-                "project_id": context.project_id,
-                "item_id": item["id"],
-                "field_id": field["id"],
-                "field": field["name"],
-                "field_type": field["__typename"],
-                "value": value,
-                "result_item_id": result_id,
-            },
-            indent=2,
-            sort_keys=True,
-        ))
-        return 0
-    except ProjectV2Error as exc:
-        print(f"PASI project-v2: {exc}", file=sys.stderr)
+        reconcile(args.login, args.dry_run)
+    except (ProjectV2Error, ValueError) as exc:
+        print(f"PASI project reconciliation failed: {exc}", file=sys.stderr)
         return 2
+    return 0
 
 
 if __name__ == "__main__":

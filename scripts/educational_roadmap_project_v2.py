@@ -79,6 +79,20 @@ GROUP_BY_ISSUE: dict[int, tuple[str, str, str]] = {
     47: ("PASI Portfolio", "PASI Interdisciplinary Engineering Portfolio", "pasi-portfolio"),
 }
 
+DEPENDENCIES: dict[int, tuple[int, ...]] = {
+    37: (),
+    38: (),
+    39: (37, 38),
+    40: (39,),
+    41: (39,),
+    42: (39,),
+    43: (39,),
+    44: (39,),
+    45: (39,),
+    46: (39, 40, 41, 42, 43, 44),
+    47: (45, 46),
+}
+
 LABEL_COLORS = {
     "roadmap": "ededed",
     "parent": "5319e7",
@@ -87,6 +101,7 @@ LABEL_COLORS = {
     "quarter": "bf8700",
     "start": "0969da",
     "end": "cf2222",
+    "dependency": "6e7781",
 }
 
 
@@ -497,6 +512,21 @@ def roadmap_values(number: int) -> tuple[str, str, int, str]:
     return start.isoformat(), end.isoformat(), duration, quarter_label(start, end)
 
 
+def validate_dependencies() -> None:
+    if set(DEPENDENCIES) != set(ISSUES):
+        raise RoadmapError(
+            f"dependency map must cover exactly the roadmap issues; got {sorted(DEPENDENCIES)}"
+        )
+    for number, prerequisites in DEPENDENCIES.items():
+        if number in prerequisites:
+            raise RoadmapError(f"issue #{number} cannot depend on itself")
+        for prerequisite in prerequisites:
+            if prerequisite not in GROUP_BY_ISSUE:
+                raise RoadmapError(
+                    f"issue #{number} depends on non-roadmap issue #{prerequisite}"
+                )
+
+
 def roadmap_group(number: int) -> tuple[str, str, str]:
     try:
         return GROUP_BY_ISSUE[number]
@@ -518,6 +548,23 @@ def label_slug(value: str) -> str:
     while "--" in slug:
         slug = slug.replace("--", "-")
     return slug
+
+
+def dependency_labels(number: int) -> list[tuple[str, str, str]]:
+    labels: list[tuple[str, str, str]] = []
+    for prerequisite in DEPENDENCIES[number]:
+        parent, child, _ = roadmap_group(prerequisite)
+        labels.append(
+            (
+                f"roadmap-depends-on:{prerequisite}",
+                LABEL_COLORS["dependency"],
+                (
+                    f"Educational Roadmap dependency: #{prerequisite} "
+                    f"({parent} / {child})"
+                ),
+            )
+        )
+    return labels
 
 
 def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
@@ -555,6 +602,7 @@ def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
             LABEL_COLORS["end"],
             f"Educational Roadmap end date: {end}",
         ),
+        *dependency_labels(number),
     ]
 
 
@@ -615,6 +663,7 @@ def set_field(project_id: str, item_id: str, field: dict[str, Any], value: dict[
 
 
 def reconcile(dry_run: bool) -> None:
+    validate_dependencies()
     project = choose_project()
     project_id = str(project["id"])
     project_number = int(project["number"])
@@ -754,6 +803,17 @@ def reconcile(dry_run: bool) -> None:
             raise RoadmapError(
                 f"issue label verification failed for {REPOSITORY}#{n}: {missing_labels}"
             )
+        dependency_labels_expected = {
+            name for name, _, _ in dependency_labels(n)
+        }
+        dependency_labels_actual = {
+            name for name in actual_labels if name.startswith("roadmap-depends-on:")
+        }
+        if dependency_labels_actual != dependency_labels_expected:
+            raise RoadmapError(
+                f"dependency verification failed for {REPOSITORY}#{n}: "
+                f"got {sorted(dependency_labels_actual)}, expected {sorted(dependency_labels_expected)}"
+            )
         verified += 1
 
     print("SYNC PASS")
@@ -764,7 +824,7 @@ def reconcile(dry_run: bool) -> None:
         "Quarter [TEXT], Parent Group [SINGLE_SELECT], Child Group [SINGLE_SELECT], "
         "Group [SINGLE_SELECT]"
     )
-    print("Issue labels verified: roadmap + parent + child + group + quarter + start + end")
+    print("Issue labels verified: roadmap + parent + child + group + quarter + start + end + dependencies")
 
 
 def main() -> int:

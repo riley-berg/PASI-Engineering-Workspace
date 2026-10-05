@@ -13,7 +13,8 @@
     "webRequest",
     "declarativeNetRequest",
     "userScripts",
-    "alarms"
+    "alarms",
+    "debugger"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -44,12 +45,7 @@
         "src/api_v3.js",
         "src/api_v4.js",
         "src/copy-api.js",
-        "src/chatgpt.js",
-        "src/timeout-config.js",
-        "src/detectors.js",
-        "src/recovery_progress.js",
-        "src/content.js",
-        "src/recovery.js"
+        "src/timeout-config.js"
       ],
       "run_at": "document_idle"
     }

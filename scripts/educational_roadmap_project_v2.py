@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -17,8 +18,6 @@ REPOSITORY = "riley-berg/PASI"
 PROJECT_TITLE = "Educational Roadmap"
 ISSUES = tuple(range(37, 48))
 
-# Planning windows derived from the issue descriptions. These are planning
-# dates, not claims about official academic-calendar dates.
 ROADMAP_PLAN: dict[int, tuple[str, str]] = {
     37: ("2026-10-05", "2027-08-22"),
     38: ("2026-10-05", "2027-05-31"),
@@ -38,6 +37,56 @@ FIELD_SPECS = {
     "End Date": "DATE",
     "Duration (days)": "NUMBER",
     "Quarter": "TEXT",
+    "Parent Group": "SINGLE_SELECT",
+    "Child Group": "SINGLE_SELECT",
+    "Group": "SINGLE_SELECT",
+}
+
+PARENT_GROUPS = (
+    "Foundation",
+    "Credit Optimization",
+    "Major Branches",
+    "Cross-Disciplinary",
+    "Decision",
+    "PASI Portfolio",
+)
+
+CHILD_GROUPS = (
+    "Control Framework & Common Foundation",
+    "CLEP & Credit-Elimination Strategy",
+    "Blinn Engineering Academy Common Path",
+    "Computer Science",
+    "Computer Engineering",
+    "Electrical Engineering",
+    "Mechanical Engineering / Robotics",
+    "Mechatronics / Automation",
+    "AI / ML / Automation Layer",
+    "Major Decision / ETAM Selection",
+    "PASI Interdisciplinary Engineering Portfolio",
+)
+
+GROUP_BY_ISSUE: dict[int, tuple[str, str, str]] = {
+    37: ("Foundation", "Control Framework & Common Foundation", "common-foundation"),
+    38: ("Credit Optimization", "CLEP & Credit-Elimination Strategy", "credit-strategy"),
+    39: ("Foundation", "Blinn Engineering Academy Common Path", "academy-common"),
+    40: ("Major Branches", "Computer Science", "computer-science"),
+    41: ("Major Branches", "Computer Engineering", "computer-engineering"),
+    42: ("Major Branches", "Electrical Engineering", "electrical-engineering"),
+    43: ("Major Branches", "Mechanical Engineering / Robotics", "mechanical-robotics"),
+    44: ("Major Branches", "Mechatronics / Automation", "mechatronics-automation"),
+    45: ("Cross-Disciplinary", "AI / ML / Automation Layer", "cross-disciplinary"),
+    46: ("Decision", "Major Decision / ETAM Selection", "major-decision"),
+    47: ("PASI Portfolio", "PASI Interdisciplinary Engineering Portfolio", "pasi-portfolio"),
+}
+
+LABEL_COLORS = {
+    "roadmap": "ededed",
+    "parent": "5319e7",
+    "child": "1f6feb",
+    "group": "8250df",
+    "quarter": "bf8700",
+    "start": "0969da",
+    "end": "cf2222",
 }
 
 
@@ -85,16 +134,16 @@ def graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def rest(path: str, *, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
+    body = json.dumps(payload).encode() if payload is not None else None
+    return request_json(f"https://api.github.com{path}", method=method, payload=body)
+
+
 PROJECTS_QUERY = """
 query UserProjects($login: String!) {
   user(login: $login) {
     projectsV2(first: 100, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {
-        id
-        number
-        title
-        url
-      }
+      nodes { id number title url }
     }
   }
 }
@@ -112,30 +161,15 @@ query Project($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: S
         pageInfo { hasNextPage endCursor }
         nodes {
           __typename
-          ... on ProjectV2Field {
-            id
-            name
-            dataType
-          }
-          ... on ProjectV2IterationField {
-            id
-            name
-            dataType
-          }
+          ... on ProjectV2Field { id name dataType }
+          ... on ProjectV2IterationField { id name dataType }
           ... on ProjectV2SingleSelectField {
             id
             name
             dataType
-            options {
-              id
-              name
-            }
+            options { id name color description }
           }
-          ... on ProjectV2MultiSelectField {
-            id
-            name
-            dataType
-          }
+          ... on ProjectV2MultiSelectField { id name dataType }
         }
       }
       items(first: 100, after: $itemAfter) {
@@ -171,6 +205,18 @@ query Project($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: S
             __typename
             ... on ProjectV2ItemFieldTextValue { text }
           }
+          parentGroup: fieldValueByName(name: "Parent Group") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
+          }
+          childGroup: fieldValueByName(name: "Child Group") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
+          }
+          group: fieldValueByName(name: "Group") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue { name optionId }
+          }
         }
       }
     }
@@ -199,33 +245,46 @@ mutation CreateField(
   $projectId: ID!
   $name: String!
   $dataType: ProjectV2CustomFieldType!
+  $singleSelectOptions: [ProjectV2SingleSelectFieldOptionInput!]
 ) {
   createProjectV2Field(input: {
     projectId: $projectId
     name: $name
     dataType: $dataType
+    singleSelectOptions: $singleSelectOptions
   }) {
     projectV2Field {
       __typename
-      ... on ProjectV2Field {
-        id
-        name
-        dataType
-      }
-      ... on ProjectV2IterationField {
-        id
-        name
-        dataType
-      }
+      ... on ProjectV2Field { id name dataType }
+      ... on ProjectV2IterationField { id name dataType }
       ... on ProjectV2SingleSelectField {
         id
         name
         dataType
+        options { id name }
       }
-      ... on ProjectV2MultiSelectField {
+      ... on ProjectV2MultiSelectField { id name dataType }
+    }
+  }
+}
+"""
+
+UPDATE_FIELD = """
+mutation UpdateField(
+  $fieldId: ID!
+  $singleSelectOptions: [ProjectV2SingleSelectFieldOptionInput!]
+) {
+  updateProjectV2Field(input: {
+    fieldId: $fieldId
+    singleSelectOptions: $singleSelectOptions
+  }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
         id
         name
         dataType
+        options { id name }
       }
     }
   }
@@ -331,10 +390,20 @@ def add_item(project_id: str, number: int) -> str:
     return str(item["id"])
 
 
-def create_field(project_id: str, name: str, data_type: str) -> dict[str, Any]:
+def create_field(
+    project_id: str,
+    name: str,
+    data_type: str,
+    options: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
     data = graphql(
         CREATE_FIELD,
-        {"projectId": project_id, "name": name, "dataType": data_type},
+        {
+            "projectId": project_id,
+            "name": name,
+            "dataType": data_type,
+            "singleSelectOptions": options if data_type == "SINGLE_SELECT" else None,
+        },
     )
     field = (data.get("createProjectV2Field") or {}).get("projectV2Field") or {}
     if not field.get("id"):
@@ -343,18 +412,67 @@ def create_field(project_id: str, name: str, data_type: str) -> dict[str, Any]:
     return field
 
 
+def desired_options(names: tuple[str, ...], prefix: str) -> list[dict[str, str]]:
+    return [
+        {
+            "name": name,
+            "color": "GRAY",
+            "description": f"Educational Roadmap {prefix}: {name}",
+        }
+        for name in names
+    ]
+
+
+def ensure_single_select_options(field: dict[str, Any], names: tuple[str, ...], prefix: str) -> dict[str, Any]:
+    existing = {
+        str(option.get("name", "")).casefold(): option
+        for option in (field.get("options") or [])
+        if option
+    }
+    options: list[dict[str, str]] = []
+    for option in desired_options(names, prefix):
+        prior = existing.get(option["name"].casefold())
+        if prior and prior.get("id"):
+            option["id"] = str(prior["id"])
+            option["color"] = str(prior.get("color") or "GRAY").upper()
+            option["description"] = str(prior.get("description") or option["description"])
+        options.append(option)
+
+    data = graphql(
+        UPDATE_FIELD,
+        {"fieldId": field["id"], "singleSelectOptions": options},
+    )
+    updated = (data.get("updateProjectV2Field") or {}).get("projectV2Field") or {}
+    if not updated.get("id"):
+        raise RoadmapError(f"failed to configure options for field {field.get('name')!r}")
+    return updated
+
+
 def ensure_fields(project_id: str, fields: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     by_name = {str(f.get("name", "")).casefold(): f for f in fields}
+    select_specs = {
+        "Parent Group": (PARENT_GROUPS, "parent group"),
+        "Child Group": (CHILD_GROUPS, "child group"),
+        "Group": (CHILD_GROUPS, "group"),
+    }
     ensured: dict[str, dict[str, Any]] = {}
     for name, data_type in FIELD_SPECS.items():
         field = by_name.get(name.casefold())
         if field is None:
-            field = create_field(project_id, name, data_type)
+            field = create_field(
+                project_id,
+                name,
+                data_type,
+                desired_options(*select_specs[name]) if name in select_specs else None,
+            )
         actual = str(field.get("dataType", "")).upper()
         if actual != data_type:
             raise RoadmapError(
                 f"project field {name!r} exists as {actual}, expected {data_type}"
             )
+        if name in select_specs:
+            options, prefix = select_specs[name]
+            field = ensure_single_select_options(field, options, prefix)
         ensured[name] = field
     return ensured
 
@@ -377,6 +495,111 @@ def roadmap_values(number: int) -> tuple[str, str, int, str]:
         raise RoadmapError(f"issue #{number} has an end before its start")
     duration = (end - start).days + 1
     return start.isoformat(), end.isoformat(), duration, quarter_label(start, end)
+
+
+def roadmap_group(number: int) -> tuple[str, str, str]:
+    try:
+        return GROUP_BY_ISSUE[number]
+    except KeyError as exc:
+        raise RoadmapError(f"no group mapping for issue #{number}") from exc
+
+
+def option_id(field: dict[str, Any], name: str) -> str:
+    wanted = name.casefold()
+    for option in field.get("options") or []:
+        if str(option.get("name", "")).casefold() == wanted and option.get("id"):
+            return str(option["id"])
+    raise RoadmapError(f"option {name!r} not found in field {field.get('name')!r}")
+
+
+def label_slug(value: str) -> str:
+    chars = [char if char.isalnum() else "-" for char in value.casefold()]
+    slug = "".join(chars).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug
+
+
+def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
+    start, end, _, quarter = roadmap_values(number)
+    parent, child, group = roadmap_group(number)
+    return [
+        ("roadmap", LABEL_COLORS["roadmap"], "Educational Roadmap issue"),
+        (
+            f"roadmap-parent:{label_slug(parent)}",
+            LABEL_COLORS["parent"],
+            f"Educational Roadmap parent group: {parent}",
+        ),
+        (
+            f"roadmap-child:{group}",
+            LABEL_COLORS["child"],
+            f"Educational Roadmap child group: {child}",
+        ),
+        (
+            f"roadmap-group:{group}",
+            LABEL_COLORS["group"],
+            f"Educational Roadmap group: {child}",
+        ),
+        (
+            f"roadmap-quarter:{label_slug(quarter)}",
+            LABEL_COLORS["quarter"],
+            f"Educational Roadmap quarter: {quarter}",
+        ),
+        (
+            f"roadmap-start:{start}",
+            LABEL_COLORS["start"],
+            f"Educational Roadmap start date: {start}",
+        ),
+        (
+            f"roadmap-end:{end}",
+            LABEL_COLORS["end"],
+            f"Educational Roadmap end date: {end}",
+        ),
+    ]
+
+
+def ensure_label(name: str, color: str, description: str) -> None:
+    encoded = urllib.parse.quote(name, safe="")
+    path = f"/repos/{REPOSITORY}/labels/{encoded}"
+    try:
+        rest(path)
+    except RoadmapError as exc:
+        if "HTTP 404" not in str(exc):
+            raise
+        rest(
+            f"/repos/{REPOSITORY}/labels",
+            method="POST",
+            payload={"name": name, "color": color, "description": description},
+        )
+        return
+    rest(
+        path,
+        method="PATCH",
+        payload={"new_name": name, "color": color, "description": description},
+    )
+
+
+def sync_issue_labels(number: int) -> None:
+    expected = roadmap_labels(number)
+    for name, color, description in expected:
+        ensure_label(name, color, description)
+
+    current = rest(f"/repos/{REPOSITORY}/issues/{number}/labels?per_page=100")
+    current_names = {str(label.get("name", "")) for label in (current or [])}
+    managed = lambda value: value == "roadmap" or value.startswith("roadmap-")
+    preserved = sorted(name for name in current_names if not managed(name))
+    desired = preserved + sorted(name for name, _, _ in expected)
+    rest(
+        f"/repos/{REPOSITORY}/issues/{number}/labels",
+        method="PUT",
+        payload={"labels": desired},
+    )
+
+    verified = rest(f"/repos/{REPOSITORY}/issues/{number}/labels?per_page=100")
+    verified_names = {str(label.get("name", "")) for label in (verified or [])}
+    missing = [name for name, _, _ in expected if name not in verified_names]
+    if missing:
+        raise RoadmapError(f"issue #{number} label verification failed; missing: {missing}")
 
 
 def set_field(project_id: str, item_id: str, field: dict[str, Any], value: dict[str, Any]) -> None:
@@ -410,7 +633,11 @@ def reconcile(dry_run: bool) -> None:
     if dry_run:
         for n in ISSUES:
             start, end, duration, quarter = roadmap_values(n)
-            print(f"#{n}: {start} -> {end} ({duration} days; {quarter})")
+            parent, child, group = roadmap_group(n)
+            print(
+                f"#{n}: {start} -> {end} ({duration} days; {quarter}; "
+                f"{parent} / {child}; group={group})"
+            )
         return
 
     for n in missing:
@@ -432,6 +659,8 @@ def reconcile(dry_run: bool) -> None:
             raise RoadmapError(f"project item missing after reconciliation: {REPOSITORY}#{n}")
 
         start, end, duration, quarter = roadmap_values(n)
+        parent, child, group = roadmap_group(n)
+
         set_field(project_id, str(item["id"]), fields_by_name["Start Date"], {"date": start})
         set_field(project_id, str(item["id"]), fields_by_name["End Date"], {"date": end})
         set_field(
@@ -441,9 +670,26 @@ def reconcile(dry_run: bool) -> None:
             {"number": duration},
         )
         set_field(project_id, str(item["id"]), fields_by_name["Quarter"], {"text": quarter})
+        set_field(
+            project_id,
+            str(item["id"]),
+            fields_by_name["Parent Group"],
+            {"singleSelectOptionId": option_id(fields_by_name["Parent Group"], parent)},
+        )
+        set_field(
+            project_id,
+            str(item["id"]),
+            fields_by_name["Child Group"],
+            {"singleSelectOptionId": option_id(fields_by_name["Child Group"], child)},
+        )
+        set_field(
+            project_id,
+            str(item["id"]),
+            fields_by_name["Group"],
+            {"singleSelectOptionId": option_id(fields_by_name["Group"], child)},
+        )
+        sync_issue_labels(n)
 
-    # Read everything back from GraphQL so the workflow verifies the actual
-    # persisted values instead of assuming mutations succeeded.
     _, final_fields, final_items = fetch_project(project_number)
     final_fields_by_name = {
         str(f.get("name", "")).casefold(): f for f in final_fields
@@ -453,6 +699,20 @@ def reconcile(dry_run: bool) -> None:
         field = final_fields_by_name.get(field_name.casefold())
         if not field or str(field.get("dataType", "")).upper() != expected_type:
             raise RoadmapError(f"final verification failed for field {field_name!r}")
+
+        if expected_type == "SINGLE_SELECT":
+            expected_options = PARENT_GROUPS if field_name == "Parent Group" else CHILD_GROUPS
+            actual_options = {
+                str(option.get("name", "")).casefold()
+                for option in (field.get("options") or [])
+            }
+            missing_options = [
+                name for name in expected_options if name.casefold() not in actual_options
+            ]
+            if missing_options:
+                raise RoadmapError(
+                    f"final verification missing {field_name!r} options: {missing_options}"
+                )
 
     verified = 0
     for n in ISSUES:
@@ -468,23 +728,43 @@ def reconcile(dry_run: bool) -> None:
             raise RoadmapError(f"final verification missing {REPOSITORY}#{n}")
 
         start, end, duration, quarter = roadmap_values(n)
+        parent, child, group = roadmap_group(n)
         actual = (
             (item.get("startDate") or {}).get("date"),
             (item.get("endDate") or {}).get("date"),
             (item.get("duration") or {}).get("number"),
             (item.get("quarter") or {}).get("text"),
+            (item.get("parentGroup") or {}).get("name"),
+            (item.get("childGroup") or {}).get("name"),
+            (item.get("group") or {}).get("name"),
         )
-        expected = (start, end, float(duration), quarter)
+        expected = (start, end, float(duration), quarter, parent, child, child)
         if actual != expected:
             raise RoadmapError(
                 f"verification mismatch for {REPOSITORY}#{n}: got {actual!r}, expected {expected!r}"
+            )
+
+        expected_labels = {name for name, _, _ in roadmap_labels(n)}
+        actual_labels = {
+            str(label.get("name", ""))
+            for label in (rest(f"/repos/{REPOSITORY}/issues/{n}/labels?per_page=100") or [])
+        }
+        if not expected_labels.issubset(actual_labels):
+            missing_labels = sorted(expected_labels - actual_labels)
+            raise RoadmapError(
+                f"issue label verification failed for {REPOSITORY}#{n}: {missing_labels}"
             )
         verified += 1
 
     print("SYNC PASS")
     print(f"Project: {project['url']}")
     print(f"Project items verified: {verified}/{len(ISSUES)}")
-    print("Fields: Start Date [DATE], End Date [DATE], Duration (days) [NUMBER], Quarter [TEXT]")
+    print(
+        "Fields: Start Date [DATE], End Date [DATE], Duration (days) [NUMBER], "
+        "Quarter [TEXT], Parent Group [SINGLE_SELECT], Child Group [SINGLE_SELECT], "
+        "Group [SINGLE_SELECT]"
+    )
+    print("Issue labels verified: roadmap + parent + child + group + quarter + start + end")
 
 
 def main() -> int:

@@ -14,6 +14,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+try:
+    from .pasi_acceptance_evidence_registry import register_acceptance_artifact
+except ImportError:
+    from pasi_acceptance_evidence_registry import register_acceptance_artifact
+
 REPO = "th3-st0v3/PASI-Engineering-Workspace"
 ROADMAP_FILE = Path(__file__).resolve().parents[1] / "roadmap" / "p0-p22-168h.json"
 HOURS = 168.0
@@ -217,16 +222,64 @@ def run_task(task: Task, worktree: Path, branch: str, run_id: str) -> dict:
         raise RuntimeError(f"executor completed {task.task_id} without a new commit")
     if os.environ.get("PASI_PUSH", "").strip() == "1":
         git(worktree, "push", "--set-upstream", "origin", branch, timeout=180)
+
+    completed_at = utcnow()
+    changed_files = [
+        item.strip()
+        for item in git(worktree, "diff", "--name-only", before, after).splitlines()
+        if item.strip()
+    ]
+    runtime_root = Path(
+        os.environ.get(
+            "PASI_ENGINEERING_RUNTIME_DIR",
+            str(state_dir() / "runtime"),
+        )
+    ).expanduser().resolve()
+    artifact_refs: list[Path] = [
+        state_dir() / "current-task.json",
+        state_dir() / "events.jsonl",
+    ]
+    for artifact_name in ("last-preflight.txt", "last-executor-output.txt"):
+        candidate = runtime_root / artifact_name
+        if candidate.is_file():
+            artifact_refs.append(candidate)
+    artifact_refs.extend(
+        worktree / relative_path
+        for relative_path in changed_files
+        if (worktree / relative_path).is_file()
+    )
+    evidence_registry = register_acceptance_artifact(
+        repo_root=worktree,
+        extension_root=worktree / "extensions" / "pasi-chatgpt",
+        run_id=run_id,
+        task_id=task.task_id,
+        phase=task.phase.id,
+        branch=branch,
+        artifact_kind="task-completion",
+        artifact_refs=artifact_refs,
+        code_head=after,
+        commit_sha=after,
+        started_at=started,
+        completed_at=completed_at,
+        metadata={
+            "title": task.title,
+            "source_issue": task.phase.issue,
+            "commit_before": before,
+            "commit_after": after,
+        },
+        state_root=state_dir(),
+    )
     mark_checked(task)
     evidence = {
         "event": "task_completed",
-        "at": utcnow().isoformat(),
+        "at": completed_at.isoformat(),
         "task_id": task.task_id,
         "phase": task.phase.id,
         "issue": task.phase.issue,
         "commit_before": before,
         "commit_after": after,
         "branch": branch,
+        "evidence_artifact": evidence_registry,
     }
     emit(evidence)
     return evidence
@@ -254,10 +307,11 @@ def main() -> int:
     ensure_worktree(root, worktree, args.branch)
     head = git(worktree, "rev-parse", "HEAD")
     phases = schedule()
+    run_started_at = utcnow()
 
     emit({
         "event": "run_started" if not args.smoke else "smoke_started",
-        "at": utcnow().isoformat(),
+        "at": run_started_at.isoformat(),
         "run_id": run_id,
         "repo": REPO,
         "branch": args.branch,
@@ -266,6 +320,25 @@ def main() -> int:
         "hours": HOURS,
         "phase_count": len(phases),
     })
+    register_acceptance_artifact(
+        repo_root=worktree,
+        extension_root=worktree / "extensions" / "pasi-chatgpt",
+        run_id=run_id,
+        task_id=None,
+        phase=None,
+        branch=args.branch,
+        artifact_kind="smoke-start" if args.smoke else "run-start",
+        artifact_refs=[state_dir() / "events.jsonl"],
+        code_head=head,
+        started_at=run_started_at,
+        completed_at=run_started_at if args.smoke else None,
+        metadata={
+            "hours": HOURS,
+            "phase_count": len(phases),
+            "smoke": args.smoke,
+        },
+        state_root=state_dir(),
+    )
 
     if args.smoke:
         discovered = all_tasks()

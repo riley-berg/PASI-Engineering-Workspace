@@ -20,6 +20,8 @@ def test_m1_harness_compiles_and_exposes_bridge_sequence_helpers():
     assert module.DEFAULT_COUNT == 20
     assert module.signature_counts("12:34:abc") == (12, 34)
     assert module.signature_counts("not-a-signature") is None
+    telemetry = module.conversation_telemetry("3:4:before", "5:7:after")
+    assert telemetry["delta"] == {"user": 2, "assistant": 3}
 
 
 def test_prompt_fingerprint_normalizes_whitespace_but_detects_content_changes():
@@ -45,5 +47,143 @@ def test_m1_harness_records_required_failure_categories():
         '"response_completed_to_prompt_injected_ms"',
         '"user_messages_added"',
         '"ack_verified"',
+        '"chain_id"',
+        '"sequence_index"',
+        '"predecessor_operation_id"',
+        '"conversation_signature_is_verification_only"',
+        '"prompt_fingerprints"',
     ]:
         assert token in source
+
+def test_prepare_durable_chat_uses_active_browser_chat_over_stale_persisted_url(
+    monkeypatch, tmp_path
+):
+    module = load_harness()
+    stale_url = "https://chatgpt.com/c/stale"
+    active_url = "https://chatgpt.com/c/active"
+
+    durable_state = tmp_path / "durable-automation-chat.json"
+    durable_state.write_text(
+        '{"chat_url": "https://chatgpt.com/c/stale", "updated_at": 1}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "DURABLE_CHAT_STATE", durable_state)
+    monkeypatch.setattr(module, "M1_EVIDENCE", tmp_path / "m1-live.json")
+    monkeypatch.setattr(module, "M0_EVIDENCE", tmp_path / "m0-live.json")
+
+    monkeypatch.setattr(
+        module,
+        "browser_health",
+        lambda _client: {
+            "native_controller": True,
+            "chat_url": active_url,
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "browser_state",
+        lambda _client: {
+            "chat_url": active_url,
+            "conversation_signature": "3:4:active",
+        },
+    )
+
+    persisted = {}
+    monkeypatch.setattr(
+        module,
+        "persist_durable_chat_url",
+        lambda url, reason="": persisted.update(url=url, reason=reason),
+    )
+
+    result = module.prepare_durable_chat(
+        object(),
+        session_id="test-session",
+        timeout_seconds=1,
+    )
+
+    assert result == (
+        active_url,
+        "3:4:active",
+        False,
+        "",
+        stale_url,
+        "",
+    )
+    assert persisted == {
+        "url": active_url,
+        "reason": "active_browser_chat",
+    }
+
+
+def test_prepare_durable_chat_creates_new_chat_only_for_explicit_limit_signal(
+    monkeypatch, tmp_path
+):
+    module = load_harness()
+    active_url = "https://chatgpt.com/c/active"
+    fresh_url = "https://chatgpt.com/c/fresh"
+
+    durable_state = tmp_path / "durable-automation-chat.json"
+    durable_state.write_text(
+        '{"chat_url": "https://chatgpt.com/c/stale", "updated_at": 1}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(module, "DURABLE_CHAT_STATE", durable_state)
+    monkeypatch.setattr(module, "M1_EVIDENCE", tmp_path / "m1-live.json")
+    monkeypatch.setattr(module, "M0_EVIDENCE", tmp_path / "m0-live.json")
+
+    monkeypatch.setattr(
+        module,
+        "browser_health",
+        lambda _client: {
+            "native_controller": True,
+            "chat_url": active_url,
+            "provider_usage_limited": True,
+        },
+    )
+
+    calls = {}
+    monkeypatch.setattr(
+        module,
+        "create_fresh_chat_after_limit",
+        lambda _client, **kwargs: (
+            calls.update(kwargs) or (fresh_url, "0:0:fresh", "op-new-chat")
+        ),
+    )
+
+    result = module.prepare_durable_chat(
+        object(),
+        session_id="test-session",
+        timeout_seconds=1,
+    )
+
+    assert result == (
+        fresh_url,
+        "0:0:fresh",
+        True,
+        "usage_limit",
+        "https://chatgpt.com/c/stale",
+        "op-new-chat",
+    )
+    assert calls["reason"] == "usage_limit"
+
+
+def test_m1_harness_does_not_gate_progression_on_exact_conversation_count_delta():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "wait_for_signature_delta" not in source
+    assert "expected_next=(" not in source
+    assert "conversation_signature_is_verification_only" in source
+    assert "conversation_verification" in source
+
+
+def test_m1_runner_requires_checkpoint_aware_bridge_before_queueing():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert '"m1_checkpoint_schema_version"' in source
+    assert "the running bridge is stale" in source
+    gate = source[source.index('bridge_health = client.get("/health")'):source.index('status = client.get("/status")')]
+    assert "M1_CHECKPOINT_SCHEMA_VERSION" in gate
+
+
+def test_m1_harness_derives_missing_predecessor_injection_latency():
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "authoritative_predecessor_completed_at_ms" in source
+    assert "response_completed_to_prompt_injected_ms" in source

@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import unittest
 
 
@@ -7,96 +6,85 @@ ROOT = Path(__file__).resolve().parents[1]
 EXTENSION_ROOT = ROOT / "extensions" / "pasi-chatgpt"
 CONTENT_JS = EXTENSION_ROOT / "src" / "content.js"
 BACKGROUND_JS = EXTENSION_ROOT / "src" / "background.js"
+RECOVERY_JS = EXTENSION_ROOT / "src" / "recovery.js"
 
 
 class TestExtensionLifecycleSafety(unittest.TestCase):
     def setUp(self) -> None:
         self.content = CONTENT_JS.read_text(encoding="utf-8")
         self.background = BACKGROUND_JS.read_text(encoding="utf-8")
+        self.recovery = RECOVERY_JS.read_text(encoding="utf-8")
 
-    def test_context_invalidation_never_reloads_the_chatgpt_page(self) -> None:
+    def test_native_controller_never_reloads_the_chatgpt_page(self) -> None:
         self.assertNotIn("window.location.reload()", self.content)
-        self.assertNotIn("scheduleContextRecovery", self.content)
-        self.assertIn("markExtensionContextDead", self.content)
-        self.assertIn("mutationObserver.disconnect()", self.content)
-        self.assertIn("window.clearInterval(heartbeatTimer)", self.content)
+        self.assertNotIn("chrome.tabs.reload", self.background)
 
-    def test_context_invalidation_stops_observation_and_preserves_state(self) -> None:
-        self.assertIn('sessionStorage.setItem(', self.content)
-        self.assertIn('"pasi_extension_context_recovery"', self.content)
-        self.assertIn("extensionContextDead = true", self.content)
-        self.assertIn("if (extensionContextDead || observationRunning)", self.content)
+    def test_native_controller_uses_a_serialized_controller_lease(self) -> None:
+        self.assertIn("CONTROLLER_LEASE_KEY", self.background)
+        self.assertIn("controllerClaimTail", self.background)
+        self.assertIn("pasi-controller-claim", self.content)
+        self.assertIn("controllerClaim({ force: true })", self.content)
 
-    def test_observer_is_throttled_and_serialized(self) -> None:
-        self.assertIn("scheduleObserve(150)", self.content)
-        self.assertIn("if (extensionContextDead || observeTimer !== null)", self.content)
-        self.assertIn("observationRunning = true", self.content)
-        self.assertIn("observationRunning = false", self.content)
+    def test_native_controller_uses_extension_messaging_for_the_loopback_bridge(self) -> None:
+        self.assertIn("type: 'pasi-bridge-request'", self.content)
+        self.assertNotIn("127.0.0.1:8765", self.content)
+        self.assertIn("const BRIDGE = 'http://127.0.0.1:8765';", self.background)
 
-    def test_operation_identity_exists_before_prompt_injection(self) -> None:
-        start = self.content.index("async function injectCurrentPrompt(")
-        end = self.content.index("async function markRecoveryPending(", start)
-        block = self.content[start:end]
-        self.assertLess(block.index("await startOperation()"), block.index("await chatgpt.injectPrompt(prompt)"))
-        self.assertIn("pasi_prompt_injection_state", self.content)
+    def test_completion_is_durable_before_next_prompt(self) -> None:
+        self.assertIn("const completion = await finishOperation(", self.content)
+        self.assertIn("operation.operation_id,", self.content)
+        self.assertIn("response,", self.content)
+        self.assertIn("const browserTiming = {", self.content)
+        self.assertIn("user_messages_added: logicalUserMessagesAdded", self.content)
+        self.assertIn("browserTiming", self.content)
+        self.assertIn("operation.predecessor_completed_at_ms", self.content)
+        self.assertIn("text_counts", self.content)
+        self.assertIn("countNewUserMessages(userMessages(), snapshot, expected)", self.content)
+        self.assertIn("matchesPrompt", self.content)
+        self.assertIn("currentMatched - baselineMatched", self.content)
+        self.assertIn("logical_user_messages_added", self.content)
+        self.assertIn("previousLogicalUserMessagesAdded + submissionUserMessagesAdded", self.content)
+        self.assertIn("ChatGPT can replace the DOM nodes for existing messages", self.content)
+        self.assertIn("userTextSignature", self.content)
+        self.assertIn("userTextReady", self.content)
+        self.assertNotIn("waitForConversationSignatureDelta", self.content)
+        self.assertNotIn("exact +1/+1 conversation counts", self.content)
+        self.assertIn("Conversation signature/count telemetry is recorded independently", self.content)
+        self.assertIn("next_operation", self.content)
+        self.assertIn("scheduleImmediateOperation(chainedOperation)", self.content)
+        self.assertIn("'POST /chat/finished'", self.background)
+        self.assertIn("next_operation", self.content)
 
-    def test_context_recovery_preserves_automation_chat_identity(self) -> None:
-        self.assertIn("sessionAutomationChatUrl", self.content)
-        self.assertIn("setSessionAutomationChatUrl", self.content)
-        self.assertIn("automation_chat_url: sessionAutomationChatUrl()", self.content)
+    def test_prompt_submission_is_verified_before_completion(self) -> None:
+        self.assertIn("submission.verified", self.content)
+        self.assertIn("if (!submission.verified)", self.content)
+        self.assertIn("response_text_available", self.content)
+        self.assertIn("/chat/finished", self.content)
 
-    def test_prompt_delivery_is_verified_against_user_message(self) -> None:
-        self.assertIn("hasUserMessageText(prompt)", self.content)
-        self.assertIn('sessionInjection.status === "sending"', self.content)
-        self.assertIn('sessionInjection.status === "sent"', self.content)
+    def test_m2_controlled_recovery_probe_is_same_operation_and_fast_resume(self) -> None:
+        self.assertIn("m2_recovery_probe", self.content)
+        self.assertIn("m2_controlled_live_probe", self.content)
+        self.assertIn("controlledLiveProbe", self.recovery)
+        self.assertIn("same_operation_resumed", self.recovery)
+        self.assertIn("checkpoint_preserved", self.recovery)
 
-    def test_reconnect_only_marks_restored_after_generation_resumes(self) -> None:
-        start = self.content.index("async function handleOnline()")
-        end = self.content.index("function restoreContextRecoveryState()", start)
-        online = self.content[start:end]
-        self.assertNotIn("CONNECTION_RESTORED", online)
-        self.assertIn("RESUME_REQUEST", online)
-        self.assertIn("resumeRequestSent", online)
-        self.assertIn("resumed_after_reconnect: true", self.content)
+    def test_connection_and_context_recovery_are_bounded(self) -> None:
+        self.assertIn("/chat/failed", self.content)
+        self.assertIn("recovery_context", self.content)
+        self.assertIn("decideRecovery", self.recovery)
+        self.assertIn("RECOVERY_HARD_CEILING_MS", self.recovery)
+        self.assertIn("MAX_CONTEXT_RECOVERIES", self.recovery)
 
-    def test_background_receives_real_prompt_delivery_ack(self) -> None:
-        self.assertIn("sendResponse", self.content)
-        self.assertIn("response?.ok === true", self.background)
+    def test_security_and_auth_boundaries_do_not_auto_recover(self) -> None:
+        self.assertIn("securityChallenge()", self.recovery)
+        self.assertIn("manual_intervention_required", self.recovery)
+        self.assertIn("auth_required", self.content)
 
-    def test_no_synthetic_connection_recovery_prompt_exists(self) -> None:
-        self.assertNotIn("PASI CONNECTION RECOVERY", self.content)
-        self.assertNotIn("submitRecoveryPrompt", self.content)
-        self.assertNotIn("recovery_via_new_prompt: true", self.content)
-
-    def test_storage_and_runtime_message_apis_have_single_controlled_entry_points(self) -> None:
-        self.assertEqual(
-            len(re.findall(r"chrome\.storage\.local\.get\(", self.content)),
-            1,
-        )
-        self.assertEqual(
-            len(re.findall(r"chrome\.storage\.local\.set\(", self.content)),
-            1,
-        )
-        self.assertEqual(
-            len(re.findall(r"chrome\.runtime\.sendMessage\(", self.content)),
-            1,
-        )
-
-    def test_background_tab_messages_are_guarded(self) -> None:
-        self.assertIn("async function sendTabMessage(tabId, message)", self.background)
-        self.assertEqual(
-            len(re.findall(r"chrome\.tabs\.sendMessage\(", self.background)),
-            1,
-        )
-        self.assertIn("prompt_delivery_failed", self.background)
-
-    def test_extension_context_is_not_treated_as_chat_connection_loss(self) -> None:
-        start = self.content.index("async function beginRecovery(reason)")
-        end = self.content.index("async function handleChatLimit()", start)
-        begin_recovery = self.content[start:end]
-        self.assertIn("isExtensionContextInvalidated(reason)", begin_recovery)
-        self.assertIn('reason === "extension context invalidated"', begin_recovery)
-        self.assertNotIn("injectPrompt(", begin_recovery)
+    def test_existing_tabs_are_reused_without_navigation(self) -> None:
+        self.assertIn("injectExistingChatTabs", self.background)
+        self.assertIn("chrome.scripting.executeScript", self.background)
+        self.assertNotIn("chrome.tabs.create", self.background)
+        self.assertNotIn("chrome.tabs.reload", self.background)
 
 
 if __name__ == "__main__":

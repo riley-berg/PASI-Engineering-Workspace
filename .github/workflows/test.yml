@@ -37,5 +37,8 @@ jobs:
       - name: Lint userscript platform
         run: npm install --no-save eslint@10.11.0 && npm run lint:userscripts
 
+      - name: Test native extension runtime
+        run: npm run test:extension
+
       - name: Run authoritative repository validation
         run: bash scripts/test_full_repo.sh

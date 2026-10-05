@@ -81,7 +81,11 @@ def test_independent_extension_manifest() -> None:
         "src/api_v4.js",
         "src/copy-api.js",
         "src/chatgpt.js",
+        "src/timeout-config.js",
+        "src/detectors.js",
+        "src/recovery_progress.js",
         "src/content.js",
+        "src/recovery.js",
     ]
     assert "self-hosted" not in json.dumps(manifest).lower()
     assert "personal-ai-system" not in json.dumps(manifest).lower()

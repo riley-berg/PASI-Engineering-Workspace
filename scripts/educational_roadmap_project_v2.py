@@ -126,6 +126,10 @@ query Project($login: String!, $number: Int!, $fieldAfter: String, $itemAfter: S
             id
             name
             dataType
+            options {
+              id
+              name
+            }
           }
           ... on ProjectV2MultiSelectField {
             id

@@ -22,6 +22,8 @@ def test_cdp_network_authority_contract():
     assert not (extension / "src" / "recovery_progress.js").exists()
 
     assert "debugger" in manifest["permissions"]
+    assert manifest["commands"]["pasi-toggle-runner"]["suggested_key"]["default"] == "Ctrl+Shift+K"
+    assert "pasi-run-next" not in manifest["commands"]
     manifest_scripts = [
         script
         for entry in manifest["content_scripts"]
@@ -57,12 +59,22 @@ def test_cdp_network_authority_contract():
     assert "executeNewChatOperation" in background
     assert "executeAttachGithubOperation" in background
     assert "operation.operation_type === 'select_reasoning'" in background
-    assert "claim_next: true" in background
     assert "chrome.tabs.onActivated" in background
     assert "chrome.tabs.onUpdated" in background
     assert "chrome.alarms.onAlarm" in background
+    assert "pasi-toggle-runner" in background
+    assert "chrome.commands" in background
+    assert "runNextQueuedOperation" not in background
+    assert "pasi.execution.run-next" not in background
+    assert "dispatchNextOperationForController" not in background
+    assert "claim_next: true" not in background
+    assert "BRIDGE_NEXT_OPERATION_RE" in background
+    assert "&wait_ms=[0-9]{1,5}" in background
+    assert "network_request_id: String(event.requestId" not in background
+    assert "network_classification: String(event.classification" not in background
+    assert "network_reason: String(event.reason" not in background
 
-    for source in (cdp, extension / "src" / "background.js"):
+    for source in (cdp, extension / "src" / "background.js", extension / "popup.js"):
         result = subprocess.run(
             ["node", "--check", str(source)],
             capture_output=True,

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "PASI ChatGPT Handoff",
-  "version": "0.2.0",
+  "version": "0.2.12",
   "description": "Self-contained PASI browser automation boundary and ChatGPT handoff extension.",
   "permissions": [
     "storage",
@@ -39,12 +39,9 @@
         "https://www.chatgpt.com/*"
       ],
       "js": [
-        "src/protocol.js",
         "src/api_contract.js",
         "src/api_v2.js",
         "src/api_v3.js",
-        "src/api_v4.js",
-        "src/copy-api.js",
         "src/timeout-config.js"
       ],
       "run_at": "document_idle"
@@ -53,6 +50,14 @@
   "action": {
     "default_title": "PASI ChatGPT Handoff",
     "default_popup": "popup.html"
+  },
+  "commands": {
+    "pasi-toggle-runner": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+K"
+      },
+      "description": "Start the idle PASI runner or stop the active PASI runner"
+    }
   },
   "minimum_chrome_version": "120",
   "web_accessible_resources": [

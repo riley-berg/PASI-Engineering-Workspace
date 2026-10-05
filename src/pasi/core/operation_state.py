@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any, Final, Mapping
 
 MAX_METADATA_KEYS = 64
 MAX_METADATA_KEY_CHARS = 128
@@ -11,18 +11,19 @@ MAX_METADATA_VALUE_CHARS = 1024
 
 OPERATION_STATE_SCHEMA_VERSION = 2
 SUPPORTED_OPERATION_STATE_SCHEMA_VERSIONS = frozenset({1, 2})
-OPERATION_STATUSES = frozenset({"queued", "claimed", "generating", "completed", "failed"})
+OPERATION_STATUSES = frozenset({"queued", "claimed", "generating", "completed", "failed", "cancelled"})
 MAX_ID_CHARS = 256
 MAX_PROVIDER_CHARS = 128
 MAX_PHASE_CHARS = 128
 MAX_SIGNATURE_CHARS = 512
 
-_ALLOWED_TRANSITIONS: dict[str, frozenset[str]] = {
-    "queued": frozenset({"claimed", "failed"}),
-    "claimed": frozenset({"generating", "failed"}),
-    "generating": frozenset({"completed", "failed"}),
+OPERATION_ALLOWED_TRANSITIONS: Final[dict[str, frozenset[str]]] = {
+    "queued": frozenset({"claimed", "failed", "cancelled"}),
+    "claimed": frozenset({"generating", "completed", "failed", "cancelled"}),
+    "generating": frozenset({"completed", "failed", "cancelled"}),
     "failed": frozenset({"claimed"}),
     "completed": frozenset(),
+    "cancelled": frozenset(),
 }
 
 
@@ -197,11 +198,40 @@ class OperationState:
         }
         return cls(**payload)
 
+    @classmethod
+    def from_chat_operation(cls, operation: Mapping[str, Any]) -> "OperationState":
+        if not isinstance(operation, Mapping):
+            raise InvalidOperationState("chat operation must be a mapping")
+        prompt = operation.get("prompt", "")
+        response = operation.get("response_text", "")
+        return cls(
+            operation_id=str(operation.get("operation_id", "")),
+            operation_type=str(operation.get("operation_type", "")),
+            status=str(operation.get("status", "queued")),
+            schema_version=OPERATION_STATE_SCHEMA_VERSION,
+            state_revision=int(operation.get("state_revision", 0)),
+            run_id=str(operation.get("run_id", "")),
+            task_id=str(operation.get("task_id", "")),
+            provider=str(operation.get("provider", "chatgpt_browser")),
+            phase=str(operation.get("phase", "")),
+            attempt=int(operation.get("attempt", 0)),
+            prompt_digest=digest_text(prompt) if isinstance(prompt, str) and prompt else "",
+            response_digest=digest_text(response) if isinstance(response, str) and response else "",
+            verification_status=str(operation.get("verification_status", "")),
+            commit_sha=str(operation.get("commit_sha", "")),
+            pr_number=operation.get("pr_number"),
+            failure_signature=str(operation.get("failure_signature", "")),
+            recovery_count=int(operation.get("recovery_count", 0)),
+            metadata=operation.get("metadata", {}),
+            created_at=str(operation.get("created_at", utc_now())),
+            updated_at=str(operation.get("updated_at", utc_now())),
+        )
+
     def can_transition_to(self, status: str) -> bool:
         normalized = _bounded_string(status, name="status", limit=64, allow_empty=False)
         if normalized not in OPERATION_STATUSES:
             raise InvalidOperationTransition(f"unsupported operation status: {normalized!r}")
-        return normalized in _ALLOWED_TRANSITIONS[self.status]
+        return normalized in OPERATION_ALLOWED_TRANSITIONS[self.status]
 
     def transition(self, status: str, *, expected_revision: int | None = None, phase: str | None = None, provider: str | None = None, prompt_digest: str | None = None, response_digest: str | None = None, verification_status: str | None = None, commit_sha: str | None = None, pr_number: int | None = None, failure_signature: str | None = None, metadata: dict[str, str] | None = None) -> "OperationState":
         if expected_revision is not None and expected_revision != self.state_revision:

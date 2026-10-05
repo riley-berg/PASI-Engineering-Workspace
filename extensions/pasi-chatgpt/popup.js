@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+
   const TYPES = {
     active: "pasi.userscript.active_tab",
     menu: "pasi.userscript.menu.list",
@@ -8,123 +9,733 @@
     disable: "pasi.userscript.disable",
     hosts: "pasi.userscript.hosts",
   };
+
+  const RUNNER_PROFILES = {
+    m1: {
+      id: "m1",
+      title: "20-Operation Acceptance",
+      badgeClass: "m1",
+    },
+    "168h": {
+      id: "168h",
+      title: "168-Hour Long-Run Acceptance",
+      badgeClass: "long-run",
+    },
+  };
+
   const $ = (id) => document.getElementById(id);
+
+  function isRunnerTargetUrl(url) {
+    try {
+      const parsed = new URL(String(url || ""));
+      return (
+        parsed.protocol === "https:" &&
+        (parsed.hostname === "chatgpt.com" || parsed.hostname === "www.chatgpt.com")
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function hasMatchedUserscripts(activeResult) {
+    return Array.isArray(activeResult?.scripts) && activeResult.scripts.length > 0;
+  }
+
   function send(type, payload = {}) {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({type, ...payload}, (response) => {
         const error = chrome.runtime.lastError;
         if (error) return reject(new Error(error.message));
-        if (!response?.ok) return reject(new Error(response?.error || "PASI request failed"));
+        if (!response?.ok) {
+          return reject(new Error(response?.error || "PASI request failed"));
+        }
         resolve(response);
       });
     });
   }
-  function status(message, error = false) {
-    $("status").textContent = message;
-    $("status").style.color = error ? "#b91c1c" : "";
+
+  async function bridgeRequest(method, path, body = null) {
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({
+        type: "pasi-control-center-bridge-request",
+        method,
+        path,
+        body,
+      }, (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) return reject(new Error(error.message));
+        resolve(response || null);
+      });
+    });
   }
+
+  function parseBridgeResponse(response) {
+    if (!response) {
+      throw new Error("No response from the PASI bridge.");
+    }
+
+    let payload = {};
+    try {
+      payload = JSON.parse(response.text || "{}");
+    } catch (_) {
+      payload = {};
+    }
+
+    if (!response.ok) {
+      const detail = String(payload?.error || response.text || "").trim();
+      throw new Error(detail || "Bridge request failed (HTTP " + String(response.status || "unknown") + ").");
+    }
+
+    return payload;
+  }
+
+  function setStatus(message, error = false) {
+    const node = $("status");
+    node.textContent = message;
+    node.classList.toggle("error", error);
+  }
+
   async function requestHosts(patterns) {
     const origins = [...new Set(patterns)];
     if (!origins.length) return false;
     return chrome.permissions.request({origins});
   }
-  async function render() {
-    try {
-      const result = await send(TYPES.active);
-      $("site").textContent = result.url || "No inspectable page";
-      const root = $("scripts");
-      root.replaceChildren();
-      const menu = await send(TYPES.menu);
-      if (menu.commands?.length) {
-        const section = document.createElement("section");
-        section.className = "card";
-        const title = document.createElement("div");
-        title.className = "name";
-        title.textContent = "Userscript commands";
-        section.append(title);
-        for (const command of menu.commands) {
-          const button = document.createElement("button");
-          button.textContent = command.title;
-          button.onclick = async () => {
-            await send(TYPES.menuInvoke, {command_id: command.id});
-            window.close();
-          };
-          section.append(button);
-        }
-        root.append(section);
-      }
-      if (!result.scripts?.length) {
-        const empty = document.createElement("div");
-        empty.textContent = "No PASI userscripts match this page.";
-        root.append(empty);
-        return;
-      }
-      for (const script of result.scripts) {
-        const card = document.createElement("section");
-        card.className = "card";
-        const row = document.createElement("div");
-        row.className = "row";
-        const left = document.createElement("div");
-        left.innerHTML = '<div class="name"></div><div class="meta"></div>';
-        left.querySelector(".name").textContent = script.name;
-        left.querySelector(".meta").textContent = script.enabled ? "Enabled" : "Disabled";
-        row.append(left);
-        const toggle = document.createElement("button");
-        toggle.textContent = script.enabled ? "Disable" : "Enable";
-        toggle.onclick = async () => {
-          await send(script.enabled ? TYPES.disable : TYPES.enable, {id: script.id});
-          await render();
-        };
-        row.append(toggle);
-        card.append(row);
 
-        const hosts = document.createElement("div");
-        hosts.className = "hosts";
-        const selected = new Set(script.host_allowlist || script.matches || []);
-        for (const pattern of script.matches || []) {
-          const label = document.createElement("label");
-          label.className = "host";
-          const input = document.createElement("input");
-          input.type = "checkbox";
-          input.checked = selected.has(pattern);
-          input.dataset.pattern = pattern;
-          label.append(input);
-          const text = document.createElement("span");
-          text.textContent = pattern;
-          label.append(text);
-          hosts.append(label);
-        }
-        const apply = document.createElement("button");
-        apply.textContent = "Apply site scope";
-        apply.onclick = async () => {
-          const allowed = [...hosts.querySelectorAll("input:checked")].map((input) => input.dataset.pattern);
-          await send(TYPES.hosts, {id: script.id, host_allowlist: allowed});
-          status("Site scope updated.");
-          await render();
-        };
-        const grant = document.createElement("button");
-        grant.textContent = "Grant checked hosts";
-        grant.onclick = async () => {
-          const origins = [...hosts.querySelectorAll("input:checked")].map((input) => input.dataset.pattern);
-          const granted = await requestHosts(origins);
-          status(granted ? "Host access granted." : "Host access declined.");
-          await render();
-        };
-        const actions = document.createElement("div");
-        actions.className = "actions";
-        actions.append(apply, grant);
-        card.append(hosts, actions);
-        if (!script.host_granted) {
-          const warn = document.createElement("div");
-          warn.className = "warn";
-          warn.textContent = "Some required host permissions are not granted.";
-          card.append(warn);
-        }
-        root.append(card);
-      }
-    } catch (error) {
-      status(String(error.message || error), true);
+  async function getRunnerState() {
+    const response = await bridgeRequest("GET", "/runner/state");
+    try {
+      return parseBridgeResponse(response);
+    } catch (_) {
+      return {available: false, reason: "runner state unavailable"};
     }
   }
-  render();
+
+  function runnerProcessIsActive(state) {
+    if (!state?.available) return false;
+    if (typeof state.process_alive === "boolean") {
+      return state.process_alive;
+    }
+    return (
+      state?.status === "starting" ||
+      state?.status === "running" ||
+      state?.status === "stopping"
+    );
+  }
+
+  function runnerIsActive(state) {
+    return runnerProcessIsActive(state);
+  }
+
+  function activeProfileForState(state) {
+    const processProfile = String(state?.process_profile || "");
+    if (processProfile === "m1" || processProfile === "168h") return processProfile;
+    const explicit = String(state?.runner_profile || "");
+    if (explicit === "m1" || explicit === "168h") return explicit;
+    const mode = String(state?.execution_mode || "");
+    if (mode === "supervised_m1") return "m1";
+    if (mode === "supervised_168h") return "168h";
+    return null;
+  }
+
+  function runnerIsReady(state, profileId) {
+    return (
+      state?.available === true &&
+      state?.ready === true &&
+      runnerProcessIsActive(state) &&
+      activeProfileForState(state) === profileId
+    );
+  }
+
+  function runnerStatusLabel(state, profileId) {
+    if (!state?.available) return "Unavailable";
+    const activeProfile = activeProfileForState(state);
+    const processActive = runnerProcessIsActive(state);
+
+    if (processActive) {
+      if (activeProfile !== profileId) return "Another runner active";
+      if (state.status === "running" && state.ready === true) return "Running";
+      if (state.status === "stopping") return "Stopping";
+      if (state.status === "starting") return "Launching";
+      return "Active process";
+    }
+
+    if (
+      state.status === "failed" &&
+      (!state.runner_profile || state.runner_profile === profileId)
+    ) {
+      return "Failed";
+    }
+    if (
+      (
+        state.status === "completed" ||
+        state.status === "roadmap_complete" ||
+        state.status === "deadline_reached"
+      ) &&
+      (!state.runner_profile || state.runner_profile === profileId)
+    ) {
+      return "Completed";
+    }
+
+    return "";
+  }
+
+  function runnerSummary(state, profileId) {
+    const status = runnerStatusLabel(state, profileId);
+    if (status === "Launching") return "Runner process launched; waiting for ready state.";
+    if (status === "Stopping") return "Stopping runner…";
+    if (status === "Running") {
+      const phase = String(state?.phase || "");
+      const currentStatus = String(state?.current_operation_status || "");
+      const currentId = String(state?.current_operation_id || "");
+      const startupPhases = {
+        startup: "Starting M1 runner.",
+        health_check: "Checking bridge and browser health.",
+        browser_diagnostics: "Reading the active ChatGPT browser state.",
+        ready_for_first_operation: "Ready for the first M1 operation."
+      };
+      const completed = Number(state.completed_operations);
+      const target = Number(state.target_operations);
+      const hasProgress = Number.isFinite(completed) && Number.isFinite(target) && target > 0;
+      if (hasProgress) {
+        const progress = String(completed) + " / " + String(target) + " operations complete";
+        if (phase === "waiting_for_cdp_dispatch" || currentStatus === "queued") {
+          return currentId
+            ? progress + " — Waiting for CDP dispatch of " + currentId
+            : progress + " — Waiting for CDP dispatch.";
+        }
+        if (phase === "processing_response" || currentStatus === "generating") {
+          return progress + " — Waiting for the current response to finish processing.";
+        }
+        if (phase === "ready_for_first_operation") {
+          return progress + " — Ready for the first M1 operation.";
+        }
+        if (phase === "ready_for_next_operation") {
+          return progress + " — Ready for the next M1 operation.";
+        }
+        return progress;
+      }
+      if (startupPhases[phase]) return startupPhases[phase];
+      return "Runner is ready and active.";
+    }
+    if (status === "Active process") {
+      return "Runner process is alive, but its state is not ready.";
+    }
+    if (status === "Another runner active") return "Another runner is active.";
+    if (status === "Completed") return "Last run completed.";
+    if (status === "Failed") {
+      return String(state?.error || state?.stop_reason || state?.last_result || "Last run failed.");
+    }
+    return "";
+  }
+
+  async function waitForRunnerState(profileId, action, timeoutMs = 5000) {
+    const deadline = Date.now() + timeoutMs;
+    let state = await getRunnerState();
+
+    while (Date.now() < deadline) {
+      const activeProfile = activeProfileForState(state);
+      const active = runnerIsActive(state);
+
+      if (action === "start") {
+        if (runnerIsReady(state, profileId)) return state;
+        if (!active || state?.status === "failed") return state;
+      } else if (!active || activeProfile !== profileId) {
+        return state;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      state = await getRunnerState();
+    }
+
+    return state;
+  }
+
+  async function controlRunner(profileId, requestedAction) {
+    const action = requestedAction === "stop" ? "stop" : "start";
+    const currentState = await getRunnerState();
+    const activeProfile = activeProfileForState(currentState);
+    const running = runnerIsActive(currentState);
+
+    if (action === "start" && running) {
+      if (activeProfile && activeProfile !== profileId) {
+        throw new Error(
+          String(activeProfile).toUpperCase() +
+          " runner is already running. Pause it before starting " +
+          (profileId === "168h" ? "168h" : "M1") +
+          "."
+        );
+      }
+      throw new Error(
+        (profileId === "168h" ? "168h" : "M1") +
+        " runner is already running."
+      );
+    }
+
+    if (action === "stop" && (!running || activeProfile !== profileId)) {
+      throw new Error(
+        (profileId === "168h" ? "168h" : "M1") +
+        " runner is not running."
+      );
+    }
+
+    const raw = await bridgeRequest("POST", "/runner/control", {
+      action,
+      profile: profileId,
+    });
+    const result = parseBridgeResponse(raw);
+
+    if (!result.accepted || result.action !== action) {
+      throw new Error(String(result.reason || "Runner action was rejected."));
+    }
+
+    const settledState = await waitForRunnerState(profileId, action);
+    if (action === "start") {
+      if (settledState?.status === "failed") {
+        throw new Error(
+          String(
+            settledState?.error ||
+            settledState?.stop_reason ||
+            settledState?.last_result ||
+            (profileId === "168h" ? "168h" : "M1") + " runner failed during launch."
+          )
+        );
+      }
+      if (runnerIsReady(settledState, profileId)) {
+        setStatus((profileId === "168h" ? "168h" : "M1") + " runner ready.");
+      } else {
+        setStatus((profileId === "168h" ? "168h" : "M1") + " runner is still launching; it is not ready yet.");
+      }
+    } else if (runnerIsActive(settledState)) {
+      setStatus((profileId === "168h" ? "168h" : "M1") + " runner is still stopping.");
+    } else {
+      setStatus((profileId === "168h" ? "168h" : "M1") + " runner stopped.");
+    }
+
+    return action;
+  }
+  function diagnosticText(state, aggregateState, profileId) {
+    const process = state?.process;
+    const processes = Array.isArray(aggregateState?.processes) ? aggregateState.processes : [];
+    const lines = [
+      "Profile: " + profileId,
+      "State: " + String(state?.status || "unavailable"),
+      "Phase: " + String(state?.phase || "n/a"),
+      "Execution: " + String(state?.execution_mode || "n/a"),
+      "Ready: " + (state?.ready === true ? "yes" : "no"),
+      "Process alive: " + (state?.process_alive === true ? "yes" : "no"),
+      "Runner PID: " + String(state?.runner_pid ?? "n/a"),
+      "Detected PID: " + String(process?.pid ?? state?.process_pid ?? "none"),
+      "Detected command: " + String(process?.cmdline ?? state?.process_cmdline ?? "none"),
+      "Runtime state: " + String(state?.runtime_state_path || "n/a"),
+      "Bridge PID: " + String(aggregateState?.bridge_process?.pid ?? "n/a"),
+      "Error: " + String(state?.error || "none"),
+      "All detected PASI processes:",
+    ];
+    if (processes.length) {
+      for (const item of processes) {
+        lines.push(
+          "  " + String(item.profile || "unknown") +
+          " pid=" + String(item.pid || "n/a") +
+          " workspace=" + (item.workspace ? "yes" : "no") +
+          " command=" + String(item.cmdline || "n/a")
+        );
+      }
+    } else {
+      lines.push("  none");
+    }
+    return lines.join("\n");
+  }
+
+  function createRunnerCard(profileId, state, aggregateState = state) {
+    const profile = RUNNER_PROFILES[profileId];
+    const card = document.createElement("section");
+    card.className = "runner-card";
+    card.dataset.profile = profileId;
+
+    const header = document.createElement("div");
+    header.className = "card-header";
+
+    const url = document.createElement("span");
+    url.className = "url";
+    url.title = $("currentUrl")?.textContent || "https://chatgpt.com/";
+    url.textContent = $("currentUrl")?.textContent || "chatgpt.com";
+
+    const badge = document.createElement("span");
+    badge.className = "badge " + profile.badgeClass;
+    badge.textContent = profileId === "m1"
+      ? "Runner: M1"
+      : "Runner: 168h";
+
+    header.append(url, badge);
+
+    const title = document.createElement("div");
+    title.className = "card-title";
+    title.textContent = profile.title;
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+
+    const stateLabelText = runnerStatusLabel(state, profileId);
+    if (stateLabelText) {
+      const stateClass =
+        stateLabelText === "Launching" ? "launching" :
+        stateLabelText === "Stopping" ? "stopping" :
+        stateLabelText === "Running" ? "running" :
+        stateLabelText === "Active process" ? "active" :
+        stateLabelText === "Failed" ? "failed" :
+        stateLabelText === "Completed" ? "completed" :
+        "unavailable";
+
+      const statusText = document.createElement("div");
+      statusText.className = "status-text " + stateClass;
+
+      const dot = document.createElement("span");
+      dot.className = "status-dot " + stateClass;
+      dot.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.textContent = stateLabelText;
+      statusText.append(dot, label);
+
+      const summary = runnerSummary(state, profileId);
+      if (summary) {
+        const desc = document.createElement("div");
+        desc.className = "status-desc";
+        desc.textContent = summary;
+        body.append(statusText, desc);
+      } else {
+        body.append(statusText);
+      }
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+
+    const toggle = document.createElement("button");
+    toggle.className = "btn btn-primary";
+    toggle.type = "button";
+    const activeThisProfile = runnerIsActive(state) && activeProfileForState(state) === profileId;
+    const anotherRunnerActive = aggregateState?._anotherRunnerActive === true;
+    const stoppingThisProfile = activeThisProfile && state?.status === "stopping";
+    toggle.textContent = stoppingThisProfile ? "Stopping" : activeThisProfile ? "Stop" : "Start";
+    toggle.disabled = stoppingThisProfile || anotherRunnerActive;
+
+    toggle.onclick = async () => {
+      const stopping = activeThisProfile;
+      toggle.disabled = true;
+      if (stopping) {
+        toggle.textContent = "Stopping…";
+        toggle.setAttribute("aria-label", "Stopping runner");
+      }
+      try {
+        await controlRunner(profileId, stopping ? "stop" : "start");
+        await render();
+      } catch (error) {
+        setStatus(String(error?.message || error), true);
+        await render();
+      }
+    };
+
+    const diagnostic = document.createElement("details");
+    diagnostic.className = "runner-diagnostics";
+    const diagnosticSummary = document.createElement("summary");
+    diagnosticSummary.textContent = "Diagnostics";
+    const diagnosticPre = document.createElement("pre");
+    diagnosticPre.textContent = diagnosticText(state, aggregateState, profileId);
+    diagnostic.append(diagnosticSummary, diagnosticPre);
+    body.append(diagnostic);
+
+    actions.append(toggle);
+    card.append(header, title, body, actions);
+    return card;
+  }
+
+  function renderRunnerDashboard(state, visible) {
+    const root = $("runnerCards");
+    const openDiagnostics = new Map(
+      [...root.querySelectorAll(".runner-card")].map((card) => [
+        card.dataset.profile,
+        card.querySelector(".runner-diagnostics")?.open === true,
+      ])
+    );
+    root.replaceChildren();
+
+    if (!visible) {
+      $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
+      $("connectionBadge").classList.remove("active");
+      return;
+    }
+
+    const profiles = state?.profiles && typeof state.profiles === "object"
+      ? state.profiles
+      : {};
+
+    for (const profileId of Object.keys(RUNNER_PROFILES)) {
+      const profileState = profiles[profileId] || state;
+      const globalActiveProfile = String(state?.active_profile || "");
+      const anotherRunnerActive =
+        Boolean(globalActiveProfile) && globalActiveProfile !== profileId;
+      const card = createRunnerCard(
+        profileId,
+        profileState,
+        {...state, _anotherRunnerActive: anotherRunnerActive}
+      );
+      const diagnostic = card.querySelector(".runner-diagnostics");
+      if (diagnostic) {
+        diagnostic.open = openDiagnostics.get(profileId) === true;
+      }
+      root.append(card);
+    }
+
+    $("connectionBadge").textContent = state?.available ? "Connected" : "Disconnected";
+    $("connectionBadge").classList.remove("active");
+  }
+
+  async function renderUserscripts(activeResult) {
+    const root = $("scripts");
+    root.replaceChildren();
+
+    const scripts = Array.isArray(activeResult?.scripts) ? activeResult.scripts : [];
+    const menu = await send(TYPES.menu);
+    const commands = Array.isArray(menu.commands) ? menu.commands : [];
+
+    if (!scripts.length && !commands.length) {
+      return;
+    }
+
+    const title = document.createElement("div");
+    title.className = "userscript-section-title";
+    title.textContent = "PASI userscripts";
+    root.append(title);
+
+    if (commands.length) {
+      const section = document.createElement("section");
+      section.className = "card userscript-card";
+
+      for (const command of commands) {
+        const button = document.createElement("button");
+        button.className = "btn btn-secondary";
+        button.type = "button";
+        button.textContent = command.title;
+        button.style.width = "100%";
+        button.onclick = async () => {
+          await send(TYPES.menuInvoke, {command_id: command.id});
+          window.close();
+        };
+        section.append(button);
+      }
+
+      root.append(section);
+    }
+
+    for (const script of scripts) {
+      const card = document.createElement("section");
+      card.className = "card userscript-card";
+
+      const row = document.createElement("div");
+      row.className = "row";
+
+      const left = document.createElement("div");
+      left.innerHTML = '<div class="name"></div><div class="meta"></div>';
+      left.querySelector(".name").textContent = script.name;
+      left.querySelector(".meta").textContent = script.enabled ? "Enabled" : "Disabled";
+      row.append(left);
+
+      const toggle = document.createElement("button");
+      toggle.className = "btn btn-secondary";
+      toggle.type = "button";
+      toggle.textContent = script.enabled ? "Disable" : "Enable";
+      toggle.onclick = async () => {
+        await send(script.enabled ? TYPES.disable : TYPES.enable, {id: script.id});
+        await render();
+      };
+      row.append(toggle);
+      card.append(row);
+
+      const hosts = document.createElement("div");
+      hosts.className = "hosts";
+      const selected = new Set(script.host_allowlist || script.matches || []);
+
+      for (const pattern of script.matches || []) {
+        const label = document.createElement("label");
+        label.className = "host";
+
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = selected.has(pattern);
+        input.dataset.pattern = pattern;
+
+        const text = document.createElement("span");
+        text.textContent = pattern;
+
+        label.append(input, text);
+        hosts.append(label);
+      }
+
+      const apply = document.createElement("button");
+      apply.className = "btn btn-secondary";
+      apply.type = "button";
+      apply.textContent = "Apply site scope";
+      apply.onclick = async () => {
+        const allowed = [...hosts.querySelectorAll("input:checked")].map((input) => input.dataset.pattern);
+        await send(TYPES.hosts, {id: script.id, host_allowlist: allowed});
+        setStatus("Site scope updated.");
+        await render();
+      };
+
+      const grant = document.createElement("button");
+      grant.className = "btn btn-secondary";
+      grant.type = "button";
+      grant.textContent = "Grant checked hosts";
+      grant.onclick = async () => {
+        const origins = [...hosts.querySelectorAll("input:checked")].map((input) => input.dataset.pattern);
+        const granted = await requestHosts(origins);
+        setStatus(granted ? "Host access granted." : "Host access declined.");
+        await render();
+      };
+
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      actions.append(apply, grant);
+      card.append(hosts, actions);
+
+      if (!script.host_granted) {
+        const warn = document.createElement("div");
+        warn.className = "warn";
+        warn.textContent = "Some required host permissions are not granted.";
+        card.append(warn);
+      }
+
+      root.append(card);
+    }
+  }
+
+  function updateThemeToggleButton(light) {
+    const button = $("themeToggle");
+    button.textContent = light ? "☀️" : "🌙";
+    button.title = light ? "Switch to dark theme" : "Switch to light theme";
+    button.setAttribute("aria-label", button.title);
+  }
+
+  function applyThemeDom(light) {
+    const root = document.documentElement;
+    root.classList.toggle("light-theme", light);
+    root.style.backgroundColor = light ? "#FAF8F5" : "#0D0E11";
+    root.style.colorScheme = light ? "light" : "dark";
+
+    const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+    if (colorSchemeMeta) {
+      colorSchemeMeta.setAttribute("content", light ? "light dark" : "dark light");
+    }
+
+    updateThemeToggleButton(light);
+  }
+
+  function getLocalTheme() {
+    try {
+      return localStorage.getItem("pasi.popup.theme");
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setLocalTheme(theme) {
+    try {
+      localStorage.setItem("pasi.popup.theme", theme);
+    } catch (_) {
+      // chrome.storage.local remains the durable fallback.
+    }
+  }
+
+  function applyTheme() {
+    updateThemeToggleButton(
+      document.documentElement.classList.contains("light-theme")
+    );
+  }
+
+  async function toggleTheme() {
+    const light = !document.documentElement.classList.contains("light-theme");
+    const theme = light ? "light" : "dark";
+
+    setLocalTheme(theme);
+    applyThemeDom(light);
+
+    try {
+      await chrome.storage.local.set({"pasi.popup.theme": theme});
+    } catch (_) {
+      // localStorage has already persisted the theme for the next popup paint.
+    }
+  }
+
+  async function getLiveActiveUrl(fallbackUrl) {
+    let activeUrl = String(fallbackUrl || "");
+
+    // Prefer the active tab in the focused browser window. If that tab is
+    // outside PASI's ChatGPT runner target, fall back to any open ChatGPT tab
+    // so opening the popup from an unrelated window does not deauthorize the
+    // extension while an authorized runner tab is still open elsewhere.
+    try {
+      const tabs = await chrome.tabs.query({active: true, lastFocusedWindow: true});
+      const tabUrl = String(tabs?.[0]?.url || "");
+      if (tabUrl) activeUrl = tabUrl;
+      if (isRunnerTargetUrl(activeUrl)) return activeUrl;
+
+      const openTabs = await chrome.tabs.query({});
+      const authorizedTab = openTabs.find((tab) => isRunnerTargetUrl(tab?.url));
+      const authorizedUrl = String(authorizedTab?.url || "");
+      if (authorizedUrl) activeUrl = authorizedUrl;
+    } catch (_) {}
+
+    return activeUrl;
+  }
+
+  async function render({clearStatus = false} = {}) {
+    try {
+      applyTheme();
+
+      const [activeResult, runnerState] = await Promise.all([
+        send(TYPES.active),
+        getRunnerState(),
+      ]);
+
+      // Resolve authorization from the live active tab on every render.
+      const activeUrl = await getLiveActiveUrl(activeResult.url);
+      const runnerSupported = isRunnerTargetUrl(activeUrl);
+      const userscriptsMatched = hasMatchedUserscripts(activeResult);
+
+      const currentUrl = $("currentUrl") || document.createElement("div");
+      currentUrl.id = "currentUrl";
+      currentUrl.textContent = activeUrl || "https://chatgpt.com/";
+      currentUrl.hidden = true;
+      if (!currentUrl.parentElement) document.body.append(currentUrl);
+
+      renderRunnerDashboard(runnerState, runnerSupported);
+      await renderUserscripts(activeResult);
+
+      const idle = $("idleState");
+      if (idle) {
+        idle.hidden = runnerSupported || userscriptsMatched;
+      }
+
+      if (clearStatus && !$("status").classList.contains("error")) {
+        setStatus("");
+      }
+    } catch (error) {
+      setStatus(String(error?.message || error), true);
+    }
+  }
+
+  $("themeToggle").addEventListener("click", () => {
+    void toggleTheme().catch((error) => setStatus(String(error?.message || error), true));
+  });
+
+  void render();
+
+  // Keep the dashboard synchronized while the popup is open. Runner state is
+  // durable on the bridge, but without polling the popup can display an old
+  // "Running" or 0/20 snapshot after the process has already advanced/failed.
+  const runnerRefreshTimer = setInterval(() => {
+    void render();
+  }, 750);
+  window.addEventListener("unload", () => clearInterval(runnerRefreshTimer), {once: true});
 })();

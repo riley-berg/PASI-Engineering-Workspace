@@ -5,9 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+  issues: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -26,3 +32,5 @@ jobs:
           node-version: '22'
       - name: Frontend tests
         run: node --test web/app.test.js
+      - name: Extension tests
+        run: node --test extensions/pasi-chatgpt/src/test_*.cjs

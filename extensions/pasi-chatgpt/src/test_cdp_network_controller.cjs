@@ -35,7 +35,33 @@ function fakeDebugger() {
     detach(_debuggee, callback) { callback(); },
     sendCommand(_debuggee, method, params, callback) {
       commands.push({method, params});
-      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus') return callback({});
+      if (method === 'Accessibility.enable' || method === 'Accessibility.disable' || method === 'DOM.focus' ||
+          method === 'Runtime.enable' || method === 'Runtime.disable' ||
+          method === 'Network.enable' || method === 'Network.disable' ||
+          method === 'Page.enable' || method === 'Page.disable') return callback({});
+      if (method === 'Page.getLayoutMetrics') return callback({visualViewport: {clientWidth: 1280, clientHeight: 720}});
+      if (method === 'Page.captureScreenshot') return callback({data: Buffer.from('PASI_SCREENSHOT').toString('base64')});
+      if (method === 'DOMSnapshot.captureSnapshot') {
+        return callback({
+          documents: [{
+            frame: {url: 'https://chatgpt.com/c/test', name: 'PASI Test'},
+            nodes: {
+              nodeName: ['#document', 'BODY', 'BUTTON', '#text'],
+              nodeType: [9, 1, 1, 3],
+              nodeValue: ['', '', '', 'Start'],
+              parentIndex: [-1, 0, 1, 2],
+              attributes: [[], [], ['id', 'start', 'class', 'primary', 'data-testid', 'start-button'], []],
+            },
+            layout: {
+              nodeIndex: [0, 1, 2],
+              bounds: [[0, 0, 1280, 720], [10, 10, 120, 40], [10, 10, 120, 40]],
+            },
+          }],
+        });
+      }
+      if (method === 'DOM.getBoxModel') {
+        return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
+      }
       if (method === 'Accessibility.getFullAXTree') {
         return callback({
           nodes: [{
@@ -79,6 +105,20 @@ function fakeDebugger() {
   };
 }
 
+test('completion markers reject fenced and quoted copies', () => {
+  assert.equal(
+    source.completionMarkersSatisfied('Previous answer:\n```text\nNETWORK_PATCH_OK_2026\n```', ['NETWORK_PATCH_OK_2026']),
+    false
+  );
+  assert.equal(
+    source.completionMarkersSatisfied('> NETWORK_PATCH_OK_2026', ['NETWORK_PATCH_OK_2026']),
+    false
+  );
+  assert.equal(
+    source.completionMarkersSatisfied('NETWORK_PATCH_OK_2026', ['NETWORK_PATCH_OK_2026']),
+    true
+  );
+});
 test('CDP controller keeps prompt bindings exclusive and exposes idle state', async () => {
   const debuggerApi = fakeDebugger();
   const controller = source.createController({debuggerApi});
@@ -254,6 +294,79 @@ test('CDP submit operation uses native input and never clicks a DOM send control
   const keyEvents = debuggerApi.commands.filter((command) => command.method === 'Input.dispatchKeyEvent');
   assert.deepEqual(keyEvents.map((command) => command.params.type), ['keyDown', 'keyUp']);
   assert.ok(!debuggerApi.commands.some((command) => command.method === 'Runtime.evaluate' && /button/i.test(command.params.expression) && /click/i.test(command.params.expression)));
+});
+
+test('CDP submit uses the accessible Send control before Enter fallback', async () => {
+  const debuggerApi = fakeDebugger();
+  let sendClicked = false;
+  let axReads = 0;
+  const prompt = '[PASI_OPERATION op-send-button]';
+  const originalSendCommand = debuggerApi.sendCommand.bind(debuggerApi);
+
+  debuggerApi.sendCommand = function(_debuggee, method, params, callback) {
+    if (method === 'Accessibility.getFullAXTree') {
+      this.commands.push({method, params});
+      axReads += 1;
+      return callback({
+        nodes: [
+          {
+            nodeId: 'ax-composer',
+            backendDOMNodeId: 101,
+            role: {type: 'role', value: 'textbox'},
+            name: {type: 'computedString', value: 'Message'},
+            value: {type: 'string', value: sendClicked ? '' : (axReads === 1 ? '' : prompt)},
+            ignored: false,
+            properties: [
+              {name: 'editable', value: {type: 'boolean', value: true}},
+              {name: 'multiline', value: {type: 'boolean', value: true}},
+              {name: 'focused', value: {type: 'boolean', value: axReads > 0}}
+            ]
+          },
+          {
+            nodeId: 'ax-send',
+            backendDOMNodeId: 202,
+            role: {type: 'role', value: 'button'},
+            name: {type: 'computedString', value: 'Send'},
+            ignored: false,
+            properties: [
+              {name: 'disabled', value: {type: 'boolean', value: false}}
+            ]
+          }
+        ]
+      });
+    }
+    if (method === 'DOM.getBoxModel') {
+      this.commands.push({method, params});
+      return callback({model: {border: [10, 20, 30, 20, 30, 40, 10, 40]}});
+    }
+    if (method === 'Input.dispatchMouseEvent' && params?.type === 'mouseReleased') {
+      sendClicked = true;
+    }
+    return originalSendCommand(_debuggee, method, params, callback);
+  };
+
+  const controller = source.createController({debuggerApi, now: () => Date.now()});
+  controller.install();
+  await controller.bindOperation({
+    tabId: 21,
+    operationId: 'op-send-button',
+    controllerId: 'controller-21',
+    prompt,
+    completionMarkers: ['SEND_BUTTON_OK']
+  });
+
+  const result = await controller.submitOperation(21, 'op-send-button', 'controller-21');
+  assert.equal(result.submitted, true);
+  assert.equal(result.submissionMethod, 'cdp_accessibility_send_button_mouse');
+  assert.equal(sendClicked, true);
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'DOM.getBoxModel'));
+  assert.ok(debuggerApi.commands.some((command) => command.method === 'Input.dispatchMouseEvent'));
+  assert.equal(
+    debuggerApi.commands.some(
+      (command) => command.method === 'Input.dispatchKeyEvent' && command.params.key === 'Enter'
+    ),
+    false,
+  );
 });
 
 test('CDP submit rejects an unacknowledged send instead of treating a red-box submission as accepted', async () => {
@@ -741,4 +854,62 @@ test('network-health exposes the request-to-task map and controller fence', asyn
   assert.equal(health.attachedTabs[0].operationId, 'op-11');
   assert.equal(health.attachedTabs[0].controllerId, 'controller-11');
   assert.equal(health.activeRequests.length, 0);
+});
+
+
+test('browser testing exposes screenshot and bounded DOM snapshot inspection', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  const screenshot = await controller.runBrowserTest(31, 'screenshot');
+  assert.equal(screenshot.mime_type, 'image/png');
+  assert.equal(screenshot.width, 1280);
+  assert.equal(screenshot.height, 720);
+  assert.ok(screenshot.image_base64);
+
+  const dom = await controller.runBrowserTest(31, 'dom', {
+    selector: '#start',
+    max_elements: 1,
+    max_text_chars: 100,
+  });
+  assert.equal(dom.matched_count, 1);
+  assert.equal(dom.elements[0].id, 'start');
+  assert.equal(dom.elements[0].text, 'Start');
+  assert.equal(dom.elements[0].visible, true);
+});
+
+test('browser testing records console errors and sanitizes network URLs', async () => {
+  const debuggerApi = fakeDebugger();
+  const controller = source.createController({debuggerApi});
+  controller.install();
+  await controller.attachTab(44);
+
+  await debuggerApi.emit({tabId: 44}, 'Runtime.consoleAPICalled', {
+    type: 'error',
+    timestamp: 1,
+    args: [{value: 'UI failure'}],
+  });
+  await debuggerApi.emit({tabId: 44}, 'Network.requestWillBeSent', {
+    requestId: 'req-ui',
+    request: {url: 'https://chatgpt.com/backend-api/ui?token=secret', method: 'GET'},
+    type: 'Fetch',
+    timestamp: 2,
+  });
+  await debuggerApi.emit({tabId: 44}, 'Network.responseReceived', {
+    requestId: 'req-ui',
+    response: {
+      url: 'https://chatgpt.com/backend-api/ui?token=secret',
+      status: 200,
+      mimeType: 'application/json',
+    },
+    type: 'Fetch',
+    timestamp: 3,
+  });
+
+  const consoleResult = await controller.runBrowserTest(44, 'console_errors', {limit: 10});
+  assert.equal(consoleResult.errors[0].text[0], 'UI failure');
+
+  const networkResult = await controller.runBrowserTest(44, 'network', {limit: 10});
+  assert.equal(networkResult.events[0].url, 'https://chatgpt.com/backend-api/ui');
+  assert.equal(networkResult.events.some((event) => String(event.url).includes('token=secret')), false);
 });

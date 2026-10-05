@@ -8,7 +8,7 @@ from pasi.core.task_selection import EvidenceAwareTaskSelector, EvidenceSnapshot
 def make_roadmap() -> Roadmap:
     return Roadmap(
         roadmap_id="pasi-main",
-        version=3,
+        version=4,
         revision=0,
         phases=(RoadmapPhase("P2", "Planner", status=PhaseStatus.ACTIVE),),
         tasks=(

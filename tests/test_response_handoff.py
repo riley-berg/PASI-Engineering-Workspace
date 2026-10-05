@@ -8,6 +8,64 @@ from automation.orchestrator.bridge import BridgeState
 from automation.orchestrator.state import StateManager
 
 
+def test_supervised_execution_authorization_requires_live_acceptance_runner(monkeypatch):
+    from automation.orchestrator import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: True)
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_168h",
+    }) is True
+
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_m1",
+    }) is True
+
+    assert bridge_module._runner_profile("m1") == "m1"
+    assert bridge_module._runner_profile("168h") == "168h"
+
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: False)
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "supervised_168h",
+    }) is False
+
+    assert bridge_module.runner_execution_authorized({
+        "status": "running",
+        "execution_mode": "manual",
+    }) is False
+
+
+def test_atomic_runner_state_write_is_available(tmp_path: Path):
+    from automation.orchestrator import bridge as bridge_module
+
+    target = tmp_path / "runner" / "state.json"
+    bridge_module.atomic_write_json(target, {"status": "paused", "profile": "m1"})
+
+    assert target.read_text(encoding="utf-8") == '{\n  "status": "paused",\n  "profile": "m1"\n}\n'
+
+
+def test_runner_start_reports_missing_script_instead_of_raising_server_error(tmp_path: Path, monkeypatch):
+    from automation.orchestrator import bridge as bridge_module
+
+    missing_script = tmp_path / "missing-runner.py"
+    monkeypatch.setattr(bridge_module, "runner_process_is_alive", lambda profile=None: False)
+    monkeypatch.setattr(bridge_module, "RUNNER_LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(
+        bridge_module,
+        "RUNNER_PROFILES",
+        {"m1": (bridge_module.sys.executable, str(missing_script))},
+    )
+
+    result = bridge_module.request_runner_control("start", "m1")
+
+    assert result["accepted"] is False
+    assert result["action"] == "start"
+    assert result["profile"] == "m1"
+    assert result["reason"] == "runner script is missing from the active PASI workspace"
+
+
 def test_wait_for_next_operation_wakes_when_runner_queues_after_response_processing(tmp_path: Path):
     state = StateManager(tmp_path / "state")
     bridge = BridgeState(state)
@@ -88,6 +146,46 @@ def test_prequeued_next_operation_waits_for_runner_processing_ack(tmp_path: Path
     assert claimed_second["operation_id"] == second.operation_id
     assert claimed_second["predecessor_operation_id"] == first.operation_id
     assert claimed_second["predecessor_completed_at_ms"] == 123_456
+
+
+def test_cancel_operation_can_clean_up_an_interrupted_queued_diagnostic(tmp_path: Path):
+    bridge = BridgeState(StateManager(tmp_path / "state"))
+    operation = bridge.queue_operation("prompt", "interrupted diagnostic")
+
+    cancelled = bridge.cancel_operation(
+        operation.operation_id,
+        reason="live diagnostic interrupted by operator",
+    )
+
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["failure_reason"] == "cancelled"
+    assert cancelled["error"] == "live diagnostic interrupted by operator"
+    assert bridge.claim_next_operation("controller-1") is None
+
+
+def test_cancel_operation_requires_matching_controller_for_claimed_work(tmp_path: Path):
+    bridge = BridgeState(StateManager(tmp_path / "state"))
+    operation = bridge.queue_operation("prompt", "claimed diagnostic")
+    claimed = bridge.claim_next_operation("controller-1")
+
+    assert claimed is not None
+    assert claimed["operation_id"] == operation.operation_id
+
+    try:
+        bridge.cancel_operation(operation.operation_id, "controller-2", "stale controller")
+    except Exception as exc:
+        assert "different controller" in str(exc)
+    else:
+        raise AssertionError("controller fencing did not reject mismatched cancellation")
+
+    cancelled = bridge.cancel_operation(
+        operation.operation_id,
+        "controller-1",
+        "operator interrupted diagnostic",
+    )
+    assert cancelled is not None
+    assert cancelled["status"] == "cancelled"
 
 
 def test_next_operation_carries_predecessor_completion_evidence(tmp_path: Path):

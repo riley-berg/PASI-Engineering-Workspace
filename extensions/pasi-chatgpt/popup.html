@@ -1,22 +1,60 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" style="background:#0B0D10;color-scheme:dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>PASI Active Site</title>
+  <meta name="color-scheme" content="dark light">
+  <title>PASI Dashboard</title>
+  <script src="theme-init.js"></script>
+  <style id="pasi-theme-critical">
+    html {
+      background: #0B0D10;
+      color-scheme: dark;
+    }
+
+    html.light-theme {
+      background: #F5F7FA;
+      color-scheme: light;
+    }
+
+    body {
+      background: #0B0D10;
+      color: #F5F7FA;
+    }
+
+    html.light-theme body {
+      background: #F5F7FA;
+      color: #171A20;
+    }
+
+    button {
+      -webkit-appearance: none;
+      appearance: none;
+    }
+  </style>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header>
-    <div>
-      <p class="eyebrow">PASI</p>
-      <h1>Active site</h1>
-      <div id="site" class="muted">Loading…</div>
+  <header class="popup-header">
+    <div class="brand-group">
+      <span class="brand">PASI Dashboard</span>
+      <span id="connectionBadge" class="status-badge">Connected</span>
     </div>
-    <a href="options.html" target="_blank">Dashboard</a>
+    <button id="themeToggle" class="theme-toggle" type="button" title="Switch to light theme" aria-label="Switch to light theme">🌙</button>
   </header>
-  <div id="status" class="status"></div>
-  <main id="scripts"></main>
+
+  <div id="status" class="status" role="status" aria-live="polite"></div>
+
+  <main id="runnerCards" class="runners-list" aria-label="PASI runners"></main>
+
+  <section id="scripts" aria-label="PASI userscripts"></section>
+
+  <section id="idleState" class="idle-state" hidden aria-live="polite">
+    <div class="idle-icon" aria-hidden="true">⚠️</div>
+    <div class="idle-title">Page not authorized</div>
+    <div class="idle-copy">This page is not authorized for the PASI extension.</div>
+  </section>
+
   <script src="popup.js"></script>
 </body>
 </html>

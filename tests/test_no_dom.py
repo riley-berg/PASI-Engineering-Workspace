@@ -10,7 +10,7 @@ def test_engineering_workspace_uses_pasi_chatgpt_handoff():
 
     extension = root / "extensions" / "pasi-chatgpt"
     manifest = extension / "manifest.json"
-    content = extension / "src" / "content.js"
+    content = extension / "src" / "legacy" / "dom-controller.js"
 
     assert manifest.is_file()
     assert content.is_file()

@@ -72,6 +72,10 @@ GROUP_OPTIONS = (
     "Decision Gate — Major Decision / ETAM Selection",
 )
 
+CHILD_LABEL_KEYS = {
+    "PASI Interdisciplinary Engineering Portfolio": "pasi-portfolio",
+}
+
 GROUP_LABEL_KEYS = {
     "All Paths — Shared Strategy": "all-paths-shared-strategy",
     "Computer Science — Optimized Strategy": "computer-science-optimized",

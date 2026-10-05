@@ -1,10 +1,59 @@
 {
   "name": "PASI Engineering Workspace roadmap",
+  "canonical_source": "phase issues in th3-st0v3/PASI-Engineering-Workspace",
+  "planning_rule": "dependency_gates_override_calendar_targets",
+  "cross_cutting_contracts": [
+    "Active browser tab/controller identity is durable execution identity; conversation URLs are metadata.",
+    "CDP Fetch response interception and response streaming are authoritative for ChatGPT generation transport.",
+    "CDP Accessibility/Input is the browser interaction boundary; DOM is diagnostic, not authoritative transport/state.",
+    "Durable operation ledger is authoritative; network observations feed correlation/classification.",
+    "At most one operation is dispatchable; stale queued/claimed operations must be reconciled or quarantined before resume.",
+    "P0.4 is a supervisor-owned seven-day gate, not a model coding task.",
+    "Reuse the authenticated ChatGPT session; new chat only on verified context exhaustion; usage limits are blocked states.",
+    "Architecture changes during acceptance require explicit evidence and must not silently replace the system under test.",
+    "Passing tests without repository progress, commit/PR evidence, and provenance is not task completion.",
+    "Protected supervisory core is immutable from agent self-editing; mutable skills/tools use shadow verification and atomic promotion/rollback."
+  ],
   "phases": [
-    {"id": "P0", "title": "Runtime proof and delivery infrastructure", "depends_on": [], "status": "completed"},
-    {"id": "P1", "title": "Control-plane consolidation", "depends_on": ["P0"], "status": "completed"},
-    {"id": "P2", "title": "Planner, scheduler, and engineering memory", "depends_on": ["P1"], "status": "in_progress"},
-    {"id": "P3", "title": "Provider-neutral model infrastructure", "depends_on": ["P2"], "status": "planned"},
-    {"id": "P4", "title": "Typed computer integration", "depends_on": ["P1", "P3"], "status": "planned"}
+    {
+      "id": "P0",
+      "title": "Runtime proof and delivery infrastructure",
+      "depends_on": [],
+      "status": "in_progress",
+      "canonical_issue": 108,
+      "gate": "P0.4",
+      "notes": "P0.4 remains active until the full 168-hour supervisor window closes with evidence."
+    },
+    {
+      "id": "P1",
+      "title": "Control-plane consolidation",
+      "depends_on": ["P0"],
+      "status": "planned",
+      "canonical_issue": 109,
+      "notes": "Includes protected-core/mutable-skill boundaries, shadow self-modification, multi-agent orchestration, persistent automation gateway, and change-aware verification."
+    },
+    {
+      "id": "P2",
+      "title": "Planner, scheduler, and engineering memory",
+      "depends_on": ["P1"],
+      "status": "planned",
+      "canonical_issue": 111,
+      "notes": "Includes procedural skills, guarded skill adaptation, cross-session memory, persistent scheduling, and asynchronous gateway integrations."
+    },
+    {
+      "id": "P3",
+      "title": "Provider-neutral model infrastructure",
+      "depends_on": ["P2"],
+      "status": "planned",
+      "canonical_issue": 112
+    },
+    {
+      "id": "P4",
+      "title": "Typed computer integration",
+      "depends_on": ["P1", "P3"],
+      "status": "planned",
+      "canonical_issue": 113,
+      "notes": "Includes stable browser-tab identity and browser-session continuity; computer use stays behind typed capability, authorization, resource, and recovery boundaries."
+    }
   ]
 }

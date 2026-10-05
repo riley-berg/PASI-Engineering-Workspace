@@ -52,3 +52,21 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/cleanup_duplicate_branches.py --json
+
+
+  project-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Reconcile canonical PASI roadmap Project
+        env:
+          PASI_PROJECTS_TOKEN: ${{ secrets.PASI_PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          python scripts/github_project_v2.py

@@ -821,7 +821,7 @@ def reconcile(dry_run: bool) -> None:
             (item.get("childGroup") or {}).get("name"),
             (item.get("group") or {}).get("name"),
         )
-        expected = (start, end, float(duration), quarter, parent, child, child)
+        expected = (start, end, float(duration), quarter, parent, child, group)
         if actual != expected:
             raise RoadmapError(
                 f"verification mismatch for {REPOSITORY}#{n}: got {actual!r}, expected {expected!r}"

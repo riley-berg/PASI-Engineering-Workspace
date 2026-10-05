@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: branch-hygiene
+  group: branch-hygiene-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:

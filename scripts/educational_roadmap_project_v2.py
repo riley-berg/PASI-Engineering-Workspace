@@ -76,6 +76,20 @@ GROUP_OPTIONS = (
     "All Paths — PASI Interdisciplinary Engineering Portfolio",
 )
 
+GROUP_LABEL_KEYS = {
+    "All Paths — Common Foundation": "all-paths-common-foundation",
+    "All Paths — Credit-Elimination Strategy": "all-paths-credit-strategy",
+    "All Paths — Engineering Academy Common Path": "all-paths-academy-common",
+    "Computer Science — Optimized Strategy": "computer-science-optimized",
+    "Computer Engineering — Optimized Strategy": "computer-engineering-optimized",
+    "Electrical Engineering — Optimized Strategy": "electrical-engineering-optimized",
+    "Mechanical Engineering / Robotics — Optimized Strategy": "me-robotics-optimized",
+    "Mechatronics / Automation — Optimized Strategy": "mechatronics-automation-optimized",
+    "All Paths — AI / ML / Automation Layer": "all-paths-ai-ml-automation",
+    "Decision Gate — Major Decision / ETAM Selection": "decision-gate-etam",
+    "All Paths — PASI Interdisciplinary Engineering Portfolio": "all-paths-pasi-portfolio",
+}
+
 GROUP_BY_ISSUE: dict[int, tuple[str, str, str]] = {
     37: ("All Paths", "Common Foundation", "All Paths — Common Foundation"),
     38: ("All Paths", "Credit-Elimination Strategy", "All Paths — Credit-Elimination Strategy"),
@@ -594,7 +608,7 @@ def roadmap_labels(number: int) -> list[tuple[str, str, str]]:
             f"Educational Roadmap child group: {child}",
         ),
         (
-            f"roadmap-group:{label_slug(group)}",
+            f"roadmap-group:{GROUP_LABEL_KEYS[group]}",
             LABEL_COLORS["group"],
             f"Educational Roadmap group: {group}",
         ),

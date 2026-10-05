@@ -44,3 +44,5 @@ jobs:
             args+=(--dry-run)
           fi
           "${args[@]}"
+
+# Canonical PASI roadmap reconciler targets Project #5 by discovery.

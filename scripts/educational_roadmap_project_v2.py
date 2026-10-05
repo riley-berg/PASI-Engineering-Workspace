@@ -16,20 +16,17 @@ API_VERSION = "2026-03-10"
 OWNER = "riley-berg"
 REPOSITORY = "riley-berg/PASI"
 PROJECT_TITLE = "Educational Roadmap"
-ISSUES = tuple(range(37, 48))
+ISSUES = (37, 40, 41, 42, 43, 44, 46)
+STALE_ISSUES = (38, 39, 45, 47)
 
 ROADMAP_PLAN: dict[int, tuple[str, str]] = {
-    37: ("2026-10-05", "2027-08-22"),
-    38: ("2026-10-05", "2027-05-31"),
-    39: ("2027-08-23", "2029-05-31"),
+    37: ("2026-10-05", "2029-05-31"),
     40: ("2027-08-23", "2029-01-31"),
     41: ("2027-08-23", "2029-01-31"),
     42: ("2027-08-23", "2029-01-31"),
     43: ("2027-08-23", "2029-01-31"),
     44: ("2027-08-23", "2029-01-31"),
-    45: ("2026-10-05", "2029-05-31"),
     46: ("2029-01-01", "2029-05-31"),
-    47: ("2026-10-05", "2029-05-31"),
 }
 
 FIELD_SPECS = {
@@ -53,73 +50,49 @@ PARENT_GROUPS = (
 )
 
 CHILD_GROUPS = (
-    "Common Foundation",
-    "Credit-Elimination Strategy",
-    "Engineering Academy Common Path",
+    "Shared Foundation & Technical Layer",
     "Optimized Major Strategy",
-    "AI / ML / Automation Layer",
     "Major Decision / ETAM Selection",
-    "PASI Interdisciplinary Engineering Portfolio",
 )
 
 GROUP_OPTIONS = (
-    "All Paths — Common Foundation",
-    "All Paths — Credit-Elimination Strategy",
-    "All Paths — Engineering Academy Common Path",
+    "All Paths — Shared Foundation",
     "Computer Science — Optimized Strategy",
     "Computer Engineering — Optimized Strategy",
     "Electrical Engineering — Optimized Strategy",
     "Mechanical Engineering / Robotics — Optimized Strategy",
     "Mechatronics / Automation — Optimized Strategy",
-    "All Paths — AI / ML / Automation Layer",
     "Decision Gate — Major Decision / ETAM Selection",
-    "All Paths — PASI Interdisciplinary Engineering Portfolio",
 )
 
-CHILD_LABEL_KEYS = {
-    "PASI Interdisciplinary Engineering Portfolio": "pasi-portfolio",
-}
-
 GROUP_LABEL_KEYS = {
-    "All Paths — Common Foundation": "all-paths-common-foundation",
-    "All Paths — Credit-Elimination Strategy": "all-paths-credit-strategy",
-    "All Paths — Engineering Academy Common Path": "all-paths-academy-common",
+    "All Paths — Shared Foundation": "all-paths-shared-foundation",
     "Computer Science — Optimized Strategy": "computer-science-optimized",
     "Computer Engineering — Optimized Strategy": "computer-engineering-optimized",
     "Electrical Engineering — Optimized Strategy": "electrical-engineering-optimized",
     "Mechanical Engineering / Robotics — Optimized Strategy": "me-robotics-optimized",
     "Mechatronics / Automation — Optimized Strategy": "mechatronics-automation-optimized",
-    "All Paths — AI / ML / Automation Layer": "all-paths-ai-ml-automation",
     "Decision Gate — Major Decision / ETAM Selection": "decision-gate-etam",
-    "All Paths — PASI Interdisciplinary Engineering Portfolio": "all-paths-pasi-portfolio",
 }
 
 GROUP_BY_ISSUE: dict[int, tuple[str, str, str]] = {
-    37: ("All Paths", "Common Foundation", "All Paths — Common Foundation"),
-    38: ("All Paths", "Credit-Elimination Strategy", "All Paths — Credit-Elimination Strategy"),
-    39: ("All Paths", "Engineering Academy Common Path", "All Paths — Engineering Academy Common Path"),
+    37: ("All Paths", "Shared Foundation & Technical Layer", "All Paths — Shared Foundation"),
     40: ("Computer Science", "Optimized Major Strategy", "Computer Science — Optimized Strategy"),
     41: ("Computer Engineering", "Optimized Major Strategy", "Computer Engineering — Optimized Strategy"),
     42: ("Electrical Engineering", "Optimized Major Strategy", "Electrical Engineering — Optimized Strategy"),
     43: ("Mechanical Engineering / Robotics", "Optimized Major Strategy", "Mechanical Engineering / Robotics — Optimized Strategy"),
     44: ("Mechatronics / Automation", "Optimized Major Strategy", "Mechatronics / Automation — Optimized Strategy"),
-    45: ("All Paths", "AI / ML / Automation Layer", "All Paths — AI / ML / Automation Layer"),
     46: ("Decision Gate", "Major Decision / ETAM Selection", "Decision Gate — Major Decision / ETAM Selection"),
-    47: ("All Paths", "PASI Interdisciplinary Engineering Portfolio", "All Paths — PASI Interdisciplinary Engineering Portfolio"),
 }
 
 DEPENDENCIES: dict[int, tuple[int, ...]] = {
     37: (),
-    38: (),
-    39: (37, 38),
-    40: (39,),
-    41: (39,),
-    42: (39,),
-    43: (39,),
-    44: (39,),
-    45: (39,),
-    46: (39, 40, 41, 42, 43, 44),
-    47: (45, 46),
+    40: (37,),
+    41: (37,),
+    42: (37,),
+    43: (37,),
+    44: (37,),
+    46: (37, 40, 41, 42, 43, 44),
 }
 
 LABEL_COLORS = {
@@ -434,6 +407,18 @@ def add_item(project_id: str, number: int) -> str:
     return str(item["id"])
 
 
+def remove_item(project_id: str, item_id: str, number: int) -> None:
+    data = graphql(
+        REMOVE_ITEM,
+        {"projectId": project_id, "itemId": item_id},
+    )
+    deleted = ((data.get("deleteProjectV2Item") or {}).get("deletedItemId"))
+    if str(deleted or "") != item_id:
+        raise RoadmapError(
+            f"failed to remove {REPOSITORY}#{number} from {PROJECT_TITLE}"
+        )
+
+
 def create_field(
     project_id: str,
     name: str,
@@ -705,8 +690,10 @@ def reconcile(dry_run: bool) -> None:
     }
 
     missing = [n for n in ISSUES if (REPOSITORY.casefold(), n) not in existing]
+    stale = [n for n in STALE_ISSUES if (REPOSITORY.casefold(), n) in existing]
     print(f"Educational Roadmap currently contains {len(existing)} PASI issue items.")
     print(f"Missing roadmap items: {missing or 'none'}")
+    print(f"Stale shared items to remove: {stale or 'none'}")
 
     if dry_run:
         for n in ISSUES:
@@ -717,6 +704,9 @@ def reconcile(dry_run: bool) -> None:
                 f"{parent} / {child}; group={group})"
             )
         return
+
+    for n in stale:
+        remove_item(project_id, str(existing[(REPOSITORY.casefold(), n)]["id"]), n)
 
     for n in missing:
         add_item(project_id, n)
@@ -797,6 +787,19 @@ def reconcile(dry_run: bool) -> None:
                     f"final verification missing {field_name!r} options: {missing_options}"
                 )
 
+    stale_present = [
+        n
+        for n in STALE_ISSUES
+        if any(
+            item_key(candidate) == (REPOSITORY.casefold(), n)
+            for candidate in final_items
+        )
+    ]
+    if stale_present:
+        raise RoadmapError(
+            f"final verification found stale roadmap items still in project: {stale_present}"
+        )
+
     verified = 0
     for n in ISSUES:
         item = next(
@@ -852,7 +855,7 @@ def reconcile(dry_run: bool) -> None:
 
     print("SYNC PASS")
     print(f"Project: {project['url']}")
-    print(f"Project items verified: {verified}/{len(ISSUES)}")
+    print(f"Project items verified: {verified}/{len(ISSUES)}; stale shared items removed: {len(STALE_ISSUES)}")
     print(
         "Fields: Start Date [DATE], End Date [DATE], Duration (days) [NUMBER], "
         "Quarter [TEXT], Parent Group [SINGLE_SELECT], Child Group [SINGLE_SELECT], "
